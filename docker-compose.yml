@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -18,6 +16,33 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vito-api:local
+    container_name: vito-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://vito:vito@postgres:5432/vito
+      PORT: 3000
+      NODE_ENV: development
+      ENABLE_SWAGGER: "true"
+      JWT_SECRET: local-development-secret-change-before-production
+      JWT_EXPIRES_IN: 15m
+      ALLOW_INSECURE_TENANT_HEADER: "false"
+    ports:
+      - "3000:3000"
+    command:
+      - sh
+      - -c
+      - |
+        pnpm prisma db push --schema prisma/schema.prisma
+        pnpm start
 
 volumes:
   vito_postgres_data:
