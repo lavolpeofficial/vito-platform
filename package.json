@@ -1,0 +1,24 @@
+{
+  "name": "vito-platform",
+  "private": true,
+  "version": "0.1.0",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "pnpm --filter @vito/api build",
+    "start": "pnpm --filter @vito/api start",
+    "start:dev": "pnpm --filter @vito/api start:dev",
+    "test": "pnpm --filter @vito/api test",
+    "test:e2e": "pnpm --filter @vito/api test:e2e",
+    "prisma:generate": "prisma generate --schema prisma/schema.prisma",
+    "prisma:migrate": "prisma migrate dev --schema prisma/schema.prisma",
+    "prisma:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
+    "prisma:seed": "ts-node --project prisma/tsconfig.seed.json prisma/seed.ts"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "bcryptjs": "^2.4.3",
+    "prisma": "^5.20.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  }
+}

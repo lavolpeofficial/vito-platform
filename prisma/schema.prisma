@@ -1,0 +1,225 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+  DISABLED
+}
+
+enum DigitalEmployeeStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum EmployeeType {
+  ORCHESTRATOR
+  SPECIALIST
+  ASSISTANT
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum ActorType {
+  USER
+  DIGITAL_EMPLOYEE
+  SYSTEM
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id        String             @id @default(uuid())
+  name      String
+  slug      String             @unique
+  status    OrganizationStatus @default(ACTIVE)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  users             User[]
+  digitalEmployees  DigitalEmployee[]
+  capabilities      Capability[]
+  tasks             Task[]
+  auditEvents       AuditEvent[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             String     @id @default(uuid())
+  organizationId String
+  email          String
+  firstName      String
+  lastName       String
+  role           UserRole   @default(MEMBER)
+  status         UserStatus @default(ACTIVE)
+  passwordHash   String?
+  lastLoginAt    DateTime?
+  tokenVersion   Int        @default(1)
+  deletedAt      DateTime?
+  deletedByUserId String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  // Sprint 3A: echte, benannte Self-Relation für Soft Delete (siehe
+  // docs/design/sprint-3-user-management-design.md, Kap. 6.1).
+  // onDelete: SetNull ist der Prisma-Default für optionale Relationen
+  // und wird hier zur Klarheit explizit angegeben.
+  deletedByUser User?  @relation("UserDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+  disabledUsers User[] @relation("UserDeletedBy")
+
+  assignedTasks Task[] @relation("TaskAssignedUser")
+  createdTasks  Task[] @relation("TaskCreatedByUser")
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@index([deletedByUserId])
+  @@map("users")
+}
+
+model DigitalEmployee {
+  id             String                @id @default(uuid())
+  organizationId String
+  name           String
+  code           String
+  description    String?
+  status         DigitalEmployeeStatus @default(DRAFT)
+  employeeType   EmployeeType
+  version        String
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  organization Organization                  @relation(fields: [organizationId], references: [id])
+  capabilities DigitalEmployeeCapability[]
+  assignedTasks Task[]                       @relation("TaskAssignedDigitalEmployee")
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@map("digital_employees")
+}
+
+model Capability {
+  id                String    @id @default(uuid())
+  organizationId    String
+  code              String
+  name              String
+  description       String?
+  riskLevel         RiskLevel @default(LOW)
+  requiresApproval  Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  organization      Organization                @relation(fields: [organizationId], references: [id])
+  digitalEmployees  DigitalEmployeeCapability[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@map("capabilities")
+}
+
+model DigitalEmployeeCapability {
+  digitalEmployeeId String
+  capabilityId      String
+  isEnabled         Boolean  @default(true)
+  configuration     Json     @default("{}")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  digitalEmployee DigitalEmployee @relation(fields: [digitalEmployeeId], references: [id])
+  capability      Capability      @relation(fields: [capabilityId], references: [id])
+
+  @@id([digitalEmployeeId, capabilityId])
+  @@map("digital_employee_capabilities")
+}
+
+model Task {
+  id                        String       @id @default(uuid())
+  organizationId            String
+  title                     String
+  description               String?
+  status                    TaskStatus   @default(OPEN)
+  priority                  TaskPriority @default(NORMAL)
+  assignedUserId            String?
+  assignedDigitalEmployeeId String?
+  dueAt                     DateTime?
+  createdByUserId           String?
+  createdAt                 DateTime     @default(now())
+  updatedAt                 DateTime     @updatedAt
+  completedAt               DateTime?
+
+  organization           Organization     @relation(fields: [organizationId], references: [id])
+  assignedUser            User?            @relation("TaskAssignedUser", fields: [assignedUserId], references: [id])
+  assignedDigitalEmployee DigitalEmployee? @relation("TaskAssignedDigitalEmployee", fields: [assignedDigitalEmployeeId], references: [id])
+  createdByUser            User?           @relation("TaskCreatedByUser", fields: [createdByUserId], references: [id])
+
+  @@index([organizationId])
+  @@map("tasks")
+}
+
+model AuditEvent {
+  id             String    @id @default(uuid())
+  organizationId String
+  actorType      ActorType
+  actorId        String?
+  action         String
+  entityType     String
+  entityId       String?
+  metadata       Json      @default("{}")
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@index([organizationId, entityType, entityId])
+  @@map("audit_events")
+}

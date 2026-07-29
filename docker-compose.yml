@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: vito-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vito
+      POSTGRES_PASSWORD: vito
+      POSTGRES_DB: vito
+    ports:
+      - "5432:5432"
+    volumes:
+      - vito_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vito -d vito"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  vito_postgres_data:
