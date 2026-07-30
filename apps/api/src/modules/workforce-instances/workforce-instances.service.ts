@@ -13,7 +13,11 @@ export class WorkforceInstancesService {
   ) {}
 
   async create(organizationId: string, dto: CreateWorkforceInstanceDto) {
-    await this.assertValidOrchestrator(organizationId, dto.orchestratorEmployeeId);
+    const orchestrator = await this.findValidOrchestrator(organizationId, dto.orchestratorEmployeeId);
+
+    if (orchestrator?.workforceInstanceId) {
+      throw new ConflictException('Der Orchestrator gehört bereits zu einer anderen WorkforceInstance.');
+    }
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -34,8 +38,14 @@ export class WorkforceInstancesService {
             isDefault: dto.isDefault,
             orchestratorEmployeeId: dto.orchestratorEmployeeId,
           },
-          include: { orchestrator: true, members: true },
         });
+
+        if (dto.orchestratorEmployeeId) {
+          await tx.digitalEmployee.update({
+            where: { id: dto.orchestratorEmployeeId },
+            data: { workforceInstanceId: workforce.id },
+          });
+        }
 
         await this.auditService.record(
           {
@@ -49,7 +59,10 @@ export class WorkforceInstancesService {
           tx,
         );
 
-        return workforce;
+        return tx.workforceInstance.findUniqueOrThrow({
+          where: { id: workforce.id },
+          include: { orchestrator: true, members: true },
+        });
       });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
@@ -80,7 +93,11 @@ export class WorkforceInstancesService {
 
   async update(organizationId: string, id: string, dto: UpdateWorkforceInstanceDto) {
     await this.findByIdOrFail(organizationId, id);
-    await this.assertValidOrchestrator(organizationId, dto.orchestratorEmployeeId);
+    const orchestrator = await this.findValidOrchestrator(organizationId, dto.orchestratorEmployeeId);
+
+    if (orchestrator?.workforceInstanceId && orchestrator.workforceInstanceId !== id) {
+      throw new ConflictException('Der Orchestrator gehört bereits zu einer anderen WorkforceInstance.');
+    }
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -94,8 +111,14 @@ export class WorkforceInstancesService {
         const updated = await tx.workforceInstance.update({
           where: { id },
           data: dto,
-          include: { orchestrator: true, members: true },
         });
+
+        if (dto.orchestratorEmployeeId) {
+          await tx.digitalEmployee.update({
+            where: { id: dto.orchestratorEmployeeId },
+            data: { workforceInstanceId: id },
+          });
+        }
 
         await this.auditService.record(
           {
@@ -109,7 +132,10 @@ export class WorkforceInstancesService {
           tx,
         );
 
-        return updated;
+        return tx.workforceInstance.findUniqueOrThrow({
+          where: { id },
+          include: { orchestrator: true, members: true },
+        });
       });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
@@ -119,8 +145,8 @@ export class WorkforceInstancesService {
     }
   }
 
-  private async assertValidOrchestrator(organizationId: string, orchestratorEmployeeId?: string): Promise<void> {
-    if (!orchestratorEmployeeId) return;
+  private async findValidOrchestrator(organizationId: string, orchestratorEmployeeId?: string) {
+    if (!orchestratorEmployeeId) return null;
 
     const orchestrator = await this.prisma.digitalEmployee.findFirst({
       where: {
@@ -128,11 +154,13 @@ export class WorkforceInstancesService {
         organizationId,
         employeeType: EmployeeType.ORCHESTRATOR,
       },
-      select: { id: true },
+      select: { id: true, workforceInstanceId: true },
     });
 
     if (!orchestrator) {
       throw new NotFoundException('Der Orchestrator existiert nicht in dieser Organization oder ist kein ORCHESTRATOR.');
     }
+
+    return orchestrator;
   }
 }
