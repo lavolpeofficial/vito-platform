@@ -24,6 +24,13 @@ enum WorkforceStatus {
   ARCHIVED
 }
 
+enum DepartmentStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
 enum UserRole {
   OWNER
   ADMIN
@@ -93,6 +100,7 @@ model Organization {
 
   users              User[]
   workforceInstances WorkforceInstance[]
+  departments        Department[]
   digitalEmployees   DigitalEmployee[]
   capabilities       Capability[]
   tasks              Task[]
@@ -113,14 +121,42 @@ model WorkforceInstance {
   createdAt              DateTime        @default(now())
   updatedAt              DateTime        @updatedAt
 
-  organization Organization    @relation(fields: [organizationId], references: [id])
+  organization Organization     @relation(fields: [organizationId], references: [id])
   orchestrator DigitalEmployee? @relation("WorkforceOrchestrator", fields: [orchestratorEmployeeId], references: [id], onDelete: SetNull)
   members      DigitalEmployee[] @relation("WorkforceMembers")
+  departments Department[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
   @@index([orchestratorEmployeeId])
   @@map("workforce_instances")
+}
+
+model Department {
+  id                  String           @id @default(uuid())
+  organizationId      String
+  workforceInstanceId String
+  parentDepartmentId  String?
+  managerEmployeeId   String?
+  code                String
+  name                String
+  description         String?
+  status              DepartmentStatus @default(DRAFT)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  organization     Organization      @relation(fields: [organizationId], references: [id])
+  workforceInstance WorkforceInstance @relation(fields: [workforceInstanceId], references: [id], onDelete: Cascade)
+  parentDepartment Department?       @relation("DepartmentHierarchy", fields: [parentDepartmentId], references: [id], onDelete: SetNull)
+  childDepartments Department[]      @relation("DepartmentHierarchy")
+  manager          DigitalEmployee?  @relation("DepartmentManager", fields: [managerEmployeeId], references: [id], onDelete: SetNull)
+
+  @@unique([workforceInstanceId, code])
+  @@index([organizationId])
+  @@index([workforceInstanceId])
+  @@index([parentDepartmentId])
+  @@index([managerEmployeeId])
+  @@map("departments")
 }
 
 model User {
@@ -140,14 +176,8 @@ model User {
   updatedAt       DateTime   @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
-
-  // Sprint 3A: echte, benannte Self-Relation für Soft Delete (siehe
-  // docs/design/sprint-3-user-management-design.md, Kap. 6.1).
-  // onDelete: SetNull ist der Prisma-Default für optionale Relationen
-  // und wird hier zur Klarheit explizit angegeben.
   deletedByUser User?  @relation("UserDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
   disabledUsers User[] @relation("UserDeletedBy")
-
   assignedTasks Task[] @relation("TaskAssignedUser")
   createdTasks  Task[] @relation("TaskCreatedByUser")
 
@@ -170,11 +200,12 @@ model DigitalEmployee {
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
 
-  organization          Organization                  @relation(fields: [organizationId], references: [id])
-  workforceInstance     WorkforceInstance?            @relation("WorkforceMembers", fields: [workforceInstanceId], references: [id], onDelete: SetNull)
-  orchestratedWorkforces WorkforceInstance[]          @relation("WorkforceOrchestrator")
-  capabilities          DigitalEmployeeCapability[]
-  assignedTasks         Task[]                        @relation("TaskAssignedDigitalEmployee")
+  organization           Organization                  @relation(fields: [organizationId], references: [id])
+  workforceInstance      WorkforceInstance?            @relation("WorkforceMembers", fields: [workforceInstanceId], references: [id], onDelete: SetNull)
+  orchestratedWorkforces WorkforceInstance[]           @relation("WorkforceOrchestrator")
+  managedDepartments     Department[]                  @relation("DepartmentManager")
+  capabilities           DigitalEmployeeCapability[]
+  assignedTasks          Task[]                        @relation("TaskAssignedDigitalEmployee")
 
   @@unique([organizationId, code])
   @@index([organizationId])
