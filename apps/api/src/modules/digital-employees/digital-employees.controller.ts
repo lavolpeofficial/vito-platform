@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiCreatedResponse, ApiOkResponse, ApiTags } from '@nest
 import { UserRole } from '@prisma/client';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { TenantContext } from '../../common/tenant/tenant-context';
+import { AssignWorkforceDto } from './dto/assign-workforce.dto';
 import { CreateDigitalEmployeeDto } from './dto/create-digital-employee.dto';
 import { UpdateDigitalEmployeeDto } from './dto/update-digital-employee.dto';
 import { DigitalEmployeesService } from './digital-employees.service';
@@ -45,5 +46,13 @@ export class DigitalEmployeesController {
   async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateDigitalEmployeeDto) {
     const organizationId = this.tenantContext.getOrThrow();
     return this.digitalEmployeesService.update(organizationId, id, dto);
+  }
+
+  @Patch(':id/workforce')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @ApiOkResponse({ description: 'Workforce-Zuordnung des DigitalEmployee wurde aktualisiert.' })
+  async assignWorkforce(@Param('id', ParseUUIDPipe) id: string, @Body() dto: AssignWorkforceDto) {
+    const organizationId = this.tenantContext.getOrThrow();
+    return this.digitalEmployeesService.assignWorkforce(organizationId, id, dto);
   }
 }
