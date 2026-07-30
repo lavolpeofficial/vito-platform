@@ -17,6 +17,13 @@ enum OrganizationStatus {
   ARCHIVED
 }
 
+enum WorkforceStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
 enum UserRole {
   OWNER
   ADMIN
@@ -84,30 +91,53 @@ model Organization {
   createdAt DateTime           @default(now())
   updatedAt DateTime           @updatedAt
 
-  users             User[]
-  digitalEmployees  DigitalEmployee[]
-  capabilities      Capability[]
-  tasks             Task[]
-  auditEvents       AuditEvent[]
+  users              User[]
+  workforceInstances WorkforceInstance[]
+  digitalEmployees   DigitalEmployee[]
+  capabilities       Capability[]
+  tasks              Task[]
+  auditEvents        AuditEvent[]
 
   @@map("organizations")
 }
 
+model WorkforceInstance {
+  id                     String          @id @default(uuid())
+  organizationId         String
+  code                   String
+  name                   String
+  description            String?
+  status                 WorkforceStatus @default(DRAFT)
+  isDefault              Boolean         @default(false)
+  orchestratorEmployeeId String?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id])
+  orchestrator DigitalEmployee? @relation("WorkforceOrchestrator", fields: [orchestratorEmployeeId], references: [id], onDelete: SetNull)
+  members      DigitalEmployee[] @relation("WorkforceMembers")
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([orchestratorEmployeeId])
+  @@map("workforce_instances")
+}
+
 model User {
-  id             String     @id @default(uuid())
-  organizationId String
-  email          String
-  firstName      String
-  lastName       String
-  role           UserRole   @default(MEMBER)
-  status         UserStatus @default(ACTIVE)
-  passwordHash   String?
-  lastLoginAt    DateTime?
-  tokenVersion   Int        @default(1)
-  deletedAt      DateTime?
+  id              String     @id @default(uuid())
+  organizationId  String
+  email           String
+  firstName       String
+  lastName        String
+  role            UserRole   @default(MEMBER)
+  status          UserStatus @default(ACTIVE)
+  passwordHash    String?
+  lastLoginAt     DateTime?
+  tokenVersion    Int        @default(1)
+  deletedAt       DateTime?
   deletedByUserId String?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
 
@@ -128,39 +158,43 @@ model User {
 }
 
 model DigitalEmployee {
-  id             String                @id @default(uuid())
-  organizationId String
-  name           String
-  code           String
-  description    String?
-  status         DigitalEmployeeStatus @default(DRAFT)
-  employeeType   EmployeeType
-  version        String
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
+  id                  String                @id @default(uuid())
+  organizationId      String
+  workforceInstanceId String?
+  name                String
+  code                String
+  description         String?
+  status              DigitalEmployeeStatus @default(DRAFT)
+  employeeType        EmployeeType
+  version             String
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
 
-  organization Organization                  @relation(fields: [organizationId], references: [id])
-  capabilities DigitalEmployeeCapability[]
-  assignedTasks Task[]                       @relation("TaskAssignedDigitalEmployee")
+  organization          Organization                  @relation(fields: [organizationId], references: [id])
+  workforceInstance     WorkforceInstance?            @relation("WorkforceMembers", fields: [workforceInstanceId], references: [id], onDelete: SetNull)
+  orchestratedWorkforces WorkforceInstance[]          @relation("WorkforceOrchestrator")
+  capabilities          DigitalEmployeeCapability[]
+  assignedTasks         Task[]                        @relation("TaskAssignedDigitalEmployee")
 
   @@unique([organizationId, code])
   @@index([organizationId])
+  @@index([workforceInstanceId])
   @@map("digital_employees")
 }
 
 model Capability {
-  id                String    @id @default(uuid())
-  organizationId    String
-  code              String
-  name              String
-  description       String?
-  riskLevel         RiskLevel @default(LOW)
-  requiresApproval  Boolean   @default(false)
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id               String    @id @default(uuid())
+  organizationId   String
+  code             String
+  name             String
+  description      String?
+  riskLevel        RiskLevel @default(LOW)
+  requiresApproval Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  organization      Organization                @relation(fields: [organizationId], references: [id])
-  digitalEmployees  DigitalEmployeeCapability[]
+  organization     Organization                @relation(fields: [organizationId], references: [id])
+  digitalEmployees DigitalEmployeeCapability[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
