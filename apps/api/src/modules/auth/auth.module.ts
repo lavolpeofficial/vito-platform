@@ -35,14 +35,21 @@ const LOGIN_RATE_LIMIT_WINDOW_MS = process.env.LOGIN_RATE_LIMIT_WINDOW_MS
   providers: [
     AuthService,
     JwtStrategy,
+    JwtAuthGuard,
+    RolesGuard,
     // Global registriert: JwtAuthGuard schützt standardmäßig alle
     // Endpunkte außer @Public(); RolesGuard greift zusätzlich überall
-    // dort, wo @Roles(...) gesetzt ist. Reihenfolge ist relevant:
-    // JwtAuthGuard muss zuerst laufen, damit TenantContext befüllt ist,
-    // bevor RolesGuard ihn liest. ThrottlerGuard ist bewusst NICHT hier
-    // als APP_GUARD registriert (siehe ThrottlerModule-Import oben).
-    { provide: APP_GUARD, useClass: JwtAuthGuard },
-    { provide: APP_GUARD, useClass: RolesGuard },
+    // dort, wo @Roles(...) gesetzt ist. Beide Guards sind request-scoped,
+    // weil sie den request-scoped TenantContext verwenden. useExisting
+    // stellt sicher, dass APP_GUARD dieselben DI-verwalteten Instanzen nutzt.
+    {
+      provide: APP_GUARD,
+      useExisting: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useExisting: RolesGuard,
+    },
   ],
   // Sprint 3A: AuthService.issueTokenFor() wird von UsersService
   // (PATCH /users/me/password) wiederverwendet, damit Token-Ausstellung
