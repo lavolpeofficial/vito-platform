@@ -56,6 +56,7 @@ export class DigitalEmployeesService {
       orderBy: { createdAt: 'asc' },
       include: {
         workforceInstance: true,
+        orchestratedWorkforces: true,
         capabilities: { include: { capability: true } },
       },
     });
@@ -66,6 +67,7 @@ export class DigitalEmployeesService {
       where: { id, organizationId },
       include: {
         workforceInstance: true,
+        orchestratedWorkforces: true,
         capabilities: { include: { capability: true } },
       },
     });
@@ -121,7 +123,7 @@ export class DigitalEmployeesService {
       }
     }
 
-    if (!workforceInstanceId && employee.orchestratedWorkforces?.length) {
+    if (!workforceInstanceId && employee.orchestratedWorkforces.length) {
       throw new ConflictException(
         'Ein als Orchestrator verwendeter DigitalEmployee kann nicht aus seiner Workforce entfernt werden.',
       );
