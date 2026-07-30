@@ -5,6 +5,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
 import { UsersModule } from './modules/users/users.module';
+import { WorkforceInstancesModule } from './modules/workforce-instances/workforce-instances.module';
 import { DigitalEmployeesModule } from './modules/digital-employees/digital-employees.module';
 import { CapabilitiesModule } from './modules/capabilities/capabilities.module';
 import { TasksModule } from './modules/tasks/tasks.module';
@@ -25,6 +26,7 @@ import { AuditModule } from './modules/audit/audit.module';
     HealthModule,
     OrganizationsModule,
     UsersModule,
+    WorkforceInstancesModule,
     DigitalEmployeesModule,
     CapabilitiesModule,
     TasksModule,
