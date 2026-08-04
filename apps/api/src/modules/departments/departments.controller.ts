@@ -25,7 +25,7 @@ export class DepartmentsController {
   }
 
   @Get()
-  @ApiQuery({ name: 'workforceInstanceId', required: false, format: 'uuid' })
+  @ApiQuery({ name: 'workforceInstanceId', required: false, type: String, description: 'Optionaler UUID-Filter für eine WorkforceInstance.' })
   @ApiOkResponse({ description: 'Departments der Organization, optional nach Workforce gefiltert.' })
   findAll(@Query('workforceInstanceId') workforceInstanceId?: string) {
     return this.departmentsService.findAll(this.tenantContext.getOrThrow(), workforceInstanceId);
