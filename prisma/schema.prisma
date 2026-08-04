@@ -7,55 +7,144 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum OrganizationStatus { ACTIVE SUSPENDED ARCHIVED }
-enum WorkforceStatus { DRAFT ACTIVE PAUSED ARCHIVED }
-enum DepartmentStatus { DRAFT ACTIVE PAUSED ARCHIVED }
-enum TeamStatus { DRAFT ACTIVE PAUSED ARCHIVED }
-enum OrganizationRoleStatus { DRAFT ACTIVE DEPRECATED ARCHIVED }
-enum UserRole { OWNER ADMIN MEMBER VIEWER }
-enum UserStatus { ACTIVE INVITED SUSPENDED DISABLED }
-enum DigitalEmployeeStatus { DRAFT ACTIVE PAUSED ARCHIVED }
-enum EmployeeType { ORCHESTRATOR SPECIALIST ASSISTANT }
-enum RiskLevel { LOW MEDIUM HIGH CRITICAL }
-enum TaskStatus { OPEN IN_PROGRESS WAITING COMPLETED CANCELLED }
-enum TaskPriority { LOW NORMAL HIGH URGENT }
-enum ActorType { USER DIGITAL_EMPLOYEE SYSTEM }
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum WorkforceStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum DepartmentStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum TeamStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum OrganizationRoleStatus {
+  DRAFT
+  ACTIVE
+  DEPRECATED
+  ARCHIVED
+}
+
+enum PositionStatus {
+  DRAFT
+  OPEN
+  OCCUPIED
+  VACANT
+  ARCHIVED
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+  DISABLED
+}
+
+enum DigitalEmployeeStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum EmployeeType {
+  ORCHESTRATOR
+  SPECIALIST
+  ASSISTANT
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum ActorType {
+  USER
+  DIGITAL_EMPLOYEE
+  SYSTEM
+}
 
 model Organization {
-  id String @id @default(uuid())
-  name String
-  slug String @unique
-  status OrganizationStatus @default(ACTIVE)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  users User[]
+  id        String             @id @default(uuid())
+  name      String
+  slug      String             @unique
+  status    OrganizationStatus @default(ACTIVE)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  users              User[]
   workforceInstances WorkforceInstance[]
-  departments Department[]
-  teams Team[]
-  organizationRoles OrganizationRole[]
-  digitalEmployees DigitalEmployee[]
-  capabilities Capability[]
-  tasks Task[]
-  auditEvents AuditEvent[]
+  departments        Department[]
+  teams              Team[]
+  organizationRoles  OrganizationRole[]
+  positions          Position[]
+  digitalEmployees   DigitalEmployee[]
+  capabilities       Capability[]
+  tasks              Task[]
+  auditEvents        AuditEvent[]
+
   @@map("organizations")
 }
 
 model WorkforceInstance {
-  id String @id @default(uuid())
-  organizationId String
-  code String
-  name String
-  description String?
-  status WorkforceStatus @default(DRAFT)
-  isDefault Boolean @default(false)
+  id                     String          @id @default(uuid())
+  organizationId         String
+  code                   String
+  name                   String
+  description            String?
+  status                 WorkforceStatus @default(DRAFT)
+  isDefault              Boolean         @default(false)
   orchestratorEmployeeId String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  organization Organization @relation(fields: [organizationId], references: [id])
-  orchestrator DigitalEmployee? @relation("WorkforceOrchestrator", fields: [orchestratorEmployeeId], references: [id], onDelete: SetNull)
-  members DigitalEmployee[] @relation("WorkforceMembers")
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id])
+  orchestrator DigitalEmployee?  @relation("WorkforceOrchestrator", fields: [orchestratorEmployeeId], references: [id], onDelete: SetNull)
+  members      DigitalEmployee[] @relation("WorkforceMembers")
   departments Department[]
-  teams Team[]
+  teams       Team[]
+  positions   Position[]
+
   @@unique([organizationId, code])
   @@index([organizationId])
   @@index([orchestratorEmployeeId])
@@ -63,23 +152,26 @@ model WorkforceInstance {
 }
 
 model Department {
-  id String @id @default(uuid())
-  organizationId String
+  id                  String           @id @default(uuid())
+  organizationId      String
   workforceInstanceId String
-  parentDepartmentId String?
-  managerEmployeeId String?
-  code String
-  name String
-  description String?
-  status DepartmentStatus @default(DRAFT)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  organization Organization @relation(fields: [organizationId], references: [id])
+  parentDepartmentId  String?
+  managerEmployeeId   String?
+  code                String
+  name                String
+  description         String?
+  status              DepartmentStatus @default(DRAFT)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  organization      Organization      @relation(fields: [organizationId], references: [id])
   workforceInstance WorkforceInstance @relation(fields: [workforceInstanceId], references: [id], onDelete: Cascade)
-  parentDepartment Department? @relation("DepartmentHierarchy", fields: [parentDepartmentId], references: [id], onDelete: SetNull)
-  childDepartments Department[] @relation("DepartmentHierarchy")
-  manager DigitalEmployee? @relation("DepartmentManager", fields: [managerEmployeeId], references: [id], onDelete: SetNull)
-  teams Team[]
+  parentDepartment  Department?       @relation("DepartmentHierarchy", fields: [parentDepartmentId], references: [id], onDelete: SetNull)
+  childDepartments  Department[]      @relation("DepartmentHierarchy")
+  manager           DigitalEmployee?  @relation("DepartmentManager", fields: [managerEmployeeId], references: [id], onDelete: SetNull)
+  teams             Team[]
+  positions         Position[]
+
   @@unique([workforceInstanceId, code])
   @@index([organizationId])
   @@index([workforceInstanceId])
@@ -89,21 +181,24 @@ model Department {
 }
 
 model Team {
-  id String @id @default(uuid())
-  organizationId String
+  id                  String     @id @default(uuid())
+  organizationId      String
   workforceInstanceId String
-  departmentId String
-  managerEmployeeId String?
-  code String
-  name String
-  description String?
-  status TeamStatus @default(DRAFT)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  organization Organization @relation(fields: [organizationId], references: [id])
+  departmentId        String
+  managerEmployeeId   String?
+  code                String
+  name                String
+  description         String?
+  status              TeamStatus @default(DRAFT)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  organization      Organization      @relation(fields: [organizationId], references: [id])
   workforceInstance WorkforceInstance @relation(fields: [workforceInstanceId], references: [id], onDelete: Cascade)
-  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-  manager DigitalEmployee? @relation("TeamManager", fields: [managerEmployeeId], references: [id], onDelete: SetNull)
+  department        Department        @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  manager           DigitalEmployee? @relation("TeamManager", fields: [managerEmployeeId], references: [id], onDelete: SetNull)
+  positions         Position[]
+
   @@unique([departmentId, code])
   @@index([organizationId])
   @@index([workforceInstanceId])
@@ -113,41 +208,83 @@ model Team {
 }
 
 model OrganizationRole {
-  id String @id @default(uuid())
-  organizationId String
-  code String
-  name String
-  description String?
-  status OrganizationRoleStatus @default(DRAFT)
-  responsibilities Json @default("[]")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id               String                 @id @default(uuid())
+  organizationId   String
+  code             String
+  name             String
+  description      String?
+  status           OrganizationRoleStatus @default(DRAFT)
+  responsibilities Json                   @default("[]")
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  positions    Position[]
+
   @@unique([organizationId, code])
   @@index([organizationId])
   @@map("organization_roles")
 }
 
+model Position {
+  id                     String         @id @default(uuid())
+  organizationId         String
+  workforceInstanceId    String
+  departmentId           String?
+  teamId                 String?
+  organizationRoleId     String
+  managerPositionId      String?
+  occupantEmployeeId     String?        @unique
+  code                   String
+  title                  String
+  description            String?
+  status                 PositionStatus @default(DRAFT)
+  isLeadership           Boolean        @default(false)
+  budgetResponsibility   Decimal?       @db.Decimal(18, 2)
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+
+  organization      Organization      @relation(fields: [organizationId], references: [id])
+  workforceInstance WorkforceInstance @relation(fields: [workforceInstanceId], references: [id], onDelete: Cascade)
+  department        Department?       @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  team              Team?             @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  organizationRole  OrganizationRole  @relation(fields: [organizationRoleId], references: [id])
+  managerPosition   Position?         @relation("PositionHierarchy", fields: [managerPositionId], references: [id], onDelete: SetNull)
+  directReports     Position[]        @relation("PositionHierarchy")
+  occupant          DigitalEmployee?  @relation("PositionOccupant", fields: [occupantEmployeeId], references: [id], onDelete: SetNull)
+
+  @@unique([workforceInstanceId, code])
+  @@index([organizationId])
+  @@index([workforceInstanceId])
+  @@index([departmentId])
+  @@index([teamId])
+  @@index([organizationRoleId])
+  @@index([managerPositionId])
+  @@map("positions")
+}
+
 model User {
-  id String @id @default(uuid())
-  organizationId String
-  email String
-  firstName String
-  lastName String
-  role UserRole @default(MEMBER)
-  status UserStatus @default(ACTIVE)
-  passwordHash String?
-  lastLoginAt DateTime?
-  tokenVersion Int @default(1)
-  deletedAt DateTime?
+  id              String     @id @default(uuid())
+  organizationId  String
+  email           String
+  firstName       String
+  lastName        String
+  role            UserRole   @default(MEMBER)
+  status          UserStatus @default(ACTIVE)
+  passwordHash    String?
+  lastLoginAt     DateTime?
+  tokenVersion    Int        @default(1)
+  deletedAt       DateTime?
   deletedByUserId String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
   organization Organization @relation(fields: [organizationId], references: [id])
-  deletedByUser User? @relation("UserDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
-  disabledUsers User[] @relation("UserDeletedBy")
-  assignedTasks Task[] @relation("TaskAssignedUser")
-  createdTasks Task[] @relation("TaskCreatedByUser")
+  deletedByUser User?        @relation("UserDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+  disabledUsers User[]       @relation("UserDeletedBy")
+  assignedTasks Task[]       @relation("TaskAssignedUser")
+  createdTasks  Task[]       @relation("TaskCreatedByUser")
+
   @@unique([organizationId, email])
   @@index([organizationId])
   @@index([deletedByUserId])
@@ -155,24 +292,27 @@ model User {
 }
 
 model DigitalEmployee {
-  id String @id @default(uuid())
-  organizationId String
+  id                  String                 @id @default(uuid())
+  organizationId      String
   workforceInstanceId String?
-  name String
-  code String
-  description String?
-  status DigitalEmployeeStatus @default(DRAFT)
-  employeeType EmployeeType
-  version String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  organization Organization @relation(fields: [organizationId], references: [id])
-  workforceInstance WorkforceInstance? @relation("WorkforceMembers", fields: [workforceInstanceId], references: [id], onDelete: SetNull)
-  orchestratedWorkforces WorkforceInstance[] @relation("WorkforceOrchestrator")
-  managedDepartments Department[] @relation("DepartmentManager")
-  managedTeams Team[] @relation("TeamManager")
-  capabilities DigitalEmployeeCapability[]
-  assignedTasks Task[] @relation("TaskAssignedDigitalEmployee")
+  name                String
+  code                String
+  description         String?
+  status              DigitalEmployeeStatus @default(DRAFT)
+  employeeType        EmployeeType
+  version             String
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  organization           Organization                @relation(fields: [organizationId], references: [id])
+  workforceInstance      WorkforceInstance?          @relation("WorkforceMembers", fields: [workforceInstanceId], references: [id], onDelete: SetNull)
+  orchestratedWorkforces WorkforceInstance[]         @relation("WorkforceOrchestrator")
+  managedDepartments     Department[]                @relation("DepartmentManager")
+  managedTeams           Team[]                      @relation("TeamManager")
+  position               Position?                   @relation("PositionOccupant")
+  capabilities           DigitalEmployeeCapability[]
+  assignedTasks          Task[]                      @relation("TaskAssignedDigitalEmployee")
+
   @@unique([organizationId, code])
   @@index([organizationId])
   @@index([workforceInstanceId])
@@ -180,17 +320,19 @@ model DigitalEmployee {
 }
 
 model Capability {
-  id String @id @default(uuid())
-  organizationId String
-  code String
-  name String
-  description String?
-  riskLevel RiskLevel @default(LOW)
-  requiresApproval Boolean @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  organization Organization @relation(fields: [organizationId], references: [id])
+  id               String    @id @default(uuid())
+  organizationId   String
+  code             String
+  name             String
+  description      String?
+  riskLevel        RiskLevel @default(LOW)
+  requiresApproval Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  organization     Organization                @relation(fields: [organizationId], references: [id])
   digitalEmployees DigitalEmployeeCapability[]
+
   @@unique([organizationId, code])
   @@index([organizationId])
   @@map("capabilities")
@@ -198,50 +340,56 @@ model Capability {
 
 model DigitalEmployeeCapability {
   digitalEmployeeId String
-  capabilityId String
-  isEnabled Boolean @default(true)
-  configuration Json @default("{}")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  capabilityId      String
+  isEnabled         Boolean  @default(true)
+  configuration     Json     @default("{}")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
   digitalEmployee DigitalEmployee @relation(fields: [digitalEmployeeId], references: [id])
-  capability Capability @relation(fields: [capabilityId], references: [id])
+  capability      Capability      @relation(fields: [capabilityId], references: [id])
+
   @@id([digitalEmployeeId, capabilityId])
   @@map("digital_employee_capabilities")
 }
 
 model Task {
-  id String @id @default(uuid())
-  organizationId String
-  title String
-  description String?
-  status TaskStatus @default(OPEN)
-  priority TaskPriority @default(NORMAL)
-  assignedUserId String?
+  id                        String       @id @default(uuid())
+  organizationId            String
+  title                     String
+  description               String?
+  status                    TaskStatus   @default(OPEN)
+  priority                  TaskPriority @default(NORMAL)
+  assignedUserId            String?
   assignedDigitalEmployeeId String?
-  dueAt DateTime?
-  createdByUserId String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  completedAt DateTime?
-  organization Organization @relation(fields: [organizationId], references: [id])
-  assignedUser User? @relation("TaskAssignedUser", fields: [assignedUserId], references: [id])
+  dueAt                     DateTime?
+  createdByUserId           String?
+  createdAt                 DateTime     @default(now())
+  updatedAt                 DateTime     @updatedAt
+  completedAt               DateTime?
+
+  organization           Organization     @relation(fields: [organizationId], references: [id])
+  assignedUser            User?            @relation("TaskAssignedUser", fields: [assignedUserId], references: [id])
   assignedDigitalEmployee DigitalEmployee? @relation("TaskAssignedDigitalEmployee", fields: [assignedDigitalEmployeeId], references: [id])
-  createdByUser User? @relation("TaskCreatedByUser", fields: [createdByUserId], references: [id])
+  createdByUser            User?           @relation("TaskCreatedByUser", fields: [createdByUserId], references: [id])
+
   @@index([organizationId])
   @@map("tasks")
 }
 
 model AuditEvent {
-  id String @id @default(uuid())
+  id             String    @id @default(uuid())
   organizationId String
-  actorType ActorType
-  actorId String?
-  action String
-  entityType String
-  entityId String?
-  metadata Json @default("{}")
-  createdAt DateTime @default(now())
+  actorType      ActorType
+  actorId        String?
+  action         String
+  entityType     String
+  entityId       String?
+  metadata       Json      @default("{}")
+  createdAt      DateTime  @default(now())
+
   organization Organization @relation(fields: [organizationId], references: [id])
+
   @@index([organizationId])
   @@index([organizationId, entityType, entityId])
   @@map("audit_events")
