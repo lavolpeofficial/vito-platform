@@ -7,6 +7,7 @@ import { OrganizationsModule } from './modules/organizations/organizations.modul
 import { UsersModule } from './modules/users/users.module';
 import { WorkforceInstancesModule } from './modules/workforce-instances/workforce-instances.module';
 import { DepartmentsModule } from './modules/departments/departments.module';
+import { TeamsModule } from './modules/teams/teams.module';
 import { DigitalEmployeesModule } from './modules/digital-employees/digital-employees.module';
 import { CapabilitiesModule } from './modules/capabilities/capabilities.module';
 import { TasksModule } from './modules/tasks/tasks.module';
@@ -29,6 +30,7 @@ import { AuditModule } from './modules/audit/audit.module';
     UsersModule,
     WorkforceInstancesModule,
     DepartmentsModule,
+    TeamsModule,
     DigitalEmployeesModule,
     CapabilitiesModule,
     TasksModule,
