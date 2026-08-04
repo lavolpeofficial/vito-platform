@@ -1,8 +1,17 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
-type DepartmentRecord = Awaited<ReturnType<OrganizationChartService['loadDepartments']>>[number];
-type PositionRecord = Awaited<ReturnType<OrganizationChartService['loadPositions']>>[number];
+type DepartmentRecord = Prisma.DepartmentGetPayload<{ include: { manager: true } }>;
+type TeamRecord = Prisma.TeamGetPayload<{ include: { manager: true } }>;
+type PositionRecord = Prisma.PositionGetPayload<{
+  include: {
+    occupant: true;
+    organizationRole: true;
+    department: true;
+    team: true;
+  };
+}>;
 
 @Injectable()
 export class OrganizationChartService {
@@ -28,9 +37,6 @@ export class OrganizationChartService {
       this.loadPositions(organizationId, workforceInstanceId),
     ]);
 
-    const positionTree = this.buildPositionTree(positions);
-    const departmentTree = this.buildDepartmentTree(departments, teams, positions);
-
     return {
       workforce: {
         id: workforce.id,
@@ -48,15 +54,15 @@ export class OrganizationChartService {
         vacantPositions: positions.filter((position) => !position.occupantEmployeeId).length,
         leadershipPositions: positions.filter((position) => position.isLeadership).length,
       },
-      departmentTree,
-      reportingTree: positionTree,
+      departmentTree: this.buildDepartmentTree(departments, teams, positions),
+      reportingTree: this.buildPositionTree(positions),
       unassignedPositions: positions
         .filter((position) => !position.departmentId)
         .map((position) => this.toPositionNode(position)),
     };
   }
 
-  async loadDepartments(organizationId: string, workforceInstanceId: string) {
+  private loadDepartments(organizationId: string, workforceInstanceId: string) {
     return this.prisma.department.findMany({
       where: { organizationId, workforceInstanceId },
       include: { manager: true },
@@ -64,7 +70,7 @@ export class OrganizationChartService {
     });
   }
 
-  async loadPositions(organizationId: string, workforceInstanceId: string) {
+  private loadPositions(organizationId: string, workforceInstanceId: string) {
     return this.prisma.position.findMany({
       where: { organizationId, workforceInstanceId },
       include: {
@@ -79,15 +85,7 @@ export class OrganizationChartService {
 
   private buildDepartmentTree(
     departments: DepartmentRecord[],
-    teams: Array<{
-      id: string;
-      departmentId: string;
-      code: string;
-      name: string;
-      description: string | null;
-      status: string;
-      manager: unknown;
-    }>,
+    teams: TeamRecord[],
     positions: PositionRecord[],
   ) {
     const byParent = new Map<string | null, DepartmentRecord[]>();
@@ -112,7 +110,12 @@ export class OrganizationChartService {
       teams: teams
         .filter((team) => team.departmentId === department.id)
         .map((team) => ({
-          ...team,
+          id: team.id,
+          code: team.code,
+          name: team.name,
+          description: team.description,
+          status: team.status,
+          manager: team.manager,
           positions: positions
             .filter((position) => position.teamId === team.id)
             .map((position) => this.toPositionNode(position)),
