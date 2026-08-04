@@ -11,6 +11,7 @@ enum OrganizationStatus { ACTIVE SUSPENDED ARCHIVED }
 enum WorkforceStatus { DRAFT ACTIVE PAUSED ARCHIVED }
 enum DepartmentStatus { DRAFT ACTIVE PAUSED ARCHIVED }
 enum TeamStatus { DRAFT ACTIVE PAUSED ARCHIVED }
+enum OrganizationRoleStatus { DRAFT ACTIVE DEPRECATED ARCHIVED }
 enum UserRole { OWNER ADMIN MEMBER VIEWER }
 enum UserStatus { ACTIVE INVITED SUSPENDED DISABLED }
 enum DigitalEmployeeStatus { DRAFT ACTIVE PAUSED ARCHIVED }
@@ -31,6 +32,7 @@ model Organization {
   workforceInstances WorkforceInstance[]
   departments Department[]
   teams Team[]
+  organizationRoles OrganizationRole[]
   digitalEmployees DigitalEmployee[]
   capabilities Capability[]
   tasks Task[]
@@ -108,6 +110,22 @@ model Team {
   @@index([departmentId])
   @@index([managerEmployeeId])
   @@map("teams")
+}
+
+model OrganizationRole {
+  id String @id @default(uuid())
+  organizationId String
+  code String
+  name String
+  description String?
+  status OrganizationRoleStatus @default(DRAFT)
+  responsibilities Json @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@map("organization_roles")
 }
 
 model User {
