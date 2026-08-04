@@ -9,6 +9,7 @@ import { WorkforceInstancesModule } from './modules/workforce-instances/workforc
 import { DepartmentsModule } from './modules/departments/departments.module';
 import { TeamsModule } from './modules/teams/teams.module';
 import { OrganizationRolesModule } from './modules/organization-roles/organization-roles.module';
+import { PositionsModule } from './modules/positions/positions.module';
 import { DigitalEmployeesModule } from './modules/digital-employees/digital-employees.module';
 import { CapabilitiesModule } from './modules/capabilities/capabilities.module';
 import { TasksModule } from './modules/tasks/tasks.module';
@@ -33,6 +34,7 @@ import { AuditModule } from './modules/audit/audit.module';
     DepartmentsModule,
     TeamsModule,
     OrganizationRolesModule,
+    PositionsModule,
     DigitalEmployeesModule,
     CapabilitiesModule,
     TasksModule,
