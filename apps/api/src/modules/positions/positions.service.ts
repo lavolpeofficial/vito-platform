@@ -30,6 +30,7 @@ export class PositionsService {
       return await this.prisma.$transaction(async (tx) => {
         const position = await tx.position.create({
           data: {
+            organizationId,
             ...dto,
             departmentId: context.departmentId,
             teamId: context.teamId,
@@ -37,14 +38,17 @@ export class PositionsService {
           },
           include: positionInclude,
         });
-        await this.auditService.record({
-          organizationId,
-          actorType: 'SYSTEM',
-          action: 'POSITION_CREATED',
-          entityType: 'Position',
-          entityId: position.id,
-          metadata: { code: position.code, occupantEmployeeId: position.occupantEmployeeId },
-        }, tx);
+        await this.auditService.record(
+          {
+            organizationId,
+            actorType: 'SYSTEM',
+            action: 'POSITION_CREATED',
+            entityType: 'Position',
+            entityId: position.id,
+            metadata: { code: position.code, occupantEmployeeId: position.occupantEmployeeId },
+          },
+          tx,
+        );
         return position;
       });
     } catch (error) {
@@ -105,18 +109,21 @@ export class PositionsService {
           },
           include: positionInclude,
         });
-        await this.auditService.record({
-          organizationId,
-          actorType: 'SYSTEM',
-          action: occupantChanged
-            ? dto.occupantEmployeeId
-              ? 'POSITION_ASSIGNED'
-              : 'POSITION_VACATED'
-            : 'POSITION_UPDATED',
-          entityType: 'Position',
-          entityId: updated.id,
-          metadata: { changes: dto },
-        }, tx);
+        await this.auditService.record(
+          {
+            organizationId,
+            actorType: 'SYSTEM',
+            action: occupantChanged
+              ? dto.occupantEmployeeId
+                ? 'POSITION_ASSIGNED'
+                : 'POSITION_VACATED'
+              : 'POSITION_UPDATED',
+            entityType: 'Position',
+            entityId: updated.id,
+            metadata: { changes: dto },
+          },
+          tx,
+        );
         return updated;
       });
     } catch (error) {
@@ -148,7 +155,7 @@ export class PositionsService {
     if (!role) throw new NotFoundException('Organization Role gehört nicht zu dieser Organization.');
 
     let departmentId = input.departmentId ?? null;
-    let teamId = input.teamId ?? null;
+    const teamId = input.teamId ?? null;
 
     if (teamId) {
       const team = await this.prisma.team.findFirst({
@@ -192,11 +199,13 @@ export class PositionsService {
   private async assertNoHierarchyCycle(organizationId: string, positionId: string, managerPositionId: string) {
     let currentId: string | null = managerPositionId;
     const visited = new Set<string>();
+
     while (currentId) {
       if (currentId === positionId) throw new ConflictException('Die Positionshierarchie würde einen Zyklus erzeugen.');
       if (visited.has(currentId)) throw new ConflictException('Bestehender Zyklus in der Positionshierarchie erkannt.');
       visited.add(currentId);
-      const current = await this.prisma.position.findFirst({
+
+      const current: { managerPositionId: string | null } | null = await this.prisma.position.findFirst({
         where: { id: currentId, organizationId },
         select: { managerPositionId: true },
       });
