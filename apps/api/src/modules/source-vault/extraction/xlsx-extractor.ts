@@ -15,11 +15,7 @@ export interface XlsxExtractionEnvelope {
   adapter: 'vito-openxml-lite';
   adapterVersion: '0.1.0';
   sheets: XlsxSheetSummary[];
-  totals: {
-    sheets: number;
-    cells: number;
-    formulas: number;
-  };
+  totals: { sheets: number; cells: number; formulas: number };
 }
 
 interface ZipEntry {
@@ -38,6 +34,11 @@ function decodeXml(value: string): string {
     .replace(/&amp;/g, '&');
 }
 
+function attr(tag: string, name: string): string | undefined {
+  const match = new RegExp(`\\b${name}="([^"]+)"`).exec(tag);
+  return match ? decodeXml(match[1]) : undefined;
+}
+
 function findEocd(buffer: Buffer): number {
   const min = Math.max(0, buffer.length - 65_557);
   for (let offset = buffer.length - 22; offset >= min; offset -= 1) {
@@ -54,7 +55,7 @@ function readZipEntries(buffer: Buffer): Map<string, ZipEntry> {
   let cursor = centralOffset;
 
   for (let i = 0; i < totalEntries; i += 1) {
-    if (buffer.readUInt32LE(cursor) !== 0x02014b50) {
+    if (cursor + 46 > buffer.length || buffer.readUInt32LE(cursor) !== 0x02014b50) {
       throw new BadRequestException('Ungültige XLSX/ZIP-Datei: Central-directory Eintrag beschädigt.');
     }
     const method = buffer.readUInt16LE(cursor + 10);
@@ -67,19 +68,20 @@ function readZipEntries(buffer: Buffer): Map<string, ZipEntry> {
     entries.set(name, { name, method, compressedSize, localHeaderOffset });
     cursor += 46 + fileNameLength + extraLength + commentLength;
   }
-
   return entries;
 }
 
 function unzipEntry(buffer: Buffer, entry: ZipEntry): Buffer {
   const offset = entry.localHeaderOffset;
-  if (buffer.readUInt32LE(offset) !== 0x04034b50) {
+  if (offset + 30 > buffer.length || buffer.readUInt32LE(offset) !== 0x04034b50) {
     throw new BadRequestException(`Ungültiger Local-Header für ${entry.name}.`);
   }
   const fileNameLength = buffer.readUInt16LE(offset + 26);
   const extraLength = buffer.readUInt16LE(offset + 28);
   const dataStart = offset + 30 + fileNameLength + extraLength;
-  const compressed = buffer.subarray(dataStart, dataStart + entry.compressedSize);
+  const dataEnd = dataStart + entry.compressedSize;
+  if (dataEnd > buffer.length) throw new BadRequestException(`ZIP-Eintrag ${entry.name} ist abgeschnitten.`);
+  const compressed = buffer.subarray(dataStart, dataEnd);
 
   if (entry.method === 0) return Buffer.from(compressed);
   if (entry.method === 8) return inflateRawSync(compressed);
@@ -104,38 +106,38 @@ export function extractXlsxStructure(buffer: Buffer): XlsxExtractionEnvelope {
   const rels = textEntry(buffer, entries, 'xl/_rels/workbook.xml.rels');
 
   const relationshipTargets = new Map<string, string>();
-  const relRegex = /<Relationship\b[^>]*\bId="([^"]+)"[^>]*\bTarget="([^"]+)"[^>]*\/?\s*>/g;
-  for (const match of rels.matchAll(relRegex)) {
-    relationshipTargets.set(decodeXml(match[1]), normalizeTarget(decodeXml(match[2])));
+  for (const match of rels.matchAll(/<Relationship\b[^>]*\/?\s*>/g)) {
+    const id = attr(match[0], 'Id');
+    const target = attr(match[0], 'Target');
+    if (id && target) relationshipTargets.set(id, normalizeTarget(target));
   }
 
   const sheets: XlsxSheetSummary[] = [];
-  const sheetRegex = /<sheet\b[^>]*\bname="([^"]+)"[^>]*\br:id="([^"]+)"[^>]*\/?\s*>/g;
-  for (const match of workbook.matchAll(sheetRegex)) {
-    const name = decodeXml(match[1]);
-    const relationshipId = decodeXml(match[2]);
+  for (const match of workbook.matchAll(/<sheet\b[^>]*\/?\s*>/g)) {
+    const name = attr(match[0], 'name');
+    const relationshipId = attr(match[0], 'r:id');
+    if (!name || !relationshipId) continue;
     const path = relationshipTargets.get(relationshipId);
     if (!path) continue;
 
     const xml = textEntry(buffer, entries, path);
-    const dimension = /<dimension\b[^>]*\bref="([^"]+)"/.exec(xml)?.[1];
-    const cellMatches = [...xml.matchAll(/<c\b[^>]*\br="([A-Z]+[0-9]+)"[^>]*>([\s\S]*?)<\/c>/g)];
+    const dimensionTag = /<dimension\b[^>]*\/?\s*>/.exec(xml)?.[0];
+    const dimension = dimensionTag ? attr(dimensionTag, 'ref') : undefined;
     const formulaCells: string[] = [];
+    let cellCount = 0;
 
-    for (const cell of cellMatches) {
-      if (/<f(?:\s[^>]*)?>[\s\S]*?<\/f>/.test(cell[2]) || /<f\s*\/>/.test(cell[2])) {
-        formulaCells.push(cell[1]);
-      }
+    // XLSX worksheet XML is flat enough to scan cell elements sequentially.
+    // Parsing attributes separately avoids backtracking across very large sheets.
+    const cellRegex = /<c\b([^>]*)>(.*?)<\/c>/gs;
+    let cell: RegExpExecArray | null;
+    while ((cell = cellRegex.exec(xml)) !== null) {
+      const ref = attr(cell[1], 'r');
+      if (!ref) continue;
+      cellCount += 1;
+      if (/<f(?:\s[^>]*)?>.*?<\/f>/s.test(cell[2]) || /<f\s*\/>/.test(cell[2])) formulaCells.push(ref);
     }
 
-    sheets.push({
-      name,
-      path,
-      dimension,
-      cellCount: cellMatches.length,
-      formulaCount: formulaCells.length,
-      formulaCells,
-    });
+    sheets.push({ name, path, dimension, cellCount, formulaCount: formulaCells.length, formulaCells });
   }
 
   return {
