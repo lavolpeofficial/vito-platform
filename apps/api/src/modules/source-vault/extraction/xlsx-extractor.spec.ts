@@ -58,14 +58,16 @@ function createStoredZip(files: Record<string, string>): Buffer {
 }
 
 describe('extractXlsxStructure', () => {
-  it('extracts sheet names, dimensions and formula cell locators from OpenXML', () => {
+  it('extracts sheet, native formulas and formula-like shared strings', () => {
     const workbook = `<?xml version="1.0"?><workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Vorlage" sheetId="1" r:id="rId1"/></sheets></workbook>`;
     const rels = `<?xml version="1.0"?><Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>`;
-    const sheet = `<?xml version="1.0"?><worksheet><dimension ref="A1:C5"/><sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><f>A1*2</f><v>2</v></c></row><row r="2"><c r="C2"><f>SUM(A1:B1)</f><v>3</v></c></row></sheetData></worksheet>`;
+    const sharedStrings = `<?xml version="1.0"?><sst><si><t>=GPT(A1)</t></si><si><t>normal</t></si></sst>`;
+    const sheet = `<?xml version="1.0"?><worksheet><dimension ref="A1:D5"/><sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><f>A1*2</f><v>2</v></c><c r="C1" t="s"><v>0</v></c><c r="D1" t="s"><v>1</v></c></row></sheetData></worksheet>`;
 
     const zip = createStoredZip({
       'xl/workbook.xml': workbook,
       'xl/_rels/workbook.xml.rels': rels,
+      'xl/sharedStrings.xml': sharedStrings,
       'xl/worksheets/sheet1.xml': sheet,
     });
 
@@ -77,13 +79,15 @@ describe('extractXlsxStructure', () => {
         {
           name: 'Vorlage',
           path: 'xl/worksheets/sheet1.xml',
-          dimension: 'A1:C5',
-          cellCount: 3,
+          dimension: 'A1:D5',
+          cellCount: 4,
           formulaCount: 2,
-          formulaCells: ['B1', 'C2'],
+          nativeFormulaCount: 1,
+          formulaLikeStringCount: 1,
+          formulaCells: ['B1', 'C1'],
         },
       ],
-      totals: { sheets: 1, cells: 3, formulas: 2 },
+      totals: { sheets: 1, cells: 4, formulas: 2, nativeFormulas: 1, formulaLikeStrings: 1 },
     });
   });
 });
