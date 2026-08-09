@@ -7,6 +7,8 @@ export interface XlsxSheetSummary {
   dimension?: string;
   cellCount: number;
   formulaCount: number;
+  nativeFormulaCount: number;
+  formulaLikeStringCount: number;
   formulaCells: string[];
 }
 
@@ -15,7 +17,13 @@ export interface XlsxExtractionEnvelope {
   adapter: 'vito-openxml-lite';
   adapterVersion: '0.1.0';
   sheets: XlsxSheetSummary[];
-  totals: { sheets: number; cells: number; formulas: number };
+  totals: {
+    sheets: number;
+    cells: number;
+    formulas: number;
+    nativeFormulas: number;
+    formulaLikeStrings: number;
+  };
 }
 
 interface ZipEntry {
@@ -100,9 +108,25 @@ function normalizeTarget(target: string): string {
   return `xl/${cleaned.replace(/^\.\//, '')}`;
 }
 
-function scanCells(xml: string): { cellCount: number; formulaCells: string[] } {
+function readSharedStrings(buffer: Buffer, entries: Map<string, ZipEntry>): string[] {
+  const entry = entries.get('xl/sharedStrings.xml');
+  if (!entry) return [];
+  const xml = unzipEntry(buffer, entry).toString('utf8');
+  const result: string[] = [];
+
+  for (const match of xml.matchAll(/<si\b[^>]*>(.*?)<\/si>/gs)) {
+    let value = '';
+    for (const text of match[1].matchAll(/<t\b[^>]*>(.*?)<\/t>/gs)) value += decodeXml(text[1]);
+    result.push(value);
+  }
+  return result;
+}
+
+function scanCells(xml: string, sharedStrings: string[]) {
   let cursor = 0;
   let cellCount = 0;
+  let nativeFormulaCount = 0;
+  let formulaLikeStringCount = 0;
   const formulaCells: string[] = [];
 
   while (cursor < xml.length) {
@@ -123,18 +147,36 @@ function scanCells(xml: string): { cellCount: number; formulaCells: string[] } {
     if (ref) {
       cellCount += 1;
       const inner = xml.slice(tagEnd + 1, close);
-      if (inner.indexOf('<f') >= 0) formulaCells.push(ref);
+      const hasNativeFormula = inner.indexOf('<f') >= 0;
+      let hasFormulaLikeString = false;
+
+      if (!hasNativeFormula && attr(startTag, 't') === 's') {
+        const valueMatch = /<v>(\d+)<\/v>/.exec(inner);
+        if (valueMatch) {
+          const sharedValue = sharedStrings[Number(valueMatch[1])];
+          hasFormulaLikeString = typeof sharedValue === 'string' && sharedValue.trimStart().startsWith('=');
+        }
+      }
+
+      if (hasNativeFormula) {
+        nativeFormulaCount += 1;
+        formulaCells.push(ref);
+      } else if (hasFormulaLikeString) {
+        formulaLikeStringCount += 1;
+        formulaCells.push(ref);
+      }
     }
     cursor = close + 4;
   }
 
-  return { cellCount, formulaCells };
+  return { cellCount, nativeFormulaCount, formulaLikeStringCount, formulaCells };
 }
 
 export function extractXlsxStructure(buffer: Buffer): XlsxExtractionEnvelope {
   const entries = readZipEntries(buffer);
   const workbook = textEntry(buffer, entries, 'xl/workbook.xml');
   const rels = textEntry(buffer, entries, 'xl/_rels/workbook.xml.rels');
+  const sharedStrings = readSharedStrings(buffer, entries);
 
   const relationshipTargets = new Map<string, string>();
   for (const match of rels.matchAll(/<Relationship\b[^>]*\/?\s*>/g)) {
@@ -154,9 +196,19 @@ export function extractXlsxStructure(buffer: Buffer): XlsxExtractionEnvelope {
     const xml = textEntry(buffer, entries, path);
     const dimensionTag = /<dimension\b[^>]*\/?\s*>/.exec(xml)?.[0];
     const dimension = dimensionTag ? attr(dimensionTag, 'ref') : undefined;
-    const { cellCount, formulaCells } = scanCells(xml);
+    const scanned = scanCells(xml, sharedStrings);
+    const formulaCount = scanned.nativeFormulaCount + scanned.formulaLikeStringCount;
 
-    sheets.push({ name, path, dimension, cellCount, formulaCount: formulaCells.length, formulaCells });
+    sheets.push({
+      name,
+      path,
+      dimension,
+      cellCount: scanned.cellCount,
+      formulaCount,
+      nativeFormulaCount: scanned.nativeFormulaCount,
+      formulaLikeStringCount: scanned.formulaLikeStringCount,
+      formulaCells: scanned.formulaCells,
+    });
   }
 
   return {
@@ -168,6 +220,8 @@ export function extractXlsxStructure(buffer: Buffer): XlsxExtractionEnvelope {
       sheets: sheets.length,
       cells: sheets.reduce((sum, sheet) => sum + sheet.cellCount, 0),
       formulas: sheets.reduce((sum, sheet) => sum + sheet.formulaCount, 0),
+      nativeFormulas: sheets.reduce((sum, sheet) => sum + sheet.nativeFormulaCount, 0),
+      formulaLikeStrings: sheets.reduce((sum, sheet) => sum + sheet.formulaLikeStringCount, 0),
     },
   };
 }
