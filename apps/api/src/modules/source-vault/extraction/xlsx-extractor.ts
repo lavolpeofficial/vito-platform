@@ -100,6 +100,37 @@ function normalizeTarget(target: string): string {
   return `xl/${cleaned.replace(/^\.\//, '')}`;
 }
 
+function scanCells(xml: string): { cellCount: number; formulaCells: string[] } {
+  let cursor = 0;
+  let cellCount = 0;
+  const formulaCells: string[] = [];
+
+  while (cursor < xml.length) {
+    const start = xml.indexOf('<c ', cursor);
+    if (start < 0) break;
+    const tagEnd = xml.indexOf('>', start + 3);
+    if (tagEnd < 0) break;
+    const startTag = xml.slice(start + 2, tagEnd);
+
+    if (xml[tagEnd - 1] === '/') {
+      cursor = tagEnd + 1;
+      continue;
+    }
+
+    const close = xml.indexOf('</c>', tagEnd + 1);
+    if (close < 0) break;
+    const ref = attr(startTag, 'r');
+    if (ref) {
+      cellCount += 1;
+      const inner = xml.slice(tagEnd + 1, close);
+      if (inner.indexOf('<f') >= 0) formulaCells.push(ref);
+    }
+    cursor = close + 4;
+  }
+
+  return { cellCount, formulaCells };
+}
+
 export function extractXlsxStructure(buffer: Buffer): XlsxExtractionEnvelope {
   const entries = readZipEntries(buffer);
   const workbook = textEntry(buffer, entries, 'xl/workbook.xml');
@@ -123,19 +154,7 @@ export function extractXlsxStructure(buffer: Buffer): XlsxExtractionEnvelope {
     const xml = textEntry(buffer, entries, path);
     const dimensionTag = /<dimension\b[^>]*\/?\s*>/.exec(xml)?.[0];
     const dimension = dimensionTag ? attr(dimensionTag, 'ref') : undefined;
-    const formulaCells: string[] = [];
-    let cellCount = 0;
-
-    const cellRegex = /<c\b([^>]*)>(.*?)<\/c>/gs;
-    let cell: RegExpExecArray | null;
-    while ((cell = cellRegex.exec(xml)) !== null) {
-      const ref = attr(cell[1], 'r');
-      if (!ref) continue;
-      cellCount += 1;
-      // Covers normal formulas and shared-formula followers such as
-      // <f t="shared" si="1"/> that carry no repeated formula text.
-      if (/<f\b[^>]*(?:\/>|>.*?<\/f>)/s.test(cell[2])) formulaCells.push(ref);
-    }
+    const { cellCount, formulaCells } = scanCells(xml);
 
     sheets.push({ name, path, dimension, cellCount, formulaCount: formulaCells.length, formulaCells });
   }
