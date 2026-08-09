@@ -52,15 +52,22 @@ export class SourceExtractionService {
           ? (source.metadata as Record<string, unknown>)
           : {};
 
+      // Prisma JSON types are intentionally stricter than ordinary TS objects.
+      // SOURCE VAULT extraction envelopes contain only JSON-safe primitives;
+      // serialize once here so the persistence boundary is explicit and stable.
+      const metadata = JSON.parse(
+        JSON.stringify({
+          ...previousMetadata,
+          extraction: envelope,
+        }),
+      ) as Prisma.InputJsonValue;
+
       const result = await this.prisma.$transaction(async (tx) => {
         const updated = await tx.source.update({
           where: { id: source.id },
           data: {
             extractionStatus: 'EXTRACTED',
-            metadata: {
-              ...previousMetadata,
-              extraction: envelope,
-            } as Prisma.InputJsonValue,
+            metadata,
           },
         });
 
@@ -78,6 +85,8 @@ export class SourceExtractionService {
               sheets: envelope.totals.sheets,
               cells: envelope.totals.cells,
               formulas: envelope.totals.formulas,
+              nativeFormulas: envelope.totals.nativeFormulas,
+              formulaLikeStrings: envelope.totals.formulaLikeStrings,
             },
           },
           tx,
