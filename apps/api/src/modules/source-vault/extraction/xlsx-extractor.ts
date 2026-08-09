@@ -126,15 +126,15 @@ export function extractXlsxStructure(buffer: Buffer): XlsxExtractionEnvelope {
     const formulaCells: string[] = [];
     let cellCount = 0;
 
-    // XLSX worksheet XML is flat enough to scan cell elements sequentially.
-    // Parsing attributes separately avoids backtracking across very large sheets.
     const cellRegex = /<c\b([^>]*)>(.*?)<\/c>/gs;
     let cell: RegExpExecArray | null;
     while ((cell = cellRegex.exec(xml)) !== null) {
       const ref = attr(cell[1], 'r');
       if (!ref) continue;
       cellCount += 1;
-      if (/<f(?:\s[^>]*)?>.*?<\/f>/s.test(cell[2]) || /<f\s*\/>/.test(cell[2])) formulaCells.push(ref);
+      // Covers normal formulas and shared-formula followers such as
+      // <f t="shared" si="1"/> that carry no repeated formula text.
+      if (/<f\b[^>]*(?:\/>|>.*?<\/f>)/s.test(cell[2])) formulaCells.push(ref);
     }
 
     sheets.push({ name, path, dimension, cellCount, formulaCount: formulaCells.length, formulaCells });
