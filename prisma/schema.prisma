@@ -72,6 +72,78 @@ enum ActorType {
   SYSTEM
 }
 
+enum SourceType {
+  DOCUMENT
+  SPREADSHEET
+  PRESENTATION
+  IMAGE
+  AUDIO
+  VIDEO
+  EMAIL
+  WEB_CAPTURE
+  DATASET
+  OTHER
+}
+
+enum SourceConfidentiality {
+  PUBLIC
+  INTERNAL
+  CONFIDENTIAL
+  RESTRICTED
+}
+
+enum SourceRightsStatus {
+  OWNED
+  LICENSED
+  CUSTOMER_PROVIDED
+  THIRD_PARTY_REFERENCE
+  UNKNOWN
+}
+
+enum SourceIngestionStatus {
+  RECEIVED
+  HASHED
+  STORED
+  FAILED
+  QUARANTINED
+}
+
+enum SourceExtractionStatus {
+  NOT_STARTED
+  PROCESSING
+  EXTRACTED
+  PARTIAL
+  FAILED
+  NOT_REQUIRED
+}
+
+enum SourceValidationStatus {
+  UNREVIEWED
+  REVIEWED
+  VALIDATED
+  REJECTED
+  SUPERSEDED
+}
+
+enum SourceLocatorType {
+  PAGE
+  SHEET
+  CELL_RANGE
+  SLIDE
+  TIMECODE
+  SECTION
+  MESSAGE
+  OTHER
+}
+
+enum SourceDerivationType {
+  QUOTE
+  PARAPHRASE
+  EXTRACTION
+  INFERENCE
+  SYNTHESIS
+}
+
 // ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
@@ -84,37 +156,35 @@ model Organization {
   createdAt DateTime           @default(now())
   updatedAt DateTime           @updatedAt
 
-  users             User[]
-  digitalEmployees  DigitalEmployee[]
-  capabilities      Capability[]
-  tasks             Task[]
-  auditEvents       AuditEvent[]
+  users                User[]
+  digitalEmployees     DigitalEmployee[]
+  capabilities         Capability[]
+  tasks                Task[]
+  auditEvents          AuditEvent[]
+  sources              Source[]
+  knowledgeSourceLinks KnowledgeSourceLink[]
 
   @@map("organizations")
 }
 
 model User {
-  id             String     @id @default(uuid())
-  organizationId String
-  email          String
-  firstName      String
-  lastName       String
-  role           UserRole   @default(MEMBER)
-  status         UserStatus @default(ACTIVE)
-  passwordHash   String?
-  lastLoginAt    DateTime?
-  tokenVersion   Int        @default(1)
-  deletedAt      DateTime?
+  id              String     @id @default(uuid())
+  organizationId  String
+  email           String
+  firstName       String
+  lastName        String
+  role            UserRole   @default(MEMBER)
+  status          UserStatus @default(ACTIVE)
+  passwordHash    String?
+  lastLoginAt     DateTime?
+  tokenVersion    Int        @default(1)
+  deletedAt       DateTime?
   deletedByUserId String?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
 
-  // Sprint 3A: echte, benannte Self-Relation für Soft Delete (siehe
-  // docs/design/sprint-3-user-management-design.md, Kap. 6.1).
-  // onDelete: SetNull ist der Prisma-Default für optionale Relationen
-  // und wird hier zur Klarheit explizit angegeben.
   deletedByUser User?  @relation("UserDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
   disabledUsers User[] @relation("UserDeletedBy")
 
@@ -149,18 +219,18 @@ model DigitalEmployee {
 }
 
 model Capability {
-  id                String    @id @default(uuid())
-  organizationId    String
-  code              String
-  name              String
-  description       String?
-  riskLevel         RiskLevel @default(LOW)
-  requiresApproval  Boolean   @default(false)
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id               String    @id @default(uuid())
+  organizationId   String
+  code             String
+  name             String
+  description      String?
+  riskLevel        RiskLevel @default(LOW)
+  requiresApproval Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  organization      Organization                @relation(fields: [organizationId], references: [id])
-  digitalEmployees  DigitalEmployeeCapability[]
+  organization     Organization                @relation(fields: [organizationId], references: [id])
+  digitalEmployees DigitalEmployeeCapability[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -222,4 +292,72 @@ model AuditEvent {
   @@index([organizationId])
   @@index([organizationId, entityType, entityId])
   @@map("audit_events")
+}
+
+model Source {
+  id                String                   @id @default(uuid())
+  sourceId          String                   @unique
+  organizationId    String
+  projectKey        String?
+  domain            String?
+  sourceType        SourceType
+  originalFilename  String
+  mimeType          String
+  byteSize          BigInt
+  sha256            String
+  storageUri        String
+  version           Int                      @default(1)
+  supersedesSourceId String?
+  parentSourceId    String?
+  language          String?
+  title             String?
+  author            String?
+  sourceDate        DateTime?
+  ingestedAt        DateTime                 @default(now())
+  ingestedBy        String
+  confidentiality   SourceConfidentiality    @default(INTERNAL)
+  rightsStatus      SourceRightsStatus       @default(UNKNOWN)
+  retentionClass    String?
+  ingestionStatus   SourceIngestionStatus    @default(RECEIVED)
+  extractionStatus  SourceExtractionStatus   @default(NOT_STARTED)
+  validationStatus  SourceValidationStatus   @default(UNREVIEWED)
+  metadata          Json                     @default("{}")
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  organization      Organization             @relation(fields: [organizationId], references: [id])
+  supersedes        Source?                  @relation("SourceVersion", fields: [supersedesSourceId], references: [id], onDelete: SetNull)
+  supersededBy      Source[]                 @relation("SourceVersion")
+  parent            Source?                  @relation("SourceParent", fields: [parentSourceId], references: [id], onDelete: SetNull)
+  children          Source[]                 @relation("SourceParent")
+  knowledgeLinks    KnowledgeSourceLink[]
+
+  @@unique([organizationId, sha256])
+  @@index([organizationId])
+  @@index([organizationId, projectKey])
+  @@index([organizationId, originalFilename])
+  @@index([supersedesSourceId])
+  @@index([parentSourceId])
+  @@map("sources")
+}
+
+model KnowledgeSourceLink {
+  id             String               @id @default(uuid())
+  organizationId String
+  sourceId       String
+  knowledgeRef   String
+  locatorType    SourceLocatorType?
+  locatorValue   String?
+  derivationType SourceDerivationType
+  confidence     Float?
+  metadata       Json                 @default("{}")
+  createdAt      DateTime             @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  source       Source       @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([sourceId])
+  @@index([organizationId, knowledgeRef])
+  @@map("knowledge_source_links")
 }
