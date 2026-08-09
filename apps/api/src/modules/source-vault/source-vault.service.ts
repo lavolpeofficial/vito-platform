@@ -18,6 +18,14 @@ export class SourceVaultService {
     return `SRC-${year}-${randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`;
   }
 
+  private toApi<T>(value: T): T {
+    return JSON.parse(
+      JSON.stringify(value, (_key, currentValue) =>
+        typeof currentValue === 'bigint' ? currentValue.toString() : currentValue,
+      ),
+    ) as T;
+  }
+
   async register(organizationId: string, dto: RegisterSourceDto) {
     const normalizedHash = dto.sha256.toLowerCase();
 
@@ -26,7 +34,7 @@ export class SourceVaultService {
     });
 
     if (duplicate) {
-      return { duplicate: true, source: duplicate };
+      return this.toApi({ duplicate: true, source: duplicate });
     }
 
     let version = 1;
@@ -51,7 +59,7 @@ export class SourceVaultService {
     }
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const result = await this.prisma.$transaction(async (tx) => {
         const source = await tx.source.create({
           data: {
             sourceId: this.createHumanSourceId(),
@@ -109,6 +117,8 @@ export class SourceVaultService {
 
         return { duplicate: false, source };
       });
+
+      return this.toApi(result);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ConflictException('Die Source konnte wegen eines konkurrierenden Duplikats nicht registriert werden.');
@@ -118,11 +128,12 @@ export class SourceVaultService {
   }
 
   async findAll(organizationId: string) {
-    return this.prisma.source.findMany({
+    const sources = await this.prisma.source.findMany({
       where: { organizationId },
       orderBy: { ingestedAt: 'desc' },
       include: { knowledgeLinks: true },
     });
+    return this.toApi(sources);
   }
 
   async findByIdOrFail(organizationId: string, id: string) {
@@ -141,7 +152,7 @@ export class SourceVaultService {
       throw new NotFoundException('Source nicht gefunden.');
     }
 
-    return source;
+    return this.toApi(source);
   }
 
   async findDuplicate(organizationId: string, sha256: string) {
@@ -154,11 +165,19 @@ export class SourceVaultService {
       where: { organizationId_sha256: { organizationId, sha256: normalizedHash } },
     });
 
-    return { duplicate: Boolean(source), source };
+    return this.toApi({ duplicate: Boolean(source), source });
   }
 
   async lineage(organizationId: string, id: string) {
-    const current = await this.findByIdOrFail(organizationId, id);
+    const current = await this.prisma.source.findFirst({
+      where: { id, organizationId },
+      select: { id: true, sourceId: true, version: true, sha256: true, supersedesSourceId: true },
+    });
+
+    if (!current) {
+      throw new NotFoundException('Source nicht gefunden.');
+    }
+
     const previous: Array<{ id: string; sourceId: string; version: number; sha256: string }> = [];
     const seen = new Set<string>();
     let cursorId = current.supersedesSourceId;
@@ -180,20 +199,17 @@ export class SourceVaultService {
       orderBy: { version: 'asc' },
     });
 
-    return {
-      current: {
-        id: current.id,
-        sourceId: current.sourceId,
-        version: current.version,
-        sha256: current.sha256,
-      },
-      previous,
-      later,
-    };
+    return { current, previous, later };
   }
 
   async linkKnowledge(organizationId: string, sourceId: string, dto: LinkKnowledgeSourceDto) {
-    await this.findByIdOrFail(organizationId, sourceId);
+    const exists = await this.prisma.source.findFirst({
+      where: { id: sourceId, organizationId },
+      select: { id: true },
+    });
+    if (!exists) {
+      throw new NotFoundException('Source nicht gefunden.');
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const link = await tx.knowledgeSourceLink.create({
