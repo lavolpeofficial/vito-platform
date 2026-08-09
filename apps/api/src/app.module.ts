@@ -9,6 +9,7 @@ import { DigitalEmployeesModule } from './modules/digital-employees/digital-empl
 import { CapabilitiesModule } from './modules/capabilities/capabilities.module';
 import { TasksModule } from './modules/tasks/tasks.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { SourceVaultModule } from './modules/source-vault/source-vault.module';
 
 /**
  * Seit Sprint 2 gibt es keine `TenantMiddleware` mehr. Authentifizierung
@@ -29,6 +30,7 @@ import { AuditModule } from './modules/audit/audit.module';
     CapabilitiesModule,
     TasksModule,
     AuditModule,
+    SourceVaultModule,
   ],
 })
 export class AppModule {}
