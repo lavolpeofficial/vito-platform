@@ -5,12 +5,23 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { LinkKnowledgeSourceDto } from './dto/link-knowledge-source.dto';
 import { RegisterSourceDto } from './dto/register-source.dto';
+import { UploadSourceDto } from './dto/upload-source.dto';
+import { sha256Hex } from './source-hash';
+import { ObjectStoragePort } from './storage/object-storage.port';
+
+export interface UploadedSourceFile {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+}
 
 @Injectable()
 export class SourceVaultService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly objectStorage: ObjectStoragePort,
   ) {}
 
   private createHumanSourceId(): string {
@@ -26,7 +37,69 @@ export class SourceVaultService {
     ) as T;
   }
 
-  async register(organizationId: string, dto: RegisterSourceDto) {
+  async ingestUpload(organizationId: string, file: UploadedSourceFile, dto: UploadSourceDto) {
+    const sha256 = sha256Hex(file.buffer);
+    const duplicate = await this.prisma.source.findUnique({
+      where: { organizationId_sha256: { organizationId, sha256 } },
+    });
+
+    if (duplicate) {
+      return this.toApi({ duplicate: true, source: duplicate });
+    }
+
+    const humanSourceId = this.createHumanSourceId();
+    let storageUri: string | undefined;
+
+    try {
+      const stored = await this.objectStorage.putImmutable({
+        organizationId,
+        sourceId: humanSourceId,
+        filename: file.originalname,
+        mimeType: file.mimetype || 'application/octet-stream',
+        body: file.buffer,
+        metadata: { sha256 },
+      });
+      storageUri = stored.storageUri;
+
+      const registerDto: RegisterSourceDto = {
+        sourceType: dto.sourceType,
+        originalFilename: file.originalname,
+        mimeType: file.mimetype || 'application/octet-stream',
+        byteSize: file.size,
+        sha256,
+        storageUri,
+        ingestedBy: dto.ingestedBy,
+        projectKey: dto.projectKey,
+        domain: dto.domain,
+        language: dto.language,
+        title: dto.title,
+        author: dto.author,
+        sourceDate: dto.sourceDate,
+        confidentiality: dto.confidentiality,
+        rightsStatus: dto.rightsStatus,
+        retentionClass: dto.retentionClass,
+        supersedesSourceId: dto.supersedesSourceId,
+        parentSourceId: dto.parentSourceId,
+        ingestionStatus: 'STORED',
+        extractionStatus: 'NOT_STARTED',
+        validationStatus: 'UNREVIEWED',
+        metadata: { upload: { storageByteSize: stored.byteSize, etag: stored.etag ?? null } },
+      };
+
+      const result = await this.register(organizationId, registerDto, humanSourceId);
+      if (result.duplicate && storageUri) {
+        await this.objectStorage.delete(storageUri);
+      }
+      return result;
+    } catch (error) {
+      if (storageUri) {
+        await this.objectStorage.delete(storageUri).catch(() => undefined);
+      }
+      throw error;
+    }
+  }
+
+  async register(organizationId: string, dto: RegisterSourceDto, sourceIdOverride?: string) {
     const normalizedHash = dto.sha256.toLowerCase();
 
     const duplicate = await this.prisma.source.findUnique({
@@ -62,7 +135,7 @@ export class SourceVaultService {
       const result = await this.prisma.$transaction(async (tx) => {
         const source = await tx.source.create({
           data: {
-            sourceId: this.createHumanSourceId(),
+            sourceId: sourceIdOverride ?? this.createHumanSourceId(),
             organizationId,
             projectKey: dto.projectKey,
             domain: dto.domain,
@@ -110,6 +183,7 @@ export class SourceVaultService {
               sourceType: source.sourceType,
               version: source.version,
               projectKey: source.projectKey,
+              storageUri: source.storageUri,
             },
           },
           tx,
@@ -121,10 +195,35 @@ export class SourceVaultService {
       return this.toApi(result);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ConflictException('Die Source konnte wegen eines konkurrierenden Duplikats nicht registriert werden.');
+        const duplicateAfterRace = await this.prisma.source.findUnique({
+          where: { organizationId_sha256: { organizationId, sha256: normalizedHash } },
+        });
+        if (duplicateAfterRace) {
+          return this.toApi({ duplicate: true, source: duplicateAfterRace });
+        }
+        throw new ConflictException('Die Source konnte wegen einer konkurrierenden Registrierung nicht registriert werden.');
       }
       throw error;
     }
+  }
+
+  async getContent(organizationId: string, id: string) {
+    const source = await this.prisma.source.findFirst({
+      where: { id, organizationId },
+      select: { id: true, sourceId: true, originalFilename: true, mimeType: true, storageUri: true, sha256: true },
+    });
+    if (!source) throw new NotFoundException('Source nicht gefunden.');
+
+    const exists = await this.objectStorage.exists(source.storageUri);
+    if (!exists) throw new NotFoundException('Das Originalobjekt der Source ist im Storage nicht verfügbar.');
+
+    const buffer = await this.objectStorage.get(source.storageUri);
+    const actualHash = sha256Hex(buffer);
+    if (actualHash !== source.sha256) {
+      throw new ConflictException('Integritätsprüfung fehlgeschlagen: Stored Object stimmt nicht mit dem registrierten SHA-256 überein.');
+    }
+
+    return { source, buffer };
   }
 
   async findAll(organizationId: string) {
