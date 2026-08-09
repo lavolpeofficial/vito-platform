@@ -62,12 +62,18 @@ export class S3ObjectStorageAdapter implements ObjectStoragePort {
     return { bucket: rest.slice(0, slash), key: rest.slice(slash + 1) };
   }
 
-  private async signedRequest(method: 'PUT' | 'GET' | 'HEAD' | 'DELETE', key: string, body = Buffer.alloc(0), extraHeaders: Record<string, string> = {}) {
+  private async signedRequest(
+    method: 'PUT' | 'GET' | 'HEAD' | 'DELETE',
+    key: string,
+    body?: Buffer,
+    extraHeaders: Record<string, string> = {},
+  ) {
+    const payload = body ?? Buffer.alloc(0);
     const config = this.config();
     const timestamp = amzTimestamp(new Date());
     const endpoint = new URL(config.endpoint);
     const canonicalUri = `/${rfc3986(config.bucket)}/${key.split('/').map(rfc3986).join('/')}`;
-    const payloadHash = sha256Hex(body);
+    const payloadHash = sha256Hex(payload);
     const host = endpoint.host;
 
     const signedHeaderNames = ['host', 'x-amz-content-sha256', 'x-amz-date'];
@@ -91,16 +97,16 @@ export class S3ObjectStorageAdapter implements ObjectStoragePort {
       Authorization: authorization,
       ...extraHeaders,
     };
-    if (body.length > 0) headers['Content-Length'] = body.length;
+    if (payload.length > 0) headers['Content-Length'] = payload.length;
 
     return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: Buffer }>((resolve, reject) => {
       const req = request(url, { method, headers }, (res) => {
         const chunks: Buffer[] = [];
-        res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? Buffer.from(chunk) : Buffer.from(chunk)));
         res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }));
       });
       req.on('error', reject);
-      if (body.length > 0) req.write(body);
+      if (payload.length > 0) req.write(payload);
       req.end();
     });
   }
@@ -111,7 +117,7 @@ export class S3ObjectStorageAdapter implements ObjectStoragePort {
     const uri = `s3://${config.bucket}/${key}`;
     if (await this.exists(uri)) throw new Error(`Immutable SOURCE VAULT object existiert bereits: ${uri}`);
 
-    const response = await this.signedRequest('PUT', key, input.body, { 'Content-Type': input.mimeType });
+    const response = await this.signedRequest('PUT', key, Buffer.from(input.body), { 'Content-Type': input.mimeType });
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`S3 PUT fehlgeschlagen (${response.status}): ${response.body.toString('utf8').slice(0, 500)}`);
     }
