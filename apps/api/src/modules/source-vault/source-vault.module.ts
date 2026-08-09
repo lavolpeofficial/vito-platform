@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { SourceExtractionController } from './source-extraction.controller';
 import { SourceExtractionService } from './source-extraction.service';
 import { SourceVaultController } from './source-vault.controller';
 import { SourceVaultService } from './source-vault.service';
@@ -8,7 +9,7 @@ import { ObjectStoragePort } from './storage/object-storage.port';
 
 @Module({
   imports: [AuditModule],
-  controllers: [SourceVaultController],
+  controllers: [SourceVaultController, SourceExtractionController],
   providers: [
     SourceVaultService,
     SourceExtractionService,
