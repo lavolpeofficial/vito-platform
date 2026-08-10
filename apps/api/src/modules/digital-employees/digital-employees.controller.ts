@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiCreatedResponse, ApiOkResponse, ApiTags } from '@nest
 import { UserRole } from '@prisma/client';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { TenantContext } from '../../common/tenant/tenant-context';
+import { ActivateDigitalEmployeeDto } from './dto/activate-digital-employee.dto';
 import { CreateDigitalEmployeeDto } from './dto/create-digital-employee.dto';
 import { UpdateDigitalEmployeeDto } from './dto/update-digital-employee.dto';
 import { DigitalEmployeesService } from './digital-employees.service';
@@ -21,29 +22,33 @@ export class DigitalEmployeesController {
   @HttpCode(HttpStatus.CREATED)
   @ApiCreatedResponse({ description: 'DigitalEmployee wurde angelegt.' })
   async create(@Body() dto: CreateDigitalEmployeeDto) {
-    const organizationId = this.tenantContext.getOrThrow();
-    return this.digitalEmployeesService.create(organizationId, dto);
+    return this.digitalEmployeesService.create(this.tenantContext.getOrThrow(), dto);
   }
 
   @Get()
   @ApiOkResponse({ description: 'Liste der DigitalEmployees der Organization.' })
   async findAll() {
-    const organizationId = this.tenantContext.getOrThrow();
-    return this.digitalEmployeesService.findAll(organizationId);
+    return this.digitalEmployeesService.findAll(this.tenantContext.getOrThrow());
   }
 
   @Get(':id')
   @ApiOkResponse({ description: 'DigitalEmployee gefunden.' })
   async findById(@Param('id', ParseUUIDPipe) id: string) {
-    const organizationId = this.tenantContext.getOrThrow();
-    return this.digitalEmployeesService.findByIdOrFail(organizationId, id);
+    return this.digitalEmployeesService.findByIdOrFail(this.tenantContext.getOrThrow(), id);
   }
 
   @Patch(':id')
   @Roles(UserRole.OWNER, UserRole.ADMIN)
-  @ApiOkResponse({ description: 'DigitalEmployee wurde aktualisiert.' })
+  @ApiOkResponse({ description: 'DigitalEmployee wurde aktualisiert. ACTIVE ist über diesen Endpoint gesperrt.' })
   async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateDigitalEmployeeDto) {
-    const organizationId = this.tenantContext.getOrThrow();
-    return this.digitalEmployeesService.update(organizationId, id, dto);
+    return this.digitalEmployeesService.update(this.tenantContext.getOrThrow(), id, dto);
+  }
+
+  @Post(':id/activate')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: 'DigitalEmployee wurde nach bestandenem Activation Gate aktiviert.' })
+  async activate(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ActivateDigitalEmployeeDto) {
+    return this.digitalEmployeesService.activate(this.tenantContext.getOrThrow(), id, dto);
   }
 }
