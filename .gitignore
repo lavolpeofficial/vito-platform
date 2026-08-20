@@ -19,6 +19,11 @@ prisma/dev.db-journal
 .source-vault/
 **/.source-vault/
 
+# VITO engineering autopilot local artifacts
+.vito-artifacts/
+**/.vito-artifacts/
+.tmp/autopilot/
+
 # Logs
 *.log
 npm-debug.log*
