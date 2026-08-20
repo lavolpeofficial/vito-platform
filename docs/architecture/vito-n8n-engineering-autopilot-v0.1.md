@@ -17,9 +17,11 @@ n8n != assurance authority.
 
 The first practical goal is not a generic automation platform. It is to remove Alessandro from the manual message-bus role between ChatGPT, OpenCode/Big Pickle, reviewers, terminal commands, test runs and Git inspection.
 
+EO-01.2 is treated as the **final manually started bootstrap block**. The Autopilot should be brought up in parallel so EO-01.3, or at latest EO-01.4, can execute through the governed automation loop without manual prompt/terminal relaying.
+
 Desired operator experience:
 
-`Start EO-01.2`
+`Start EO-01.3`
 
 Then the system proceeds autonomously through BUILD / TEST / PACKAGE / REVIEW / CORRECTION cycles until a governed Human Gate is reached.
 
@@ -69,7 +71,7 @@ Name: `VITO_ENGINEERING_AUTOPILOT_V1`
 16. maximum semantic correction loops governed by VITO (default 3)
 17. provider-local technical retry may happen in n8n/worker without incrementing correctionLoopCount
 18. once assurance passes, stop at Human Release Gate
-19. never commit, push, merge or delete branches without explicit human release authority
+19. never merge or release without explicit human authority
 
 ## Retry boundary
 
@@ -142,13 +144,15 @@ ALLOW:
 - git branch --show-current
 - git fetch subject to branch/network policy
 
-DENY:
+DENY by default until a separate engineering-autonomy policy explicitly enables them:
 - git commit
 - git push
 - git merge
 - git branch delete
 - remote delete
-- destructive reset/clean unless a future explicit isolated policy is approved
+- destructive reset/clean
+
+Merge to main and release/deployment remain Human Gate operations in v0.1.
 
 ## Secrets
 
@@ -229,6 +233,22 @@ Goal: eliminate manual copy/paste immediately.
 - replacement of Human Gates
 - Kubernetes
 - distributed workflow engine of our own
+
+## Bootstrap exit criteria
+
+Before we claim manual relay is removed:
+- self-hosted n8n is running
+- controlled worker has authenticated typed action interface
+- repo/worktree allowlist enforced
+- health/echo workflow works
+- GIT_INSPECT workflow returns normalized branch/status
+- RUN_TESTS/RUN_BUILD works in an allowlisted worktree
+- builder invocation can return a structured result
+- reviewer invocation can return a structured verdict
+- technical retry counter is separate from correctionLoopCount
+- artifacts are stored with hashes
+- workflow stops at Human Gate
+- no unrestricted shell/HOME access
 
 ## Definition of Done — build-phase autopilot v0.1
 
