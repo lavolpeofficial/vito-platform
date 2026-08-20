@@ -1,6 +1,6 @@
 # VITO Engineering Autopilot v0.1
 
-Status: Draft build-phase automation architecture
+Status: Phase A bootstrap implemented; productive provider execution intentionally gated behind EO-01.4.
 Purpose: eliminate manual copy/paste and agent handoffs during VITO/AOE engineering while preserving VITO governance and human release authority.
 
 ## Core decision
@@ -13,17 +13,47 @@ VITO != n8n.
 n8n != provider router.
 n8n != assurance authority.
 
+## Current implementation status — 2026-08-20
+
+Implemented on `feature/vito-eo-01-governed-runtime-v0.1`:
+
+- `tools/engineering-worker/server.mjs`
+  - localhost-only worker (`127.0.0.1:8081`)
+  - bearer-authenticated `POST /execute`
+  - static repository registry
+  - typed actions: `GIT_INSPECT`, `RUN_BUILD`, `RUN_TESTS`, `RUN_PRISMA_GENERATE`
+  - arbitrary action deny by default
+  - `shell: false`
+  - minimal environment and fake/non-user HOME
+  - timeout/process-group termination
+  - stdout/stderr caps
+  - SHA-256 artifact references
+  - process-local executionId idempotency
+- `infra/n8n/docker-compose.autopilot.yml`
+  - self-hosted n8n
+  - Linux host networking so n8n can reach the localhost-only worker without exposing it on `0.0.0.0`
+  - n8n bound to `127.0.0.1:5678`
+- `infra/n8n/workflows/vito-engineering-bootstrap-v1.json`
+  - importable bootstrap workflow
+  - `GIT_INSPECT -> RUN_TESTS -> RUN_BUILD -> response`
+- bootstrap/import/smoke-test scripts under `scripts/autopilot/`
+- local artifacts ignored by Git
+- bootstrap runbook: `docs/architecture/vito-autopilot-bootstrap-runbook-v0.1.md`
+- EO-01.3 provider-router builder prompt prepared
+
+Productive `INVOKE_BUILDER` / `INVOKE_REVIEWER` actions remain disabled until EO-01.4 Execution Policy & Sandbox passes its security gate. This preserves the rule that no productive provider adapter executes before sandbox/policy controls are approved.
+
 ## Immediate build-phase objective
 
-The first practical goal is not a generic automation platform. It is to remove Alessandro from the manual message-bus role between ChatGPT, OpenCode/Big Pickle, reviewers, terminal commands, test runs and Git inspection.
+The practical goal is not a generic automation platform. It is to remove Alessandro from the manual message-bus role between ChatGPT, OpenCode/Big Pickle, reviewers, terminal commands, test runs and Git inspection.
 
-EO-01.2 is treated as the **final manually started bootstrap block**. The Autopilot should be brought up in parallel so EO-01.3, or at latest EO-01.4, can execute through the governed automation loop without manual prompt/terminal relaying.
+EO-01.2 was the final fully manual bootstrap block. EO-01.3 is prepared as the next build block while the deterministic execution plane is brought online. Productive agent invocation is intentionally deferred until the EO-01.4 sandbox gate.
 
 Desired operator experience:
 
 `Start EO-01.3`
 
-Then the system proceeds autonomously through BUILD / TEST / PACKAGE / REVIEW / CORRECTION cycles until a governed Human Gate is reached.
+Then the system proceeds autonomously through BUILD / TEST / PACKAGE / REVIEW / CORRECTION cycles until a governed Human Gate is reached once the execution-policy gate allows provider adapters.
 
 ## V0.1 architecture
 
@@ -42,8 +72,8 @@ AOE / Human engineering task
   -> controlled execution workers
       - Git/read worker
       - build/test worker
-      - OpenCode builder adapter
-      - reviewer adapter(s)
+      - OpenCode builder adapter (after EO-01.4)
+      - reviewer adapter(s) (after EO-01.4)
       - artifact collector
   -> normalized ExecutionResult
   -> VITO
@@ -199,21 +229,22 @@ Provider candidates may include OpenCode, Codex, Claude, Gemini, local models an
 ## Phase plan
 
 ### Phase A — Engineering Harness
-Goal: eliminate manual copy/paste immediately.
-- n8n self-hosted
+Goal: eliminate deterministic manual terminal relays first.
+- self-hosted n8n
 - controlled worker
-- one workflow
+- bootstrap workflow
 - file/artifact store
 - simple task envelope
-- current provider adapters
-- stop at Human Gate
+- no productive agent adapters until EO-01.4
 
 ### Phase B — VITO control integration
+- EO-01.3 provider registry/router
+- EO-01.4 execution policy/sandbox
 - ExecutionRuntimePort -> n8n adapter
-- VITO provider router
 - VITO state persistence
 - VITO human gates
 - VITO audit/cost/performance
+- productive provider adapters only after the policy gate
 
 ### Phase C — generalized governed execution
 - multiple workflows/repositories
@@ -243,8 +274,8 @@ Before we claim manual relay is removed:
 - health/echo workflow works
 - GIT_INSPECT workflow returns normalized branch/status
 - RUN_TESTS/RUN_BUILD works in an allowlisted worktree
-- builder invocation can return a structured result
-- reviewer invocation can return a structured verdict
+- builder invocation can return a structured result (after EO-01.4)
+- reviewer invocation can return a structured verdict (after EO-01.4)
 - technical retry counter is separate from correctionLoopCount
 - artifacts are stored with hashes
 - workflow stops at Human Gate
