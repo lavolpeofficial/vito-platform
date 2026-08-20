@@ -4,8 +4,16 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-: "${VITO_WORKER_TOKEN:?export VITO_WORKER_TOKEN first}"
-: "${N8N_ENCRYPTION_KEY:?export N8N_ENCRYPTION_KEY first}"
+ENV_FILE="$ROOT/.env.autopilot.local"
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
+
+: "${VITO_WORKER_TOKEN:?run scripts/autopilot/setup-local-secrets.sh or export VITO_WORKER_TOKEN first}"
+: "${N8N_ENCRYPTION_KEY:?run scripts/autopilot/setup-local-secrets.sh or export N8N_ENCRYPTION_KEY first}"
 
 export VITO_WORKER_PORT="${VITO_WORKER_PORT:-8081}"
 export VITO_WORKER_DEFAULT_TIMEOUT_MS="${VITO_WORKER_DEFAULT_TIMEOUT_MS:-120000}"
