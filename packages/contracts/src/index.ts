@@ -68,3 +68,33 @@ export enum ActorType {
 }
 
 export const TENANT_HEADER = 'x-organization-id';
+
+// --- Engineering Runtime Contracts ---
+export {
+  EngineeringCapability,
+  AssuranceLevel,
+  WorkflowRunStatus,
+  WorkflowStepStatus,
+  EngineeringStepType,
+  ReviewVerdict,
+  resolveReviewerDisagreement,
+  AgentExecutionStatus,
+  DEFAULT_RETRY_POLICY,
+  ExecutionArtifactType,
+  createDefaultEngineeringPermissionPolicy,
+  nextEngineeringStep,
+  checkAl4Independence,
+  type ReviewFinding,
+  type ReviewFindingSeverity,
+  type ReviewFindingCategory,
+  type ReviewResult,
+  type DisagreementResolution,
+  type RetryPolicy,
+  type ExecutionBudget,
+  type IndependenceContext,
+  type AssuranceUnsatisfiedReason,
+  type ExecutionPermissionPolicy,
+  type StateMachineInput,
+  type TransitionOutcome,
+  type BlockReason,
+} from './engineering/index.js';
