@@ -144,6 +144,41 @@ enum SourceDerivationType {
   SYNTHESIS
 }
 
+enum WorkflowRunStatus {
+  CREATED
+  RUNNING
+  WAITING_FOR_HUMAN
+  BLOCKED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum WorkflowStepStatus {
+  PENDING
+  READY
+  RUNNING
+  WAITING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+  CANCELLED
+}
+
+enum EngineeringStepType {
+  PLAN
+  BUILD
+  TEST
+  PACKAGE
+  RED_TEAM
+  PARSE_VERDICT
+  CORRECTION
+  VERIFY
+  HUMAN_RELEASE_GATE
+  RELEASE_EXECUTION
+  REMOTE_VERIFY
+}
+
 // ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
@@ -163,6 +198,8 @@ model Organization {
   auditEvents          AuditEvent[]
   sources              Source[]
   knowledgeSourceLinks KnowledgeSourceLink[]
+  workflowRuns         WorkflowRun[]
+  workflowStepRuns     WorkflowStepRun[]
 
   @@map("organizations")
 }
@@ -360,4 +397,54 @@ model KnowledgeSourceLink {
   @@index([sourceId])
   @@index([organizationId, knowledgeRef])
   @@map("knowledge_source_links")
+}
+
+model WorkflowRun {
+  id                        String             @id @default(uuid())
+  organizationId            String
+  taskId                    String?
+  workflowDefinitionCode    String
+  workflowDefinitionVersion String
+  assuranceLevel            String
+  status                    WorkflowRunStatus  @default(CREATED)
+  currentStepType           EngineeringStepType?
+  correctionLoopCount       Int                @default(0)
+  maxCorrectionLoops        Int                @default(3)
+  correlationId             String
+  blockReasonCode           String?
+  failureReasonCode         String?
+  createdAt                 DateTime           @default(now())
+  updatedAt                 DateTime           @updatedAt
+  startedAt                 DateTime?
+  completedAt               DateTime?
+
+  organization Organization      @relation(fields: [organizationId], references: [id])
+  stepRuns     WorkflowStepRun[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, correlationId])
+  @@index([correlationId])
+  @@map("workflow_runs")
+}
+
+model WorkflowStepRun {
+  id             String             @id @default(uuid())
+  organizationId String
+  workflowRunId  String
+  stepType       EngineeringStepType
+  status         WorkflowStepStatus @default(PENDING)
+  attemptNumber  Int                @default(1)
+  causationId    String?
+  metadata       Json               @default("{}")
+  startedAt      DateTime?
+  finishedAt     DateTime?
+
+  organization  Organization  @relation(fields: [organizationId], references: [id])
+  workflowRun   WorkflowRun   @relation(fields: [workflowRunId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([workflowRunId])
+  @@index([organizationId, workflowRunId])
+  @@map("workflow_step_runs")
 }
