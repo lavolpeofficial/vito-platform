@@ -5,7 +5,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "vito-engineering-bootstrap-v1",
-        "responseMode": "lastNode",
+        "responseMode": "responseNode",
         "options": {}
       },
       "id": "webhook-start",
