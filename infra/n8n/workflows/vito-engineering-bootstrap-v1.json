@@ -1,0 +1,106 @@
+{
+  "name": "VITO_ENGINEERING_BOOTSTRAP_V1",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vito-engineering-bootstrap-v1",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-start",
+      "name": "Start",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-720, 0],
+      "webhookId": "vito-engineering-bootstrap-v1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.VITO_WORKER_URL + '/execute'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{'Bearer ' + $env.VITO_WORKER_TOKEN}}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ executionId: ($json.body?.executionIdPrefix || 'bootstrap') + '-inspect', workflowRunId: $json.body?.workflowRunId || null, repositoryId: $json.body?.repositoryId || 'vito-platform', action: 'GIT_INSPECT', timeoutMs: 30000, policyVersion: 'worker-v0.1' }) }}",
+        "options": { "timeout": 45000 }
+      },
+      "id": "git-inspect",
+      "name": "GIT_INSPECT",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-440, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.VITO_WORKER_URL + '/execute'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{'Bearer ' + $env.VITO_WORKER_TOKEN}}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ executionId: 'bootstrap-tests-' + Date.now(), repositoryId: 'vito-platform', action: 'RUN_TESTS', parameters: { profile: 'default' }, timeoutMs: 300000, policyVersion: 'worker-v0.1' }) }}",
+        "options": { "timeout": 330000 }
+      },
+      "id": "run-tests",
+      "name": "RUN_TESTS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-160, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.VITO_WORKER_URL + '/execute'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{'Bearer ' + $env.VITO_WORKER_TOKEN}}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ executionId: 'bootstrap-build-' + Date.now(), repositoryId: 'vito-platform', action: 'RUN_BUILD', parameters: { profile: 'default' }, timeoutMs: 300000, policyVersion: 'worker-v0.1' }) }}",
+        "options": { "timeout": 330000 }
+      },
+      "id": "run-build",
+      "name": "RUN_BUILD",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [120, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: $json.status, executionId: $json.executionId, exitCode: $json.exitCode, artifacts: $json.producedArtifactRefs, gate: $json.status === 'SUCCEEDED' ? 'BOOTSTRAP_VALIDATION_PASSED' : 'BOOTSTRAP_VALIDATION_FAILED' } }}",
+        "options": {}
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [400, 0]
+    }
+  ],
+  "connections": {
+    "Start": { "main": [[{ "node": "GIT_INSPECT", "type": "main", "index": 0 }]] },
+    "GIT_INSPECT": { "main": [[{ "node": "RUN_TESTS", "type": "main", "index": 0 }]] },
+    "RUN_TESTS": { "main": [[{ "node": "RUN_BUILD", "type": "main", "index": 0 }]] },
+    "RUN_BUILD": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false,
+  "versionId": "vito-engineering-bootstrap-v1"
+}
