@@ -20,19 +20,51 @@ else
   echo $! > .tmp/autopilot/worker.pid
 fi
 
-for _ in $(seq 1 20); do
-  if curl -fsS http://127.0.0.1:${VITO_WORKER_PORT}/health >/dev/null; then
+worker_ready=false
+for _ in $(seq 1 40); do
+  if curl -fsS "http://127.0.0.1:${VITO_WORKER_PORT}/health" >/dev/null 2>&1; then
+    worker_ready=true
     break
   fi
   sleep 0.5
 done
 
-curl -fsS http://127.0.0.1:${VITO_WORKER_PORT}/health | python3 -m json.tool
+if [[ "$worker_ready" != "true" ]]; then
+  echo "controlled worker did not become ready" >&2
+  tail -100 .tmp/autopilot/worker.log >&2 || true
+  exit 1
+fi
+
+curl -fsS "http://127.0.0.1:${VITO_WORKER_PORT}/health" | python3 -m json.tool
 
 docker compose -f infra/n8n/docker-compose.autopilot.yml up -d
 
+echo "Waiting for n8n readiness on 127.0.0.1:5678 ..."
+n8n_ready=false
+for _ in $(seq 1 180); do
+  if curl -fsS http://127.0.0.1:5678/healthz >/dev/null 2>&1 || \
+     curl -fsS http://127.0.0.1:5678/ >/dev/null 2>&1; then
+    n8n_ready=true
+    break
+  fi
+
+  if ! docker ps --format '{{.Names}}' | grep -qx 'vito-n8n'; then
+    echo "vito-n8n stopped before becoming ready" >&2
+    docker logs --tail 150 vito-n8n >&2 || true
+    exit 1
+  fi
+
+  sleep 1
+done
+
+if [[ "$n8n_ready" != "true" ]]; then
+  echo "n8n did not become ready within 180 seconds" >&2
+  docker logs --tail 200 vito-n8n >&2 || true
+  exit 1
+fi
+
 echo
-echo "Autopilot execution plane started"
+echo "Autopilot execution plane READY"
 echo "n8n:    http://127.0.0.1:5678"
 echo "worker: http://127.0.0.1:${VITO_WORKER_PORT}/health"
 echo "log:    $ROOT/.tmp/autopilot/worker.log"
