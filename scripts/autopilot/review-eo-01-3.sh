@@ -130,11 +130,61 @@ Gate:
 OPEN|CLOSED|HUMAN_DECISION
 EOF
 
+normalize_review_output() {
+  local file="$1"
+
+  sed -E \
+    -e 's/\*\*//g' \
+    -e 's/^[[:space:]]+//' \
+    -e 's/[[:space:]]+$//' \
+    "$file"
+}
+
+extract_structured_decision() {
+  local file="$1"
+  local normalized
+  normalized="$(mktemp)"
+
+  normalize_review_output "$file" > "$normalized"
+
+  local verdict=""
+  local gate=""
+
+  verdict="$(
+    grep -E '^Verdict:[[:space:]]*[ABCD][[:space:]]*$' "$normalized" \
+      | tail -1 || true
+  )"
+
+  gate="$(
+    grep -E '^Gate:[[:space:]]*(OPEN|CLOSED|HUMAN_DECISION)[[:space:]]*$' "$normalized" \
+      | tail -1 || true
+  )"
+
+  if [[ -z "$gate" ]]; then
+    gate="$(
+      awk '
+        previous == "Gate:" &&
+        $0 ~ /^(OPEN|CLOSED|HUMAN_DECISION)$/ {
+          print "Gate: " $0
+        }
+        {
+          previous = $0
+        }
+      ' "$normalized" | tail -1
+    )"
+  fi
+
+  rm -f "$normalized"
+
+  [[ -n "$verdict" ]] && echo "$verdict"
+  [[ -n "$gate" ]] && echo "$gate"
+
+  [[ -n "$verdict" && -n "$gate" ]]
+}
+
 has_structured_decision() {
   local file="$1"
-  [[ -s "$file" ]] && \
-    grep -Eq '^Verdict:[[:space:]]*[ABCD][[:space:]]*$' "$file" && \
-    grep -Eq '^Gate:[[:space:]]*(OPEN|CLOSED|HUMAN_DECISION)[[:space:]]*$' "$file"
+  [[ -s "$file" ]] && extract_structured_decision "$file" >/dev/null
 }
 
 run_reviewer() {
@@ -179,7 +229,7 @@ run_reviewer() {
 # on provider outage, empty response, or malformed/non-structured verdict.
 REVIEWERS=(
   "opencode/nemotron-3-ultra-free|nemotron-ultra|VITO EO-01.3 Nemotron Ultra Re-Review"
-  "opencode/deepseek-v4-flash-free|deepseek-v4|VITO EO-01.3 DeepSeek Independent Fallback Review"
+  "opencode/mimo-v2.5-free|mimo-v2.5|VITO EO-01.3 Mimo Independent Fallback Review"
   "opencode/nemotron-3.5-lightning-free|nemotron-lightning|VITO EO-01.3 Nemotron Lightning Final Fallback Review"
 )
 
@@ -200,7 +250,7 @@ fi
 echo
 echo "===== EXTRACTED REVIEW DECISION ====="
 cat "$ROOT/.tmp/autopilot/eo-01-3-review-provider.txt" | sed 's/^/Reviewer: /'
-grep -E '^Verdict:[[:space:]]*[ABCD][[:space:]]*$|^Gate:[[:space:]]*(OPEN|CLOSED|HUMAN_DECISION)[[:space:]]*$' "$REPORT"
+extract_structured_decision "$REPORT"
 
 echo
 echo "Review complete: $REPORT"
