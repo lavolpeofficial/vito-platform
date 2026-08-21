@@ -6,7 +6,7 @@ cd "$ROOT"
 
 EXPECTED_BRANCH="feature/vito-eo-01-governed-runtime-v0.1"
 REVIEW_DIR="/tmp/vito-eo-01-3-review"
-REPORT="$ROOT/.tmp/autopilot/eo-01-3-nemotron-review.txt"
+REPORT="$ROOT/.tmp/autopilot/eo-01-3-review.txt"
 SPEC="$ROOT/docs/architecture/vito-eo-01-3-builder-prompt.md"
 CORRECTION="$ROOT/docs/architecture/vito-eo-01-3-correction-02.md"
 
@@ -23,8 +23,7 @@ command -v rsync >/dev/null 2>&1 || { echo "rsync not found" >&2; exit 1; }
 [[ -f "$SPEC" ]] || { echo "builder spec missing: $SPEC" >&2; exit 1; }
 [[ -f "$CORRECTION" ]] || { echo "correction scope missing: $CORRECTION" >&2; exit 1; }
 
-# Trusted verification is authoritative. Reviewer may inspect/run additional checks,
-# but a failed ad-hoc reviewer command must not override these results by itself.
+# Trusted verification is authoritative.
 echo "===== TRUSTED VERIFICATION ====="
 pnpm prisma:generate
 pnpm --filter @vito/contracts test
@@ -33,7 +32,7 @@ pnpm build
 
 rm -rf "$REVIEW_DIR"
 mkdir -p "$REVIEW_DIR/repo"
-rm -f "$REPORT"
+rm -f "$REPORT" "$ROOT/.tmp/autopilot/eo-01-3-review-"*.txt
 
 cp "$SPEC" "$REVIEW_DIR/builder-spec.md"
 cp "$CORRECTION" "$REVIEW_DIR/correction-02.md"
@@ -42,8 +41,7 @@ git diff > "$REVIEW_DIR/tracked.patch"
 git diff --stat > "$REVIEW_DIR/diff-stat.txt"
 find prisma/migrations -maxdepth 2 -type f -name 'migration.sql' -print | sort > "$REVIEW_DIR/migrations-list.txt"
 
-# Snapshot the actual working tree exactly once. This avoids the previous nested
-# engineering/engineering package bug and includes package manifests/config.
+# Snapshot the actual working tree exactly once, excluding secrets and generated state.
 rsync -a \
   --exclude='.git/' \
   --exclude='node_modules/' \
@@ -78,7 +76,7 @@ Trusted verification already passed before packaging:
 - contracts: 63/63 PASS
 - API: 146/146 PASS
 - build: PASS
-Do not treat a failed ad-hoc test command of your own as evidence that these trusted results failed unless you identify an actual implementation defect.
+Do not treat a failed ad-hoc test command of your own as evidence that these trusted results failed unless you identify an actual implementation defect. If you run API tests in the isolated snapshot, run `pnpm prisma:generate` first.
 
 Approved interpretation boundaries from Correction 02:
 1. Previous reviewer provider/model-family exclusion constraints are intentionally part of EO-01.3 routing independence support. Do NOT flag their existence as a redefinition of EO-01.1 AL4 governance unless the router itself invents verdict/approval semantics.
@@ -132,43 +130,77 @@ Gate:
 OPEN|CLOSED|HUMAN_DECISION
 EOF
 
-echo "===== NEMOTRON RED TEAM RE-REVIEW ====="
-set +e
-opencode run \
-  "$(cat "$REVIEW_DIR/review-prompt.txt")" \
-  --pure \
-  --model=opencode/nemotron-3-ultra-free \
-  --title="VITO EO-01.3 Correction 02 Independent Re-Review" \
-  --dir="$REVIEW_DIR" \
-  --print-logs \
-  --log-level INFO \
-  2>&1 | tee "$REPORT"
-review_rc=${PIPESTATUS[0]}
-set -e
+has_structured_decision() {
+  local file="$1"
+  [[ -s "$file" ]] && \
+    grep -Eq '^Verdict:[[:space:]]*[ABCD][[:space:]]*$' "$file" && \
+    grep -Eq '^Gate:[[:space:]]*(OPEN|CLOSED|HUMAN_DECISION)[[:space:]]*$' "$file"
+}
 
-if [[ $review_rc -ne 0 ]]; then
-  echo "Nemotron review exited non-zero: $review_rc" >&2
-  exit $review_rc
-fi
+run_reviewer() {
+  local model="$1"
+  local slug="$2"
+  local title="$3"
+  local outfile="$ROOT/.tmp/autopilot/eo-01-3-review-${slug}.txt"
 
-if [[ ! -s "$REPORT" ]]; then
-  echo "FAIL: Nemotron review report is empty" >&2
-  exit 2
-fi
+  echo
+  echo "===== REVIEWER: $model ====="
+  rm -f "$outfile"
 
-# Require a structured verdict and gate somewhere in the emitted output.
-if ! grep -Eq 'Verdict:[[:space:]]*[ABCD]' "$REPORT"; then
-  echo "FAIL: structured Verdict A/B/C/D not found in review output" >&2
-  exit 3
-fi
-if ! grep -Eq 'Gate:[[:space:]]*(OPEN|CLOSED|HUMAN_DECISION)' "$REPORT"; then
-  echo "FAIL: structured Gate not found in review output" >&2
-  exit 4
+  set +e
+  opencode run \
+    "$(cat "$REVIEW_DIR/review-prompt.txt")" \
+    --pure \
+    --model="$model" \
+    --title="$title" \
+    --dir="$REVIEW_DIR" \
+    --print-logs \
+    --log-level INFO \
+    2>&1 | tee "$outfile"
+  local rc=${PIPESTATUS[0]}
+  set -e
+
+  if [[ $rc -ne 0 ]]; then
+    echo "Reviewer $model exited non-zero: $rc" >&2
+    return 1
+  fi
+
+  if ! has_structured_decision "$outfile"; then
+    echo "Reviewer $model produced no valid structured decision; trying fallback." >&2
+    return 2
+  fi
+
+  cp "$outfile" "$REPORT"
+  echo "$model" > "$ROOT/.tmp/autopilot/eo-01-3-review-provider.txt"
+  return 0
+}
+
+# Reviewer routing: preferred independent reviewer first; automatically fail over
+# on provider outage, empty response, or malformed/non-structured verdict.
+REVIEWERS=(
+  "opencode/nemotron-3-ultra-free|nemotron-ultra|VITO EO-01.3 Nemotron Ultra Re-Review"
+  "opencode/deepseek-v4-flash-free|deepseek-v4|VITO EO-01.3 DeepSeek Independent Fallback Review"
+  "opencode/nemotron-3.5-lightning-free|nemotron-lightning|VITO EO-01.3 Nemotron Lightning Final Fallback Review"
+)
+
+review_ok=0
+for entry in "${REVIEWERS[@]}"; do
+  IFS='|' read -r model slug title <<< "$entry"
+  if run_reviewer "$model" "$slug" "$title"; then
+    review_ok=1
+    break
+  fi
+done
+
+if [[ $review_ok -ne 1 ]]; then
+  echo "FAIL: all independent reviewers were unavailable or returned malformed decisions." >&2
+  exit 5
 fi
 
 echo
 echo "===== EXTRACTED REVIEW DECISION ====="
-grep -E 'Verdict:[[:space:]]*[ABCD]|Gate:[[:space:]]*(OPEN|CLOSED|HUMAN_DECISION)' "$REPORT" | tail -4
+cat "$ROOT/.tmp/autopilot/eo-01-3-review-provider.txt" | sed 's/^/Reviewer: /'
+grep -E '^Verdict:[[:space:]]*[ABCD][[:space:]]*$|^Gate:[[:space:]]*(OPEN|CLOSED|HUMAN_DECISION)[[:space:]]*$' "$REPORT"
 
 echo
 echo "Review complete: $REPORT"
