@@ -57,8 +57,8 @@ check() {
 check "ProviderCapability Prisma model" grep -q 'model ProviderCapability' prisma/schema.prisma
 check "estimatedCostMinorUnits exists" grep -Rqs 'estimatedCostMinorUnits' packages/contracts/src/engineering apps/api/src/modules/provider-registry prisma/schema.prisma
 check "COST_UNKNOWN exists" grep -Rqs 'COST_UNKNOWN' packages/contracts/src/engineering apps/api/src/modules/provider-registry
-check "migration has ProviderCapability" grep -q 'provider_capabilities' prisma/migrations/20260820_add_provider_registry_routing/migration.sql
-check "migration has estimatedCostMinorUnits" grep -q 'estimatedCostMinorUnits' prisma/migrations/20260820_add_provider_registry_routing/migration.sql
+check "migration has ProviderCapability" grep -Rqs 'provider_capabilities' prisma/migrations/20260820_add_provider_registry_routing prisma/migrations/20260821000000_add_provider_capability_and_estimated_cost
+check "migration has estimatedCostMinorUnits" grep -Rqs 'estimatedCostMinorUnits' prisma/migrations/20260820_add_provider_registry_routing prisma/migrations/20260821000000_add_provider_capability_and_estimated_cost
 
 if [[ $fail -ne 0 ]]; then
   echo "Correction 02 FAILED hard postconditions. Do not review/commit." >&2
