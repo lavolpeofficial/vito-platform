@@ -179,6 +179,35 @@ enum EngineeringStepType {
   REMOTE_VERIFY
 }
 
+enum ProviderStatus {
+  ACTIVE
+  DISABLED
+  DEGRADED
+}
+
+enum ProviderHealthStatus {
+  UNKNOWN
+  HEALTHY
+  DEGRADED
+  QUOTA_LIMITED
+  UNAVAILABLE
+  DISABLED
+}
+
+enum ProviderQuotaStatus {
+  UNKNOWN
+  AVAILABLE
+  LIMITED
+  EXHAUSTED
+}
+
+enum ProviderType {
+  CLOUD_LLM
+  LOCAL_LLM
+  DETERMINISTIC_TOOL
+  LOCAL_TOOL
+}
+
 // ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
@@ -191,15 +220,18 @@ model Organization {
   createdAt DateTime           @default(now())
   updatedAt DateTime           @updatedAt
 
-  users                User[]
-  digitalEmployees     DigitalEmployee[]
-  capabilities         Capability[]
-  tasks                Task[]
-  auditEvents          AuditEvent[]
-  sources              Source[]
-  knowledgeSourceLinks KnowledgeSourceLink[]
-  workflowRuns         WorkflowRun[]
-  workflowStepRuns     WorkflowStepRun[]
+  users                    User[]
+  digitalEmployees         DigitalEmployee[]
+  capabilities             Capability[]
+  tasks                    Task[]
+  auditEvents              AuditEvent[]
+  sources                  Source[]
+  knowledgeSourceLinks     KnowledgeSourceLink[]
+  workflowRuns             WorkflowRun[]
+  workflowStepRuns         WorkflowStepRun[]
+  agentProviders           AgentProvider[]
+  providerRoutingDecisions ProviderRoutingDecision[]
+  providerCapabilities     ProviderCapability[]
 
   @@map("organizations")
 }
@@ -246,9 +278,9 @@ model DigitalEmployee {
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
 
-  organization Organization                  @relation(fields: [organizationId], references: [id])
-  capabilities DigitalEmployeeCapability[]
-  assignedTasks Task[]                       @relation("TaskAssignedDigitalEmployee")
+  organization  Organization                @relation(fields: [organizationId], references: [id])
+  capabilities  DigitalEmployeeCapability[]
+  assignedTasks Task[]                      @relation("TaskAssignedDigitalEmployee")
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -304,10 +336,10 @@ model Task {
   updatedAt                 DateTime     @updatedAt
   completedAt               DateTime?
 
-  organization           Organization     @relation(fields: [organizationId], references: [id])
+  organization            Organization     @relation(fields: [organizationId], references: [id])
   assignedUser            User?            @relation("TaskAssignedUser", fields: [assignedUserId], references: [id])
   assignedDigitalEmployee DigitalEmployee? @relation("TaskAssignedDigitalEmployee", fields: [assignedDigitalEmployeeId], references: [id])
-  createdByUser            User?           @relation("TaskCreatedByUser", fields: [createdByUserId], references: [id])
+  createdByUser           User?            @relation("TaskCreatedByUser", fields: [createdByUserId], references: [id])
 
   @@index([organizationId])
   @@map("tasks")
@@ -332,42 +364,42 @@ model AuditEvent {
 }
 
 model Source {
-  id                String                   @id @default(uuid())
-  sourceId          String                   @unique
-  organizationId    String
-  projectKey        String?
-  domain            String?
-  sourceType        SourceType
-  originalFilename  String
-  mimeType          String
-  byteSize          BigInt
-  sha256            String
-  storageUri        String
-  version           Int                      @default(1)
+  id                 String                 @id @default(uuid())
+  sourceId           String                 @unique
+  organizationId     String
+  projectKey         String?
+  domain             String?
+  sourceType         SourceType
+  originalFilename   String
+  mimeType           String
+  byteSize           BigInt
+  sha256             String
+  storageUri         String
+  version            Int                    @default(1)
   supersedesSourceId String?
-  parentSourceId    String?
-  language          String?
-  title             String?
-  author            String?
-  sourceDate        DateTime?
-  ingestedAt        DateTime                 @default(now())
-  ingestedBy        String
-  confidentiality   SourceConfidentiality    @default(INTERNAL)
-  rightsStatus      SourceRightsStatus       @default(UNKNOWN)
-  retentionClass    String?
-  ingestionStatus   SourceIngestionStatus    @default(RECEIVED)
-  extractionStatus  SourceExtractionStatus   @default(NOT_STARTED)
-  validationStatus  SourceValidationStatus   @default(UNREVIEWED)
-  metadata          Json                     @default("{}")
-  createdAt         DateTime                 @default(now())
-  updatedAt         DateTime                 @updatedAt
+  parentSourceId     String?
+  language           String?
+  title              String?
+  author             String?
+  sourceDate         DateTime?
+  ingestedAt         DateTime               @default(now())
+  ingestedBy         String
+  confidentiality    SourceConfidentiality  @default(INTERNAL)
+  rightsStatus       SourceRightsStatus     @default(UNKNOWN)
+  retentionClass     String?
+  ingestionStatus    SourceIngestionStatus  @default(RECEIVED)
+  extractionStatus   SourceExtractionStatus @default(NOT_STARTED)
+  validationStatus   SourceValidationStatus @default(UNREVIEWED)
+  metadata           Json                   @default("{}")
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
 
-  organization      Organization             @relation(fields: [organizationId], references: [id])
-  supersedes        Source?                  @relation("SourceVersion", fields: [supersedesSourceId], references: [id], onDelete: SetNull)
-  supersededBy      Source[]                 @relation("SourceVersion")
-  parent            Source?                  @relation("SourceParent", fields: [parentSourceId], references: [id], onDelete: SetNull)
-  children          Source[]                 @relation("SourceParent")
-  knowledgeLinks    KnowledgeSourceLink[]
+  organization   Organization          @relation(fields: [organizationId], references: [id])
+  supersedes     Source?               @relation("SourceVersion", fields: [supersedesSourceId], references: [id], onDelete: SetNull)
+  supersededBy   Source[]              @relation("SourceVersion")
+  parent         Source?               @relation("SourceParent", fields: [parentSourceId], references: [id], onDelete: SetNull)
+  children       Source[]              @relation("SourceParent")
+  knowledgeLinks KnowledgeSourceLink[]
 
   @@unique([organizationId, sha256])
   @@index([organizationId])
@@ -400,21 +432,21 @@ model KnowledgeSourceLink {
 }
 
 model WorkflowRun {
-  id                        String             @id @default(uuid())
+  id                        String               @id @default(uuid())
   organizationId            String
   taskId                    String?
   workflowDefinitionCode    String
   workflowDefinitionVersion String
   assuranceLevel            String
-  status                    WorkflowRunStatus  @default(CREATED)
+  status                    WorkflowRunStatus    @default(CREATED)
   currentStepType           EngineeringStepType?
-  correctionLoopCount       Int                @default(0)
-  maxCorrectionLoops        Int                @default(3)
+  correctionLoopCount       Int                  @default(0)
+  maxCorrectionLoops        Int                  @default(3)
   correlationId             String
   blockReasonCode           String?
   failureReasonCode         String?
-  createdAt                 DateTime           @default(now())
-  updatedAt                 DateTime           @updatedAt
+  createdAt                 DateTime             @default(now())
+  updatedAt                 DateTime             @updatedAt
   startedAt                 DateTime?
   completedAt               DateTime?
 
@@ -429,22 +461,107 @@ model WorkflowRun {
 }
 
 model WorkflowStepRun {
-  id             String             @id @default(uuid())
+  id             String              @id @default(uuid())
   organizationId String
   workflowRunId  String
   stepType       EngineeringStepType
-  status         WorkflowStepStatus @default(PENDING)
-  attemptNumber  Int                @default(1)
+  status         WorkflowStepStatus  @default(PENDING)
+  attemptNumber  Int                 @default(1)
   causationId    String?
-  metadata       Json               @default("{}")
+  metadata       Json                @default("{}")
   startedAt      DateTime?
   finishedAt     DateTime?
 
-  organization  Organization  @relation(fields: [organizationId], references: [id])
-  workflowRun   WorkflowRun   @relation(fields: [workflowRunId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id])
+  workflowRun  WorkflowRun  @relation(fields: [workflowRunId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([workflowRunId])
   @@index([organizationId, workflowRunId])
   @@map("workflow_step_runs")
+}
+
+model AgentProvider {
+  id                    String               @id @default(uuid())
+  organizationId        String
+  providerCode          String
+  displayName           String
+  providerType          ProviderType         @default(CLOUD_LLM)
+  status                ProviderStatus       @default(ACTIVE)
+  modelFamily           String?
+  modelName             String?
+  modelCode             String?
+  supportedCapabilities Json                 @default("[]")
+  estimatedCostMinorUnits Int?
+  healthStatus          ProviderHealthStatus @default(UNKNOWN)
+  healthCheckedAt       DateTime?
+  quotaStatus           ProviderQuotaStatus  @default(UNKNOWN)
+  quotaCheckedAt        DateTime?
+  qualityScore          Float?
+  latencyScore          Float?
+  costScore             Float?
+  costMetadata          Json                 @default("{}")
+  assuranceLevels       Json                 @default("[]")
+  metadata              Json                 @default("{}")
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  organization     Organization              @relation(fields: [organizationId], references: [id])
+  routingDecisions ProviderRoutingDecision[]
+  capabilities     ProviderCapability[]
+
+  @@unique([organizationId, providerCode])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, providerCode])
+  @@map("agent_providers")
+}
+
+/// Durable Capability-Zuweisung: verknüpft einen AgentProvider mit einem
+/// EngineeringCapability-Code. Nur ENABLED Assignments berechtigen zum Routing.
+/// Das legacy JSON `supportedCapabilities` ist KEINE Routing-Authorität mehr.
+model ProviderCapability {
+  id              String   @id @default(uuid())
+  organizationId  String
+  agentProviderId String
+  capabilityCode  String
+  isEnabled       Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization  Organization  @relation(fields: [organizationId], references: [id])
+  agentProvider AgentProvider @relation(fields: [agentProviderId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, agentProviderId, capabilityCode])
+  @@index([organizationId])
+  @@index([organizationId, capabilityCode])
+  @@index([organizationId, capabilityCode, isEnabled])
+  @@map("provider_capabilities")
+}
+
+model ProviderRoutingDecision {
+  id                   String   @id @default(uuid())
+  organizationId       String
+  correlationId        String
+  workflowRunId        String?
+  workflowStepRunId    String?
+  requestedCapability  String
+  assuranceLevel       String?
+  selectedProviderId   String?
+  candidateProviderIds Json     @default("[]")
+  rejectionReasons     Json     @default("{}")
+  scoreComponents      Json     @default("{}")
+  finalScore           Float?
+  decisionReason       String
+  routingPolicyVersion String?
+  createdAt            DateTime @default(now())
+
+  organization     Organization   @relation(fields: [organizationId], references: [id])
+  selectedProvider AgentProvider? @relation(fields: [selectedProviderId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([organizationId, correlationId])
+  @@index([organizationId, workflowRunId])
+  @@index([selectedProviderId])
+  @@map("provider_routing_decisions")
 }

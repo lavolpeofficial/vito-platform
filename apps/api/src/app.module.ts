@@ -12,6 +12,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { SourceVaultModule } from './modules/source-vault/source-vault.module';
 import { AoeImportModule } from './modules/aoe-import/aoe-import.module';
 import { WorkflowRuntimeModule } from './modules/workflow-runtime/workflow-runtime.module';
+import { ProviderRegistryModule } from './modules/provider-registry/provider-registry.module';
 
 /**
  * Seit Sprint 2 gibt es keine `TenantMiddleware` mehr. Authentifizierung
@@ -35,6 +36,7 @@ import { WorkflowRuntimeModule } from './modules/workflow-runtime/workflow-runti
     SourceVaultModule,
     AoeImportModule,
     WorkflowRuntimeModule,
+    ProviderRegistryModule,
   ],
 })
 export class AppModule {}

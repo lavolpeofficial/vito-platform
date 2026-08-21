@@ -41,3 +41,27 @@ export {
   type TransitionOutcome,
   type BlockReason,
 } from './state-machine.js';
+export {
+  ProviderStatus,
+  ProviderHealthStatus,
+  ProviderQuotaStatus,
+  ProviderType,
+  providerSupportsCapability,
+  providerSupportsAssuranceLevel,
+  isProviderRoutable,
+  type ProviderDeclaration,
+  type ProviderCapabilityAssignment,
+} from './provider-registry.js';
+export {
+  RoutingRejectionReason,
+  ROUTING_REJECTION_MESSAGES,
+  EligibilityPhase,
+  DEFAULT_ROUTING_SCORE_WEIGHTS,
+  ROUTING_POLICY_VERSION,
+  type ProviderRoutingRequest,
+  type ProviderRoutingResponse,
+  type ProviderScoreComponents,
+  type RoutingCandidate,
+  type ProviderRoutingDecisionRecord,
+  type RoutingScoreWeights,
+} from './provider-router.js';
