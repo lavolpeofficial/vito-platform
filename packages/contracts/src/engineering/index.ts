@@ -65,3 +65,19 @@ export {
   type ProviderRoutingDecisionRecord,
   type RoutingScoreWeights,
 } from './provider-router.js';
+export {
+  ExecutionProfile,
+  ExecutionAction,
+  PolicyReasonCode,
+  POLICY_REASON_MESSAGES,
+  ReleaseGateStatus,
+  ExecutionOutcome,
+  evaluatePolicy,
+  createBuilderPolicy,
+  createReviewerPolicy,
+  policyDecisionToOutcome,
+  auditSafe,
+  type PolicyDecision,
+  type ExecutionPolicyConfig,
+  type PolicyEvaluationContext,
+} from './execution-policy.js';

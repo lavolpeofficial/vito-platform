@@ -1,12 +1,20 @@
 /**
- * Execution Permission Policy für den Engineering Runtime.
+ * Execution Permission Policy for the Engineering Runtime.
  *
- * Fail-closed Sicherheitsdefaults für VITO-EO:
+ * Fail-closed security defaults for VITO-EO:
  * - allowSecrets = false
  * - allowGitCommit = false
  * - allowGitPush = false
  * - allowMerge = false
  * - allowBranchDelete = false
+ *
+ * Finding E correction: This interface is a legacy convenience layer.
+ * The authoritative execution-policy boundary is evaluatePolicy() in
+ * execution-policy.ts (EO-01.4). Do not add conflicting denials here;
+ * path security is enforced by EO-01.4's canonicalized path evaluation.
+ *
+ * In particular, prisma/ paths inside a builder worktree are legitimate
+ * source modifications and must not be blanket-denied.
  */
 export interface ExecutionPermissionPolicy {
   readonly allowRead: boolean;
@@ -39,6 +47,6 @@ export function createDefaultEngineeringPermissionPolicy(): ExecutionPermissionP
     allowBranchDelete: false,
 
     allowedPaths: ['packages/', 'apps/'],
-    deniedPaths: ['.env', '.env.*', 'prisma/'],
+    deniedPaths: ['.env', '.env.*'],
   };
 }
