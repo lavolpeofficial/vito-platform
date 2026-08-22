@@ -48,6 +48,17 @@ export enum ProviderType {
 }
 
 /**
+ * Credential requirement state for a provider.
+ * UNKNOWN must fail closed for productive invocation.
+ * Do not infer from display names or silently map missing data to NOT_REQUIRED.
+ */
+export enum ProviderCredentialRequirement {
+  REQUIRED = 'REQUIRED',
+  NOT_REQUIRED = 'NOT_REQUIRED',
+  UNKNOWN = 'UNKNOWN',
+}
+
+/**
  * Durable Capability-Zuweisung eines Providers (Spiegelbild des
  * ProviderCapability-Datenmodells). Nur ENABLED Assignments machen einen
  * Provider für eine Capability routing-berechtigt.
@@ -95,6 +106,8 @@ export interface ProviderDeclaration {
   readonly metadata: Record<string, unknown>;
   readonly createdAt: Date;
   readonly updatedAt: Date;
+  /** Credential requirement for this provider. UNKNOWN fails closed. */
+  readonly credentialRequirement: ProviderCredentialRequirement;
 }
 
 /**

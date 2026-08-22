@@ -6,6 +6,7 @@ import {
   ProviderStatus,
   ProviderHealthStatus,
   ProviderQuotaStatus,
+  ProviderCredentialRequirement,
   providerSupportsCapability,
   type ProviderDeclaration,
   type ProviderRoutingRequest,
@@ -226,6 +227,7 @@ export class ProviderRouterService {
       metadata: (r.metadata as Record<string, unknown>) ?? {},
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
+      credentialRequirement: ProviderCredentialRequirement.UNKNOWN,
     }));
   }
 
