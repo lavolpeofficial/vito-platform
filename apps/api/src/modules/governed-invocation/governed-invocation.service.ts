@@ -309,8 +309,11 @@ function normalizeAdapterResult(
   adapterResult: GovernedAdapterResult,
   startedAt: Date,
   completedAt: Date,
+  credentialReference?: string,
 ): GovernedCapabilityInvocationResult {
   const durationMs = completedAt.getTime() - startedAt.getTime();
+
+  const trustedSecretValues = credentialReference ? [credentialReference] : [];
 
   const sanitizedProviderMetadata =
     sanitizeProviderExecutionMetadata(adapterResult.providerExecutionMetadata);
@@ -322,7 +325,9 @@ function normalizeAdapterResult(
   const error = adapterResult.error
     ? {
         reason: 'EXECUTION_FAILED' as InvocationFailureReason,
-        message: adapterResult.error.message,
+        // Leakage-Boundary: die Diagnose bleibt nützlich, Geheimmaterial
+        // (z. B. die credentialReference dieser Invocation) wird redactiert.
+        message: redactSecretMaterial(adapterResult.error.message, trustedSecretValues),
         executionOutcome: undefined,
         agentExecutionStatus: adapterResult.status,
         retryable: adapterResult.error.retryable,
@@ -332,13 +337,30 @@ function normalizeAdapterResult(
 
   const se = sanitizedProviderMetadata?.sideEffects as Partial<SideEffectSummary> | undefined;
 
+  // Leakage-Boundary: das provider-kontrollierte Roh-Side-Effect-Objekt wird
+  // aus den Metadaten entfernt; die alleinige, redactierte Repräsentation ist
+  // sideEffectSummary.
+  let outputProviderMetadata = sanitizedProviderMetadata;
+  if (outputProviderMetadata && 'sideEffects' in outputProviderMetadata) {
+    const { sideEffects: _stripped, ...rest } = outputProviderMetadata;
+    outputProviderMetadata = rest as typeof outputProviderMetadata;
+  }
+
   const sideEffectSummary: SideEffectSummary = {
-    filesCreated: se?.filesCreated ? [...se.filesCreated] : [],
-    filesModified: se?.filesModified ? [...se.filesModified] : [],
-    filesDeleted: se?.filesDeleted ? [...se.filesDeleted] : [],
-    commandsExecuted: se?.commandsExecuted ? [...se.commandsExecuted] : [],
-    networkCalls: se?.networkCalls ? [...se.networkCalls] : [],
-    artifactsCreated: adapterResult.artifactReferences ? [...adapterResult.artifactReferences] : [],
+    filesCreated: sanitizeSideEffectTextList(se?.filesCreated, trustedSecretValues),
+    filesModified: sanitizeSideEffectTextList(se?.filesModified, trustedSecretValues),
+    filesDeleted: sanitizeSideEffectTextList(se?.filesDeleted, trustedSecretValues),
+    commandsExecuted: sanitizeSideEffectTextList(se?.commandsExecuted, trustedSecretValues),
+    networkCalls: se?.networkCalls
+      ? se.networkCalls.map((call) => ({
+          ...call,
+          destination: redactSecretMaterial(String(call.destination ?? ''), trustedSecretValues),
+        }))
+      : [],
+    artifactsCreated: sanitizeGovernedReferenceList(
+      adapterResult.artifactReferences,
+      trustedSecretValues,
+    ),
   };
 
   return {
@@ -353,10 +375,17 @@ function normalizeAdapterResult(
     startedAt,
     completedAt,
     durationMs,
-    outputReference: adapterResult.outputReference,
-    artifactReferences: adapterResult.artifactReferences,
-    evidenceReferences: adapterResult.evidenceReferences,
-    providerExecutionMetadata: sanitizedProviderMetadata,
+    // Leakage-Boundary: nur validierte gov://-Referenzen ohne Geheimmaterial.
+    outputReference: sanitizeGovernedReference(adapterResult.outputReference, trustedSecretValues),
+    artifactReferences: sanitizeGovernedReferenceList(
+      adapterResult.artifactReferences,
+      trustedSecretValues,
+    ),
+    evidenceReferences: sanitizeGovernedReferenceList(
+      adapterResult.evidenceReferences,
+      trustedSecretValues,
+    ),
+    providerExecutionMetadata: outputProviderMetadata,
     normalizedError: error,
     policyDecisionReference: `${policyDecision.policyVersion}-${policyDecision.evaluatedAt.toISOString()}`,
     sideEffectSummary,
@@ -477,12 +506,15 @@ function createRuntimeFailureResult(
   status: AgentExecutionStatus,
   message: string,
   providerMetadata?: Record<string, unknown>,
+  credentialReference?: string,
 ): GovernedCapabilityInvocationResult {
   const completedAt = new Date();
   const durationMs = completedAt.getTime() - startedAt.getTime();
 
   const executionOutcome =
     status === AgentExecutionStatus.TIMED_OUT ? ExecutionOutcome.TIMED_OUT : undefined;
+
+  const trustedSecretValues = credentialReference ? [credentialReference] : [];
 
   return {
     invocationId: request.invocationId,
@@ -499,7 +531,7 @@ function createRuntimeFailureResult(
     providerExecutionMetadata: {},
     normalizedError: {
       reason: 'EXECUTION_FAILED',
-      message,
+      message: redactSecretMaterial(message, trustedSecretValues),
       executionOutcome,
       agentExecutionStatus: status,
       retryable: false,
@@ -529,6 +561,7 @@ function normalizeAdapterRuntimeFailure(
   policyDecision: PolicyDecision,
   startedAt: Date,
   error: unknown,
+  credentialReference?: string,
 ): GovernedCapabilityInvocationResult {
   if (error instanceof AdapterExecutionTimeoutError) {
     return createRuntimeFailureResult(
@@ -538,12 +571,16 @@ function normalizeAdapterRuntimeFailure(
       startedAt,
       AgentExecutionStatus.TIMED_OUT,
       `EXECUTION_FAILED: ${error.message}`,
+      undefined,
+      credentialReference,
     );
   }
 
   const rawMessage = error instanceof Error ? error.message : String(error);
   // Defensive Kürzung: nur die Meldung, niemals Stack oder Error-Objekt.
-  const safeMessage = rawMessage.length > 2000 ? `${rawMessage.slice(0, 2000)}…` : rawMessage;
+  // Die Leakage-Boundary redactiert Geheimmaterial aus der Meldung.
+  const safeMessage =
+    rawMessage.length > 2000 ? `${rawMessage.slice(0, 2000)}…` : rawMessage;
 
   return createRuntimeFailureResult(
     request,
@@ -552,6 +589,8 @@ function normalizeAdapterRuntimeFailure(
     startedAt,
     AgentExecutionStatus.FAILED,
     `EXECUTION_FAILED: Adapter execution failed: ${safeMessage}`,
+    undefined,
+    credentialReference,
   );
 }
 
@@ -568,6 +607,7 @@ function createIllegalLifecycleFailureResult(
   policyDecision: PolicyDecision,
   startedAt: Date,
   rejectedStatus: AgentExecutionStatus,
+  credentialReference?: string,
 ): GovernedCapabilityInvocationResult {
   return createRuntimeFailureResult(
     request,
@@ -577,7 +617,122 @@ function createIllegalLifecycleFailureResult(
     AgentExecutionStatus.FAILED,
     `EXECUTION_FAILED: Adapter returned illegal non-terminal lifecycle status "${rejectedStatus}" as terminal result`,
     { rejectedLifecycleStatus: rejectedStatus },
+    credentialReference,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Output & Error Leakage Boundary
+// ---------------------------------------------------------------------------
+
+/** Maximale Länge freier Textfelder im normalisierten Ergebnis. */
+const MAX_SAFE_TEXT_LENGTH = 2000;
+/** Maximale Länge einer regierten Referenz. */
+const MAX_GOVERNED_REFERENCE_LENGTH = 512;
+const REDACTED = '[REDACTED]';
+
+/**
+ * Bekannte Formen geheimen Materials in Freitext — unanchored, gleiche
+ * Vokabular-Familie wie auditSafe() in @vito/contracts. Bewusst begrenzt
+ * und explizit, kein DLP-Ersatz. Ohne /g-Flag für sicheres .test().
+ */
+const LEAK_SECRET_TEXT_PATTERNS: readonly RegExp[] = [
+  /-----BEGIN\s+(RSA\s+)?(EC\s+)?PRIVATE\s+KEY-----[\s\S]*?(-----END\s+([A-Z0-9]+\s+)?PRIVATE\s+KEY-----|$)/,
+  /\bBearer\s+[A-Za-z0-9._\-]{20,}\b/,
+  /\bBasic\s+[A-Za-z0-9+/=]{20,}\b/,
+  /\beyJhbGciOi[A-Za-z0-9._\-]+\.eyJ[A-Za-z0-9._\-]+/,
+  /\b(?:sk|pk)_(?:live|test)_[A-Za-z0-9]{16,}\b/,
+  /\bgh[posr]_[A-Za-z0-9]{20,}\b/,
+  /\bxox[bpsa]-[A-Za-z0-9\-]{10,}\b/,
+  /\bAKIA[A-Z0-9]{16}\b/,
+];
+
+function containsSecretMaterial(
+  value: string,
+  trustedSecretValues: readonly string[],
+): boolean {
+  if (
+    trustedSecretValues.some((secret) => secret.length > 0 && value.includes(secret))
+  ) {
+    return true;
+  }
+  return LEAK_SECRET_TEXT_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+/**
+ * Redactiert Geheimmaterial aus freiem Text:
+ * 1. exakte vertrauenswürdige Werte (z. B. die credentialReference dieser
+ *    Invocation — niemals selbst persistiert),
+ * 2. bekannte Geheim-Materialformen,
+ * 3. Längenbegrenzung.
+ * Deterministisch; es wird nie der Rohwert geloggt.
+ */
+function redactSecretMaterial(
+  text: string,
+  trustedSecretValues: readonly string[],
+): string {
+  let redacted = text;
+  for (const secret of trustedSecretValues) {
+    if (secret.length > 0 && redacted.includes(secret)) {
+      redacted = redacted.split(secret).join(REDACTED);
+    }
+  }
+  for (const pattern of LEAK_SECRET_TEXT_PATTERNS) {
+    redacted = redacted.replace(new RegExp(pattern.source, `${pattern.flags}g`), REDACTED);
+  }
+  if (redacted.length > MAX_SAFE_TEXT_LENGTH) {
+    redacted = `${redacted.slice(0, MAX_SAFE_TEXT_LENGTH)}…`;
+  }
+  return redacted;
+}
+
+/**
+ * Regierte Referenzen sind opake gov://-Referenzen (bestehende
+ * Repository-Konvention). Fail-closed: beliebige provider-kontrollierte
+ * Strings oder Referenzen mit Geheimmaterial werden verworfen — niemals
+ * durchgereicht.
+ */
+function sanitizeGovernedReference(
+  value: string | undefined | null,
+  trustedSecretValues: readonly string[],
+): string | undefined {
+  if (!value || typeof value !== 'string') {
+    return undefined;
+  }
+  if (
+    value.length === 0 ||
+    value.length > MAX_GOVERNED_REFERENCE_LENGTH ||
+    !/^gov:\/\/[A-Za-z0-9._~:/?#%-]+$/.test(value)
+  ) {
+    return undefined;
+  }
+  if (containsSecretMaterial(value, trustedSecretValues)) {
+    return undefined;
+  }
+  return value;
+}
+
+function sanitizeGovernedReferenceList(
+  values: readonly string[] | undefined,
+  trustedSecretValues: readonly string[],
+): readonly string[] {
+  if (!values) {
+    return [];
+  }
+  return values.flatMap((value) => {
+    const sanitized = sanitizeGovernedReference(value, trustedSecretValues);
+    return sanitized === undefined ? [] : [sanitized];
+  });
+}
+
+function sanitizeSideEffectTextList(
+  values: readonly string[] | undefined,
+  trustedSecretValues: readonly string[],
+): readonly string[] {
+  if (!values) {
+    return [];
+  }
+  return values.map((value) => redactSecretMaterial(String(value), trustedSecretValues));
 }
 
 @Injectable()
@@ -657,7 +812,14 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
         request,
         provider,
         executionProfile,
-        normalizeAdapterRuntimeFailure(request, provider, policyDecision, startedAt, error),
+        normalizeAdapterRuntimeFailure(
+          request,
+          provider,
+          policyDecision,
+          startedAt,
+          error,
+          executionContext.credentialReference,
+        ),
       );
     }
 
@@ -675,20 +837,22 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
           policyDecision,
           startedAt,
           adapterResult.status,
+          executionContext.credentialReference,
         ),
       );
     }
 
     const completedAt = new Date();
 
-    const result = normalizeAdapterResult(
-      request,
-      provider,
-      policyDecision,
-      adapterResult,
-      startedAt,
-      completedAt,
-    );
+        const result = normalizeAdapterResult(
+          request,
+          provider,
+          policyDecision,
+          adapterResult,
+          startedAt,
+          completedAt,
+          executionContext.credentialReference,
+        );
 
     await this.auditInvocationComplete(request, provider, executionProfile, result);
 

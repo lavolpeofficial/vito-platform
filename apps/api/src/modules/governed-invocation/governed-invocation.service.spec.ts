@@ -38,8 +38,9 @@ import {
   type ExecutionPolicyResolutionContext,
   type ExecutionPolicyResolver,
   type ExecutionProfileResolver,
-  type GovernedAdapterRegistry,
-  type GovernedCapabilityInvocationRequest,
+   type GovernedAdapterRegistry,
+   type GovernedAdapterResult,
+   type GovernedCapabilityInvocationRequest,
   type GovernedCapabilityInvocationResult,
   type GovernedExecutionContext,
   type GovernedProviderAdapter,
@@ -1698,5 +1699,263 @@ describe('GovernedInvocationServiceImpl Phase 3E assurance and budget revalidati
 
     expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
     expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+  });
+});
+
+// ===========================================================================
+// EO-01.5 Phase 3F — Output + Error Leakage Boundary Tests
+//
+// Invariante: Credential-/Geheimmaterial darf innerhalb der vertrauens-
+// würdigen Adapter-Grenze existieren, aber NIEMALS durch normalisierte
+// Invocation-Outputs oder audit-sichere Metadaten entweichen — unabhängig
+// davon, ob der Adapter freiwillig saubere Strings liefert.
+//
+// Adversariales Modell: Der Fake-Adapter erhält die ECHTE credentialReference
+// am Boundary und leakt sie gezielt auf jeder Output-Fläche. Zusätzlich
+// werden bekannte Geheim-Materialformen (Bearer/JWT/Token-Präfixe) getestet.
+//
+// Bewusste Grenzen (v0.1): Kein DLP-System — deterministische, begrenzte
+// Regeln: exakte Redaction vertrauenswürdiger Werte, explizite Geheimformen,
+// Schema-Validierung regierter Referenzen, Längenbegrenzung.
+// ===========================================================================
+
+describe('GovernedInvocationServiceImpl Phase 3F output and error leakage boundary', () => {
+  const SECRET_MARKER = 'SECRET_REF_DO_NOT_LEAK_7f3a';
+
+  function buildLeakageHarness(execute: jest.Mock): Harness {
+    // REQUIRED-Credential-Pfad: Die trusted Broker-Reference IST der Marker
+    // und erreicht den Adapter-Boundary als context.credentialReference.
+    const provider = makeProviderDeclaration({
+      credentialRequirement: ProviderCredentialRequirement.REQUIRED,
+    });
+    const broker: CredentialBroker = {
+      getCredentialReference: jest.fn().mockResolvedValue(SECRET_MARKER),
+      validateCredentialReference: jest.fn().mockResolvedValue(true),
+    };
+    return buildHarness({
+      provider,
+      credentialBroker: broker,
+      fakeAdapter: {
+        adapter: { providerType: ProviderType.CLOUD_LLM, execute } as GovernedProviderAdapter,
+        execute,
+      },
+    });
+  }
+
+  function assertMarkerContainedNowhere(harness: Harness, result: GovernedCapabilityInvocationResult): void {
+    const serializedResult = JSON.stringify(result);
+    expect(serializedResult).not.toContain(SECRET_MARKER);
+
+    const auditMock = harness.auditService.record as unknown as jest.Mock;
+    for (const call of auditMock.mock.calls) {
+      expect(JSON.stringify(call)).not.toContain(SECRET_MARKER);
+    }
+  }
+
+  function leakyExecute(
+    resultOverride: Partial<GovernedAdapterResult>,
+  ): jest.Mock {
+    return jest.fn(
+      async (_request: unknown, context: GovernedExecutionContext): Promise<GovernedAdapterResult> => {
+        // Der Marker MUSS am Adapter-Boundary sichtbar gewesen sein — sonst
+        // testet die Assertion nichts.
+        expect(context.credentialReference).toBe(SECRET_MARKER);
+        return {
+          status: AgentExecutionStatus.SUCCEEDED,
+          providerExecutionMetadata: {},
+          completedAt: new Date(),
+          ...resultOverride,
+        };
+      },
+    );
+  }
+
+  // =========================================================================
+  // B. Output References
+  // =========================================================================
+
+  it('secret material in outputReference is not leaked', async () => {
+    const execute = leakyExecute({ outputReference: SECRET_MARKER });
+    const harness = buildLeakageHarness(execute);
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-leak-output-ref-1' }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    // Verworfene/geheime Referenz darf nicht durchgereicht werden.
+    expect(result.outputReference).toBeUndefined();
+    assertMarkerContainedNowhere(harness, result);
+  });
+
+  it('secret material in artifactReferences is not leaked', async () => {
+    const execute = leakyExecute({
+      artifactReferences: ['gov://artifacts/clean-artifact', SECRET_MARKER],
+    });
+    const harness = buildLeakageHarness(execute);
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-leak-artifact-ref-1' }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    // Saubere Referenz bleibt erhalten; geheime Referenz wird verworfen.
+    expect(result.artifactReferences).toEqual(['gov://artifacts/clean-artifact']);
+    expect(result.sideEffectSummary?.artifactsCreated).toEqual([
+      'gov://artifacts/clean-artifact',
+    ]);
+    assertMarkerContainedNowhere(harness, result);
+  });
+
+  it('secret material in evidenceReferences is not leaked', async () => {
+    const execute = leakyExecute({
+      evidenceReferences: ['gov://evidence/clean-evidence', SECRET_MARKER],
+    });
+    const harness = buildLeakageHarness(execute);
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-leak-evidence-ref-1' }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.evidenceReferences).toEqual(['gov://evidence/clean-evidence']);
+    assertMarkerContainedNowhere(harness, result);
+  });
+
+  // =========================================================================
+  // C. Error Surface
+  // =========================================================================
+
+  it('secret material in returned adapter error message is not leaked', async () => {
+    const execute = leakyExecute({
+      status: AgentExecutionStatus.FAILED,
+      error: {
+        code: 'PROVIDER_UPSTREAM_ERROR',
+        message: `upstream provider failed with reference ${SECRET_MARKER} during completion`,
+        retryable: false,
+      },
+    });
+    const harness = buildLeakageHarness(execute);
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-leak-error-msg-1' }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(AgentExecutionStatus.FAILED);
+    expect(result.normalizedError?.reason).toBe('EXECUTION_FAILED');
+    // Diagnose bleibt nützlich, das Geheimmaterial nicht.
+    expect(result.normalizedError?.message).toContain('upstream provider failed');
+    expect(result.normalizedError?.message).not.toContain(SECRET_MARKER);
+    assertMarkerContainedNowhere(harness, result);
+  });
+
+  it('secret material in thrown adapter error is not leaked', async () => {
+    const execute = jest.fn(
+      async (_request: unknown, context: GovernedExecutionContext): Promise<GovernedAdapterResult> => {
+        expect(context.credentialReference).toBe(SECRET_MARKER);
+        throw new Error(`adapter exploded while using reference ${SECRET_MARKER}`);
+      },
+    );
+    const harness = buildLeakageHarness(execute);
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-leak-thrown-error-1' }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(AgentExecutionStatus.FAILED);
+    expect(result.normalizedError?.reason).toBe('EXECUTION_FAILED');
+    expect(result.normalizedError?.message).toContain('adapter exploded');
+    expect(result.normalizedError?.message).not.toContain(SECRET_MARKER);
+    assertMarkerContainedNowhere(harness, result);
+  });
+
+  // =========================================================================
+  // D. Provider Metadata / Side Effects
+  // =========================================================================
+
+  it('secret material in provider execution metadata is sanitized', async () => {
+    const execute = leakyExecute({
+      providerExecutionMetadata: {
+        credentialReference: SECRET_MARKER,
+        token: SECRET_MARKER,
+        nested: { apiKey: SECRET_MARKER },
+      },
+    });
+    const harness = buildLeakageHarness(execute);
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-leak-metadata-1' }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    assertMarkerContainedNowhere(harness, result);
+  });
+
+  it('secret material in side effect fields does not reach audit output', async () => {
+    const execute = leakyExecute({
+      providerExecutionMetadata: {
+        sideEffects: {
+          filesCreated: [`/tmp/session/${SECRET_MARKER}.json`],
+          filesModified: [`/workspace/report-${SECRET_MARKER}.md`],
+          filesDeleted: [],
+          commandsExecuted: [`echo ${SECRET_MARKER}`],
+          networkCalls: [
+            {
+              destination: `https://api.example.com/callback?ref=${SECRET_MARKER}`,
+              method: 'GET',
+              timestamp: new Date(),
+            },
+          ],
+        },
+      },
+    });
+    const harness = buildLeakageHarness(execute);
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-leak-side-effects-1' }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+
+    const summary = result.sideEffectSummary!;
+    expect(summary.filesCreated[0]).toContain('/tmp/session/');
+    expect(summary.filesCreated[0]).toContain('[REDACTED]');
+    expect(summary.filesModified[0]).toContain('[REDACTED]');
+    expect(summary.commandsExecuted[0]).toContain('[REDACTED]');
+    expect(summary.networkCalls?.[0]?.destination).toContain('[REDACTED]');
+
+    expect(summary.filesCreated.join(' ')).not.toContain(SECRET_MARKER);
+    expect(summary.filesModified.join(' ')).not.toContain(SECRET_MARKER);
+    expect(summary.commandsExecuted.join(' ')).not.toContain(SECRET_MARKER);
+    expect((summary.networkCalls ?? []).map((n) => n.destination).join(' ')).not.toContain(SECRET_MARKER);
+
+    assertMarkerContainedNowhere(harness, result);
+  });
+
+  it('known secret shapes are redacted from free-form error text without exact-value knowledge', async () => {
+    // Generische Formen (unabhängig vom konkreten Marker) müssen ebenfalls
+    // nicht entweichen — z. B. ein Bearer-Token im Fehlertext des Adapters.
+    const TOKEN = `Bearer ${'c'.repeat(44)}`;
+    const execute = jest.fn(
+      async (): Promise<GovernedAdapterResult> => {
+        throw new Error(`provider rejected credentials ${TOKEN}`);
+      },
+    );
+    const harness = buildLeakageHarness(execute);
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-leak-token-shape-1' }),
+    );
+
+    expect(result.status).toBe(AgentExecutionStatus.FAILED);
+    expect(result.normalizedError?.message).toContain('provider rejected credentials [REDACTED]');
+    expect(result.normalizedError?.message).not.toContain(TOKEN);
+    expect(JSON.stringify(result)).not.toContain(TOKEN);
   });
 });
