@@ -208,6 +208,45 @@ enum ProviderType {
   LOCAL_TOOL
 }
 
+/// Credential requirement state of a provider (EO-01.5).
+/// UNKNOWN must fail closed for productive invocation; missing data is
+/// never silently mapped to NOT_REQUIRED.
+enum ProviderCredentialRequirement {
+  REQUIRED
+  NOT_REQUIRED
+  UNKNOWN
+}
+
+/// Interner Claim-State der Governed-Idempotenz-Grenze (EO-01.5 Phase 3H.1).
+/// Kein zweiter Lifecycle-Motor: Claims werden NIE freigegeben.
+enum GovernedInvocationClaimState {
+  IN_PROGRESS
+  COMPLETED
+  TIMED_OUT_UNKNOWN
+  FAILED_UNKNOWN
+}
+
+/// Status einer intern initiierten governed Operation (B2a).
+enum GovernedOperationEnvelopeStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+/// Ausführungsstatus einer einzelnen Provider-Ausführung (Spiegel des
+/// EO-Contracts AgentExecutionStatus).
+enum AgentExecutionStatus {
+  QUEUED
+  STARTING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  TIMED_OUT
+  CANCELLED
+  POLICY_BLOCKED
+  QUOTA_BLOCKED
+}
+
 // ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
@@ -232,6 +271,8 @@ model Organization {
   agentProviders           AgentProvider[]
   providerRoutingDecisions ProviderRoutingDecision[]
   providerCapabilities     ProviderCapability[]
+  governedOperationEnvelopes GovernedOperationEnvelope[]
+  governedExecutionRecords   GovernedExecutionRecord[]
 
   @@map("organizations")
 }
@@ -488,6 +529,7 @@ model AgentProvider {
   displayName           String
   providerType          ProviderType         @default(CLOUD_LLM)
   status                ProviderStatus       @default(ACTIVE)
+  credentialRequirement ProviderCredentialRequirement @default(UNKNOWN)
   modelFamily           String?
   modelName             String?
   modelCode             String?
@@ -564,4 +606,80 @@ model ProviderRoutingDecision {
   @@index([organizationId, workflowRunId])
   @@index([selectedProviderId])
   @@map("provider_routing_decisions")
+}
+
+/// Intern initiierte governed Operation (B2a): liefert die vertrauenswürdige
+/// workflowRunId-Identität für Aufrufe der eingefrorenen EO-01.5
+/// GovernedInvocationService-Schnittstelle, ohne Engineering-Workflow-Tabellen
+/// zu überfrachten. Kein Task-Dispatch, keine Human-Gate-Persistenz.
+model GovernedOperationEnvelope {
+  id            String                          @id @default(uuid())
+  organizationId String
+  purposeCode   String
+  correlationId String?
+  status        GovernedOperationEnvelopeStatus @default(PENDING)
+  createdAt     DateTime                        @default(now())
+  updatedAt     DateTime                        @updatedAt
+
+  organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  executions   GovernedExecutionRecord[]
+
+  @@index([organizationId])
+  @@index([correlationId])
+  @@map("governed_operation_envelopes")
+}
+
+/// Claim-Eintrag der Governed-Idempotenz-Grenze (EO-01.5 Phase 3H.1).
+///
+/// Dedup-Primärschlüssel ist die LOGISCHE OPERATION (logicalOperationKey),
+/// trusted abgeleitet und inklusive organizationId-Feld (length-präfixierte
+/// Kodierung) — ein fremder Tenant kann keinen kollidierenden Schlüssel
+/// erzeugen. Die Attempt-Identität (invocationId) ist ebenfalls UNIQUE:
+/// dieselbe invocationId unter einem anderen logischen Schlüssel ist
+/// CONTEXT_CONFLICT. Bewusst OHNE eigenes organizationId-Feld: die
+/// eingefrorene Store-Schnittstelle führt keine Tenant-ID; die Tenant-
+/// Bindung steckt unveränderlich im Schlüssel selbst.
+/// Claims werden NIE freigegeben (kein Release-Pfad).
+model GovernedInvocationClaim {
+  id                  String                       @id @default(uuid())
+  logicalOperationKey String                       @unique
+  invocationId        String                       @unique
+  contextFingerprint  String
+  state               GovernedInvocationClaimState @default(IN_PROGRESS)
+  claimedAt           DateTime                     @default(now())
+  updatedAt           DateTime                     @updatedAt
+
+  @@map("governed_invocation_claims")
+}
+
+/// Persistiertes Ergebnis einer governed Invocation (Evidence Ledger).
+/// Alle JSON-Strukturen sind bereits durch EO-01.5 sanitisierte Formen —
+/// dieser Datensatz speichert KEINE Rohinhalte, Secrets oder Umgebungen.
+model GovernedExecutionRecord {
+  id                      String                @id
+  envelopeId              String
+  organizationId          String
+  workflowRunId           String
+  workflowStepRunId       String
+  capabilityCode          String
+  providerId              String
+  status                  AgentExecutionStatus
+  startedAt               DateTime
+  completedAt             DateTime?
+  durationMs              Int?
+  outputReference         String?
+  artifactReferences      Json?
+  normalizedError         Json?
+  policyDecisionReference String
+  sideEffectSummary       Json?
+  usageMetadata           Json?
+  createdAt               DateTime              @default(now())
+
+  envelope     GovernedOperationEnvelope @relation(fields: [envelopeId], references: [id], onDelete: Restrict)
+  organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([envelopeId])
+  @@index([organizationId, workflowRunId])
+  @@map("governed_execution_records")
 }
