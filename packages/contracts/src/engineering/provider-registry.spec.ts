@@ -13,6 +13,7 @@ import {
   isProviderRoutable,
   ProviderStatus,
   ProviderHealthStatus,
+  ProviderCredentialRequirement,
   type ProviderDeclaration,
 } from './provider-registry.js';
 import {
@@ -33,6 +34,7 @@ function makeDeclaration(overrides: Partial<ProviderDeclaration> = {}): Provider
     capabilityAssignments: [{ capabilityCode: 'CODE_BUILD', isEnabled: true }],
     healthStatus: ProviderHealthStatus.HEALTHY,
     quotaStatus: 'AVAILABLE' as any,
+    credentialRequirement: ProviderCredentialRequirement.UNKNOWN,
     costMetadata: {},
     assuranceLevels: [],
     metadata: {},
