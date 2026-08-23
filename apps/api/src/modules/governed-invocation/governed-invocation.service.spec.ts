@@ -34,6 +34,10 @@ import {
   providerSupportsCapability,
   ReleaseGateStatus,
   validateHumanGateBinding,
+  buildGovernedInvocationFingerprint,
+  buildGovernedLogicalOperationKey,
+  type GovernedContextIdentityFields,
+  type GovernedOperationIdentityFields,
   type GovernedInvocationClaimResult,
   type GovernedInvocationClaimState,
   type GovernedInvocationIdempotencyStore,
@@ -2934,6 +2938,10 @@ describe('GovernedInvocationServiceImpl Phase 3H idempotency boundary', () => {
     { dimension: 'workflowStepRunId', overrides: { workflowStepRunId: 'wf-step-CONFLICT' } },
     { dimension: 'requestedAction', overrides: { requestedAction: ExecutionAction.CREATE_FILE } },
     { dimension: 'inputReference', overrides: { inputReference: 'gov://input/CONFLICT' } },
+    {
+      dimension: 'requestedPath',
+      overrides: { requestedPath: `${WORKTREE_ROOT}/src/generated/other-target.ts` },
+    },
   ])(
     'same invocation id with conflicting $dimension fails closed',
     async ({ overrides }) => {
@@ -3067,5 +3075,220 @@ describe('GovernedInvocationServiceImpl Phase 3H idempotency boundary', () => {
 
     expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
     expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ===========================================================================
+// EO-01.5 Phase 3H.2 — Logical Operation Key Semantics
+//
+// Korrektur zu 3H.1: logicalOperationKey und contextFingerprint dienen
+// VERSCHIEDENEN Zwecken und teilen sich daher NICHT mehr dieselbe Feldmenge.
+//
+// - GOVERNED CONTEXT FINGERPRINT (v1|…): vollständige Ausführungs-Kontext-
+//   bindung inkl. Ausführungsmechanismus (providerId, executionProfile,
+//   assuranceLevel) — Replay-/Forensik-Evidenz.
+// - LOGICAL OPERATION KEY (logop-v1|…): stabile Identität der konsequenziellen
+//   SIDE EFFECT-Operation. Enthält KEINE Ausführungsmechanismus-Felder:
+//   Provider-/Profil-/Assurance-Wechsel dürfen Duplicate-Schutz niemals
+//   zurücksetzen. Enthält dafür die autoritative Action-Ziel-Referenz
+//   (requestedPath bzw. requestedCommand, soweit modelliert) sowie
+//   inputReference als operationales Eingabe-Unterscheidungsmerkmal.
+//
+// Identitäts-Trennung bleibt dreistufig:
+// ATTEMPT = invocationId | LOGICAL OPERATION = logop-v1-Schlüssel |
+// CONTEXT BINDING = v1-Fingerprint.
+// ===========================================================================
+
+describe('Phase 3H.2 logical operation key semantics', () => {
+  /** Consequentieller, policy-erlaubter Fall: BUILDER + WRITE_FILE im Worktree. */
+  function makeWriteFileRequest(
+    overrides: Record<string, any> = {},
+  ): GovernedCapabilityInvocationRequest {
+    return makeInvocationRequest({
+      requestedAction: ExecutionAction.WRITE_FILE,
+      requestedPath: `${WORKTREE_ROOT}/src/generated/report.ts`,
+      ...overrides,
+    });
+  }
+
+  /** Vertrauenswürdige Basis-Feldmenge der logischen Operation (keine Mechanismus-Felder). */
+  function makeOperationIdentityFields(
+    overrides: Partial<GovernedOperationIdentityFields> = {},
+  ): GovernedOperationIdentityFields {
+    return {
+      organizationId: ORG_A,
+      workflowRunId: WORKFLOW_RUN_ID,
+      workflowStepRunId: WORKFLOW_STEP_RUN_ID,
+      capabilityCode: CAPABILITY_CODE,
+      requestedAction: ExecutionAction.WRITE_FILE,
+      ...overrides,
+    };
+  }
+
+  /** Vollständige Fingerprint-Feldmenge (Kontextbindung inkl. Mechanismus). */
+  function makeContextIdentityFields(
+    overrides: Partial<GovernedContextIdentityFields> = {},
+  ): GovernedContextIdentityFields {
+    return {
+      ...makeOperationIdentityFields(),
+      providerId: 'provider-1',
+      executionProfile: ExecutionProfile.BUILDER,
+      ...overrides,
+    };
+  }
+
+  it('logical operation key is provider-independent while context fingerprint binds the provider', () => {
+    const keyA = buildGovernedLogicalOperationKey(makeOperationIdentityFields());
+    const keyB = buildGovernedLogicalOperationKey(
+      // "Anderer Provider" ist auf Key-Ebene gar nicht repräsentiert —
+      // der Builder nimmt providerId strukturell NICHT entgegen.
+      makeOperationIdentityFields(),
+    );
+    expect(keyA).toBe(keyB);
+    expect(keyA).toMatch(/^logop-v1\|/);
+    expect(keyA).not.toContain('provider');
+
+    const fingerprintA = buildGovernedInvocationFingerprint(
+      makeContextIdentityFields({ providerId: 'provider-1' }),
+    );
+    const fingerprintB = buildGovernedInvocationFingerprint(
+      makeContextIdentityFields({ providerId: 'provider-2' }),
+    );
+    expect(fingerprintA).not.toBe(fingerprintB);
+    expect(fingerprintA).toContain('prov:');
+    expect(fingerprintB).toContain('prov:');
+
+    // Getrennte Namespaces: Schlüssel und Fingerprint können nie kreuzweise
+    // verglichen/vermischt werden.
+    expect(keyA).not.toBe(fingerprintA);
+  });
+
+  it('different requested paths produce different logical operation keys', () => {
+    const keyA = buildGovernedLogicalOperationKey(
+      makeOperationIdentityFields({
+        requestedPath: `${WORKTREE_ROOT}/src/generated/report-a.ts`,
+      }),
+    );
+    const keyB = buildGovernedLogicalOperationKey(
+      makeOperationIdentityFields({
+        requestedPath: `${WORKTREE_ROOT}/src/generated/report-b.ts`,
+      }),
+    );
+
+    expect(keyA).not.toBe(keyB);
+
+    // Determinismus: identische Felder ⇒ identischer Schlüssel; kein
+    // unkontrolliertes Payload-JSON, keine Zeitstempel.
+    expect(
+      buildGovernedLogicalOperationKey(
+        makeOperationIdentityFields({
+          requestedPath: `${WORKTREE_ROOT}/src/generated/report-a.ts`,
+        }),
+      ),
+    ).toBe(keyA);
+  });
+
+  it('authoritative requested commands produce distinct logical operation keys', () => {
+    const gitStatusKey = buildGovernedLogicalOperationKey(
+      makeOperationIdentityFields({
+        requestedAction: ExecutionAction.RUN_COMMAND,
+        requestedCommand: 'git status',
+      }),
+    );
+    const npmTestKey = buildGovernedLogicalOperationKey(
+      makeOperationIdentityFields({
+        requestedAction: ExecutionAction.RUN_COMMAND,
+        requestedCommand: 'npm test',
+      }),
+    );
+
+    // Materiell verschiedene Side Effects ⇒ verschiedene Operationen.
+    expect(gitStatusKey).not.toBe(npmTestKey);
+
+    // Pfad-Freiheit für Command-Aktionen: requestedPath gehört zur
+    // Datei-Aktion, nicht zur Command-Aktion — hier irrelevant und
+    // bewusst nicht im Schlüssel.
+    expect(gitStatusKey).toContain('cmd:10:git status');
+  });
+
+  it('same logical operation routed to a different provider remains duplicate', async () => {
+    // Phase 3H.2 Kernbefund: Providerwechsel darf Duplicate-Schutz nicht
+    // zurücksetzen. Zwei Provider desselben Typs bedienen denselben Fake-
+    // Adapter; die logische Operation (gleiche org/run/step/cap/action/
+    // target/input, andere invocationId) bleibt EINE.
+    const dualProviderResolver = {
+      resolve: jest.fn(async (providerId: string, organizationId: string) =>
+        organizationId === ORG_A ? makeProviderDeclaration({ id: providerId }) : null,
+      ),
+    };
+    const harness = buildHarness({ providerResolver: dualProviderResolver });
+
+    const attemptA = await harness.service.invoke(
+      makeWriteFileRequest({ invocationId: 'attempt-A', providerId: 'provider-1' }),
+    );
+    expect(attemptA.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+
+    const attemptB = await harness.service.invoke(
+      makeWriteFileRequest({ invocationId: 'attempt-B', providerId: 'provider-2' }),
+    );
+
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    expect(attemptB.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(attemptB.normalizedError?.reason).toBe('INVOCATION_DUPLICATE');
+    expect(attemptB.normalizedError?.executionOutcome).toBe(
+      ExecutionOutcome.POLICY_BLOCKED,
+    );
+
+    // Identischer logischer Schlüssel trotz unterschiedlicher Provider;
+    // die Fingerprints unterscheiden sich NUR als Forensik-Evidenz —
+    // dieser Unterschied ist KEINE Ausführungsberechtigung.
+    expect(harness.idempotencyStore.claim).toHaveBeenCalledTimes(2);
+    const [keyA, , fingerprintA] = harness.idempotencyStore.claim.mock.calls[0];
+    const [keyB, , fingerprintB] = harness.idempotencyStore.claim.mock.calls[1];
+    expect(keyB).toBe(keyA);
+    expect(fingerprintB).not.toBe(fingerprintA);
+
+    // Ownership verbleibt beim Originalversuch.
+    expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledTimes(1);
+  });
+
+  it('different requested paths execute independently as distinct logical operations', async () => {
+    // Positive Kontrolle zur Ziel-Identität: verschiedene autoritative
+    // Write-Targets sind materiell verschiedene Operationen — unabhängig
+    // ausführbar, ohne globale Sperre.
+    const harness = buildHarness();
+
+    const first = await harness.service.invoke(
+      makeWriteFileRequest({
+        invocationId: 'inv-path-op-1',
+        requestedPath: `${WORKTREE_ROOT}/src/generated/report-a.ts`,
+      }),
+    );
+    const second = await harness.service.invoke(
+      makeWriteFileRequest({
+        invocationId: 'inv-path-op-2',
+        requestedPath: `${WORKTREE_ROOT}/src/generated/report-b.ts`,
+      }),
+    );
+
+    expect(first.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(second.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(2);
+
+    expect(harness.idempotencyStore.claim).toHaveBeenCalledTimes(2);
+    const [keyOne] = harness.idempotencyStore.claim.mock.calls[0];
+    const [keyTwo] = harness.idempotencyStore.claim.mock.calls[1];
+    expect(keyTwo).not.toBe(keyOne);
+    expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledWith(
+      keyOne,
+      'inv-path-op-1',
+      'COMPLETED',
+    );
+    expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledWith(
+      keyTwo,
+      'inv-path-op-2',
+      'COMPLETED',
+    );
   });
 });

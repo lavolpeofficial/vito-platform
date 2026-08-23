@@ -958,19 +958,21 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
       governedInputPayload: request.governedInputPayload,
     };
 
-    // Phase 3H/3H.1 Claim-Gate: so spät wie möglich, unmittelbar vor dem
-    // einzigen produktiven adapter.execute(). Identitäts-Trennung:
+    // Phase 3H/3H.1/3H.2 Claim-Gate: so spät wie möglich, unmittelbar vor
+    // dem einzigen produktiven adapter.execute(). Identitäts-Trennung:
     // - ATTEMPT IDENTITY: request.invocationId (Besitzer-/Audit-Evidenz)
     // - LOGICAL OPERATION IDENTITY: trusted abgeleiteter Operationsschlüssel
-    //   (Dedup-Primärschlüssel — ein Retry mit NEUER invocationId auf
-    //   derselben logischen Operation ist DUPLICATE, kein Neubezug)
-    // - GOVERNED CONTEXT FINGERPRINT: exakte Kontextbindung/Konfliktnachweis
-    // DUPLICATE und CONTEXT_CONFLICT sind fail-closed: kein zweiter Side
-    // Effect, kein Attacker-Reuse einer Identität für fremden Kontext.
+    //   OHNE Ausführungsmechanismus-Felder (Provider/Profil/Assurance) —
+    //   dafür MIT autoritativer Ziel-Referenz (requestedPath/requestedCommand)
+    //   und inputReference. Ein Retry mit neuer invocationId ODER anderem
+    //   Provider auf derselben Operation ist DUPLICATE.
+    // - GOVERNED CONTEXT FINGERPRINT: vollständige Kontextbindung inkl.
+    //   Mechanismus-Felder; Differenzen sind Forensik-Evidenz, niemals
+    //   Ausführungsberechtigung.
     let executionClaimed = false;
     let claimedLogicalOperationKey: string | undefined;
     if (this.dependencies.idempotencyStore) {
-      const identityFields = {
+      const contextFingerprint = buildGovernedInvocationFingerprint({
         organizationId: request.organizationId,
         workflowRunId: request.workflowRunId,
         workflowStepRunId: request.workflowStepRunId,
@@ -980,9 +982,17 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
         executionProfile,
         assuranceLevel: request.assuranceLevel,
         inputReference: request.inputReference,
-      };
-      const contextFingerprint = buildGovernedInvocationFingerprint(identityFields);
-      const logicalOperationKey = buildGovernedLogicalOperationKey(identityFields);
+      });
+      const logicalOperationKey = buildGovernedLogicalOperationKey({
+        organizationId: request.organizationId,
+        workflowRunId: request.workflowRunId,
+        workflowStepRunId: request.workflowStepRunId,
+        capabilityCode: request.capabilityCode,
+        requestedAction: request.requestedAction,
+        requestedPath: request.requestedPath,
+        requestedCommand: request.requestedCommand,
+        inputReference: request.inputReference,
+      });
 
       let claimResult: Awaited<ReturnType<GovernedInvocationIdempotencyStore['claim']>>;
       try {

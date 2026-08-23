@@ -119,6 +119,7 @@ export {
   sanitizeProviderExecutionMetadata,
   sanitizeErrorProviderMetadata,
   type GovernedContextIdentityFields,
+  type GovernedOperationIdentityFields,
   type GovernedInvocationClaimState,
   type GovernedInvocationExecutionClaim,
   type GovernedInvocationClaimResult,

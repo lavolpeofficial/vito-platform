@@ -738,11 +738,23 @@ export interface GovernedInvocationIdempotencyStore {
 }
 
 /**
- * Shared length-prefixed encoder for governed identity fields.
- * Explicit controlled scalar fields only — no arbitrary JSON.stringify;
- * label:len:value encoding prevents field-value delimiter merging.
+ * Gemeinsamer length-präfixierter Skalar-Encoder für governed Identitäten.
+ * Nur explizite, kontrollierte Skalar-Felder — kein unkontrolliertes
+ * JSON.stringify; label:len:value-Kodierung verhindert das Verschmelzen
+ * von Feldwerten mit der Struktur (Delimiter-Injection-Feldgleichzug).
  */
-function encodeGovernedContextFields(fields: {
+function appendLengthPrefixed(parts: string[], label: string, value: string | undefined): void {
+  if (value === undefined) return;
+  parts.push(`${label}:${value.length}:${value}`);
+}
+
+/**
+ * Feldmenge des GOVERNED CONTEXT FINGERPRINT (Phase 3H / geschärft in
+ * Phase 3H.2): vollständige Ausführungs-Kontextbindung inklusive
+ * Ausführungsmechanismus (Provider, Profil, Assurance). Rolle: exakte
+ * Kontextbindung, Replay-/Forensik-Evidenz.
+ */
+export interface GovernedContextIdentityFields {
   readonly organizationId: string;
   readonly workflowRunId: string;
   readonly workflowStepRunId: string;
@@ -752,68 +764,93 @@ function encodeGovernedContextFields(fields: {
   readonly executionProfile: ExecutionProfile;
   readonly assuranceLevel?: string;
   readonly inputReference?: string;
-}): string[] {
-  const parts: string[] = [];
-
-  const append = (label: string, value: string | undefined): void => {
-    if (value === undefined) return;
-    parts.push(`${label}:${value.length}:${value}`);
-  };
-
-  append('org', fields.organizationId);
-  append('run', fields.workflowRunId);
-  append('step', fields.workflowStepRunId);
-  append('cap', fields.capabilityCode);
-  append('prov', fields.providerId);
-  append('action', fields.requestedAction);
-  append('profile', fields.executionProfile);
-  if (fields.assuranceLevel !== undefined) {
-    append('al', fields.assuranceLevel);
-  }
-  if (fields.inputReference !== undefined) {
-    append('in', fields.inputReference);
-  }
-
-  return parts;
 }
 
-/** Field set shared by fingerprint and logical-operation-key builders. */
-export type GovernedContextIdentityFields = Parameters<
-  typeof encodeGovernedContextFields
->[0];
+/**
+ * Feldmenge des LOGICAL OPERATION KEY (Phase 3H.2): stabile Identität der
+ * konsequenziellen Side-Effect-Operation. Bewusst OHNE Ausführungs-
+* mechanismus-Felder (providerId/executionProfile/assuranceLevel) — ein
+ * Provider- oder Governance-Wechsel darf Duplicate-Schutz nie zurücksetzen.
+ * Enthält die autoritative Action-Ziel-Referenz, soweit im Vertrag
+ * modelliert (requestedPath für Datei-Aktionen, requestedCommand für
+ * Command-Aktionen), sowie inputReference als operationales Eingabe-
+ * Unterscheidungsmerkmal. KEINE Payload-Serialisierung, KEINE Zeitstempel,
+ * NIEMALS invocationId.
+ */
+export interface GovernedOperationIdentityFields {
+  readonly organizationId: string;
+  readonly workflowRunId: string;
+  readonly workflowStepRunId: string;
+  readonly capabilityCode: string;
+  readonly requestedAction: ExecutionAction;
+  /** Autoritatives Datei-Ziel (Datei-Aktionen), falls modelliert. */
+  readonly requestedPath?: string;
+  /** Autoritativer Command (RUN_COMMAND), falls modelliert. */
+  readonly requestedCommand?: string;
+  /** Autoritative operationale Eingabe-Referenz, falls vorhanden. */
+  readonly inputReference?: string;
+}
 
 /**
  * Kanonischer, deterministischer Kontext-Fingerprint einer governed
- * Invocation (Phase 3H / 3H.1).
+ * Invocation (Phase 3H / 3H.2).
  *
- * Bewusst KEIN JSON.stringify unkontrollierter Objekte: nur explizite,
- * kontrollierte Skalar-Felder mit length-präfixierter Kodierung, sodass
- * Feldwerte die Struktur nicht verschmelzen können (kein
- * Delimiter-Injection-Feldgleichzug). Die Bindung des Claims an diesen
- * Fingerprint verhindert Attacker-Reuse einer invocationId für einen
- * anderen governed Kontext. Rolle: GOVERNED CONTEXT FINGERPRINT — exakte
- * Kontextbindung und Konflikt-/Replay-Evidenz.
+ * Längere/strengere Bindung als der Operationsschlüssel: zusätzlich
+ * providerId, executionProfile und assuranceLevel. Derselbe logische
+ * Vorgang unter anderem Ausführungskontext bleibt an der logischen Ebene
+ * DUPLICATE — die Fingerprint-Differenz dient ausschließlich als Forensik-
+ * Evidenz und ist NIEMALS Ausführungsberechtigung. Kein JSON.stringify;
+ * length-präfixierte Kodierung gegen Delimiter-Injection.
  */
 export function buildGovernedInvocationFingerprint(
   fields: GovernedContextIdentityFields,
 ): string {
-  return ['v1', ...encodeGovernedContextFields(fields)].join('|');
+  const parts: string[] = ['v1'];
+  appendLengthPrefixed(parts, 'org', fields.organizationId);
+  appendLengthPrefixed(parts, 'run', fields.workflowRunId);
+  appendLengthPrefixed(parts, 'step', fields.workflowStepRunId);
+  appendLengthPrefixed(parts, 'cap', fields.capabilityCode);
+  appendLengthPrefixed(parts, 'prov', fields.providerId);
+  appendLengthPrefixed(parts, 'action', fields.requestedAction);
+  appendLengthPrefixed(parts, 'profile', fields.executionProfile);
+  if (fields.assuranceLevel !== undefined) {
+    appendLengthPrefixed(parts, 'al', fields.assuranceLevel);
+  }
+  if (fields.inputReference !== undefined) {
+    appendLengthPrefixed(parts, 'in', fields.inputReference);
+  }
+  return parts.join('|');
 }
 
 /**
  * Stabiler, trusted abgeleiteter Schlüssel der LOGISCHEN OPERATION
- * (Phase 3H.1). Primärschlüssel der Duplicate-Prävention: dieselbe
- * governed logische Operation ergibt denselben Schlüssel — unabhängig
- * davon, welche invocationId der Aufrufer wählt. Keine mutierbaren
- * Zeitstempel, kein unkontrolliertes JSON.stringify; dieselben
- * kontrollierten Felder wie der Kontext-Fingerprint, aber eigener
- * Namespace-Präfix, sodass die beiden Identitäten nie vermischt oder
- * kreuzweise verglichen werden können.
+ * (Phase 3H.1, Feldsemantik geschärft in Phase 3H.2).
+ *
+ * Primärschlüssel der Duplicate-Prävention: derselbe consequential Vorgang
+ * ergibt denselben Schlüssel — unabhängig von invocationId (Attempt),
+ * Provider, ExecutionProfile oder AssuranceLevel (Ausführungsmechanismus).
+ * Material verschiedene Side-Effect-Ziele ergeben verschiedene Schlüssel:
+ * autoritatives requestedPath/requestedCommand (je nach Aktionsart) sowie
+ * inputReference. Version-präfixiert, deterministisch, keine mutierbaren
+ * Zeitstempel, kein unkontrolliertes JSON.stringify; eigener Namespace
+ * ('logop-v1'), sodass Schlüssel und Kontext-Fingerprint nie kreuzweise
+ * vergleichbar sind.
  */
 export function buildGovernedLogicalOperationKey(
-  fields: GovernedContextIdentityFields,
+  fields: GovernedOperationIdentityFields,
 ): string {
-  return ['logop-v1', ...encodeGovernedContextFields(fields)].join('|');
+  const parts: string[] = ['logop-v1'];
+  appendLengthPrefixed(parts, 'org', fields.organizationId);
+  appendLengthPrefixed(parts, 'run', fields.workflowRunId);
+  appendLengthPrefixed(parts, 'step', fields.workflowStepRunId);
+  appendLengthPrefixed(parts, 'cap', fields.capabilityCode);
+  appendLengthPrefixed(parts, 'action', fields.requestedAction);
+  // Autoritative Ziel-Referenz je Aktionsart; nur EIN Zielfeld ist je
+  // Operation maßgeblich, beide Labels bleiben strukturell getrennt.
+  appendLengthPrefixed(parts, 'path', fields.requestedPath);
+  appendLengthPrefixed(parts, 'cmd', fields.requestedCommand);
+  appendLengthPrefixed(parts, 'in', fields.inputReference);
+  return parts.join('|');
 }
 
 /**
