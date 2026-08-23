@@ -18,6 +18,7 @@ import {
   ProviderType,
   ProviderQuotaStatus,
   providerSupportsCapability,
+  providerSupportsAssuranceLevel,
   isProviderRoutable,
   ExecutionProfile,
   ExecutionAction,
@@ -796,6 +797,36 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
       throw new Error(
         `PROVIDER_NOT_ELIGIBLE: Provider quota status ${provider.quotaStatus} is not eligible for productive invocation`,
       );
+    }
+
+    // Assurance-Revalidation mit der bestehenden EO-01.3-Semantik
+    // (providerSupportsAssuranceLevel): leere assuranceLevels bleiben
+    // kompatibel; explizite Level verlangen Mitgliedschaft.
+    if (
+      request.assuranceLevel !== undefined &&
+      !providerSupportsAssuranceLevel(provider, request.assuranceLevel)
+    ) {
+      throw new Error(
+        `PROVIDER_NOT_ELIGIBLE: Provider does not support the requested assurance level ${request.assuranceLevel}`,
+      );
+    }
+
+    // Budget-/Kosten-Revalidation gemäß EO-01.3 Phase-6-Semantik:
+    // nur explizite estimatedCostMinorUnits sind monetäre Authorität —
+    // costScore ist und bleibt reines Ranking-Signal.
+    const maxCostMinorUnits = request.executionBudget.maxCostMinorUnits;
+    if (maxCostMinorUnits !== undefined) {
+      const estimatedCost = provider.estimatedCostMinorUnits;
+      if (estimatedCost === undefined || estimatedCost === null) {
+        throw new Error(
+          'PROVIDER_NOT_ELIGIBLE: Provider estimated cost is unknown while an execution budget is bounded',
+        );
+      }
+      if (estimatedCost > maxCostMinorUnits) {
+        throw new Error(
+          `PROVIDER_NOT_ELIGIBLE: Provider estimated cost ${estimatedCost} exceeds the bounded execution budget of ${maxCostMinorUnits}`,
+        );
+      }
     }
 
     return provider;

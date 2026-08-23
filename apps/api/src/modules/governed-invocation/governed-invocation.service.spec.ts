@@ -1542,3 +1542,161 @@ describe('GovernedInvocationServiceImpl Phase 3D provider eligibility revalidati
     expect(harness.adapterRegistry.getSupportedProviderTypes()).toHaveLength(1);
   });
 });
+
+// ===========================================================================
+// EO-01.5 Phase 3E — Assurance + Budget Revalidation Tests
+//
+// Invariante: Auch Assurance-Kompatibilität und Budget-/Kosten-Eligibility
+// sind KEINE permanenten Authorization-Token aus dem Routing. Die CURRENT
+// Declaration muss beide Dimensionen unmittelbar vor adapter.execute()
+// weiterhin erfüllen — deterministisch, ohne Re-Routing, Ranking oder
+// Fallback.
+//
+// Bewahrte EO-01.3-Semantik:
+// - Assurance (providerSupportsAssuranceLevel): leere assuranceLevels =>
+//   kompatibel (v0.1 Registration fail-open); sonst explizite Mitgliedschaft.
+// - Budget: kein maxCostMinorUnits => Check blockiert nicht;
+//   unbekannte Kosten + gesetztes Budget => fail-closed;
+//   estimated > max => reject; estimated <= max => eligible;
+//   costScore ist NIEMALS monetäre Budget-Authorität.
+// ===========================================================================
+
+describe('GovernedInvocationServiceImpl Phase 3E assurance and budget revalidation', () => {
+  // =========================================================================
+  // A. Assurance Revalidation
+  // =========================================================================
+
+  it('provider without requested assurance level is rejected before adapter execution', async () => {
+    // Sonst voll eligibility-geeigneter Provider; AL5 ist nicht deklariert.
+    const provider = makeProviderDeclaration({
+      assuranceLevels: ['AL1', 'AL2', 'AL3', 'AL4'],
+    });
+    const harness = buildHarness({ provider });
+
+    const request = makeInvocationRequest({
+      invocationId: 'inv-assurance-unsupported-1',
+      assuranceLevel: 'AL5',
+    });
+
+    await expect(harness.service.invoke(request)).rejects.toThrow(
+      'PROVIDER_NOT_ELIGIBLE',
+    );
+
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(harness.adapterRegistry.getSupportedProviderTypes()).toHaveLength(1);
+  });
+
+  it('provider supporting requested assurance level may proceed', async () => {
+    const provider = makeProviderDeclaration();
+    const harness = buildHarness({ provider });
+
+    const request = makeInvocationRequest({
+      invocationId: 'inv-assurance-supported-1',
+      assuranceLevel: 'AL2',
+    });
+
+    const result = await harness.service.invoke(request);
+
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    const [, executionContext] = harness.fakeAdapter.execute.mock.calls[0];
+    expect(executionContext.policyDecision.allowed).toBe(true);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+  });
+
+  it('empty provider assurance levels remain compatible with requested level', async () => {
+    // EO-01.3-Semantik bewahren: leere assuranceLevels => kompatibel
+    // (v0.1 Registration fail-open). Keine strengere EO-01.5-Regel erfinden.
+    const provider = makeProviderDeclaration({ assuranceLevels: [] });
+    const harness = buildHarness({ provider });
+
+    const request = makeInvocationRequest({
+      invocationId: 'inv-assurance-empty-levels-1',
+      assuranceLevel: 'AL9',
+    });
+
+    const result = await harness.service.invoke(request);
+
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+  });
+
+  // =========================================================================
+  // B. Budget / Cost Revalidation
+  // =========================================================================
+
+  it('provider exceeding execution budget is rejected before adapter execution', async () => {
+    const provider = makeProviderDeclaration({
+      estimatedCostMinorUnits: 5000,
+    });
+    const harness = buildHarness({ provider });
+
+    const request = makeInvocationRequest({
+      invocationId: 'inv-budget-exceeded-1',
+      executionBudget: { maxDurationMs: 60000, maxCostMinorUnits: 1000 },
+    });
+
+    await expect(harness.service.invoke(request)).rejects.toThrow(
+      'PROVIDER_NOT_ELIGIBLE',
+    );
+
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([null, undefined])(
+    'provider with unknown estimated cost (%s) is rejected when execution budget is bounded',
+    async (unknownCost) => {
+      const provider = makeProviderDeclaration({
+        estimatedCostMinorUnits: unknownCost,
+      });
+      const harness = buildHarness({ provider });
+
+      const request = makeInvocationRequest({
+        invocationId: `inv-budget-cost-unknown-${String(unknownCost)}-1`,
+        executionBudget: { maxDurationMs: 60000, maxCostMinorUnits: 1000 },
+      });
+
+      await expect(harness.service.invoke(request)).rejects.toThrow(
+        'PROVIDER_NOT_ELIGIBLE',
+      );
+
+      expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    },
+  );
+
+  it('provider within execution budget may proceed', async () => {
+    const provider = makeProviderDeclaration({
+      estimatedCostMinorUnits: 500,
+    });
+    const harness = buildHarness({ provider });
+
+    const request = makeInvocationRequest({
+      invocationId: 'inv-budget-within-1',
+      executionBudget: { maxDurationMs: 60000, maxCostMinorUnits: 1000 },
+    });
+
+    const result = await harness.service.invoke(request);
+
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+  });
+
+  it('absence of maxCostMinorUnits does not block solely because provider cost is unknown', async () => {
+    // EO-01.3-Semantik bewahren: Ohne monetäres Maximalbudget blockiert der
+    // Budget-Check nicht — unbekannte Kosten allein reichen nicht.
+    const provider = makeProviderDeclaration({
+      estimatedCostMinorUnits: null,
+    });
+    const harness = buildHarness({ provider });
+
+    const request = makeInvocationRequest({
+      invocationId: 'inv-budget-unbounded-unknown-cost-1',
+      executionBudget: { maxDurationMs: 60000, maxTokens: 100000 },
+    });
+    expect(request.executionBudget.maxCostMinorUnits).toBeUndefined();
+
+    const result = await harness.service.invoke(request);
+
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+  });
+});
