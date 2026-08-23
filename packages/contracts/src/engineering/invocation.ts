@@ -119,6 +119,11 @@ export interface GovernedCapabilityInvocationRequest {
  * Human Gate Approval Binding.
  * Must be bound to the specific invocation context.
  * A generic APPROVED boolean is NOT sufficient.
+ *
+ * Phase 3G: requestedAction binds the approval to ONE consequential action.
+ * When such an approval satisfies a release/consequential gate, its action
+ * scope MUST match the action being evaluated. Missing requestedAction MUST
+ * NOT act as wildcard authority for release actions.
  */
 export interface HumanGateBinding {
   readonly approvalId: string;
@@ -129,6 +134,7 @@ export interface HumanGateBinding {
   readonly providerId?: string;
   readonly artifactReference?: string;
   readonly inputReference?: string;
+  readonly requestedAction?: ExecutionAction;
   readonly approverIdentity: string;
   readonly approvedAt: Date;
   readonly expiresAt?: Date;
@@ -597,6 +603,12 @@ export interface HumanGateResolver {
       readonly capabilityCode: string;
       readonly providerId: string;
       readonly inputReference?: string;
+      /**
+       * Phase 3G: the action whose gate the approval is intended to satisfy.
+       * Trusted resolvers use this to return only bindings whose
+       * requestedAction scope matches; validation re-proves it fail-closed.
+       */
+      readonly requestedAction?: ExecutionAction;
     },
   ): Promise<HumanGateBinding | null>;
 }
@@ -691,6 +703,25 @@ export function sanitizeErrorProviderMetadata(
  * Validates a HumanGateBinding against the invocation context.
  * Returns the effective ReleaseGateStatus derived from the binding.
  * Returns ReleaseGateStatus.NOT_REQUESTED when no valid binding exists.
+ *
+ * Phase 3G — Approval Scope Binding:
+ *
+ * 1. Action scope: when the binding declares a requestedAction, it MUST
+ *    match the action being evaluated. A trusted approval for ONE
+ *    consequential action MUST NOT silently authorize another one.
+ *    A binding WITHOUT declared action scope MUST NOT become wildcard
+ *    authority for release/consequential actions (currently GIT_COMMIT and
+ *    GIT_PUSH — the only actions for which ReleaseGateStatus.APPROVED has
+ *    authority in EO-01.4 evaluatePolicy()). For actions where the Human
+ *    Gate is optional, historical bindings without action scope remain
+ *    valid.
+ *
+ * 2. Artifact scope: if the binding explicitly claims an artifact-bound
+ *    authorization, the claimed scope MUST be provable against an
+ *    authoritative artifact reference of the invocation context:
+ *    mismatch => fail closed; missing authoritative artifact context =>
+ *    fail closed. An artifact-scoped approval must not silently act
+ *    unscoped.
  */
 export function validateHumanGateBinding(
   binding: HumanGateBinding | null | undefined,
@@ -701,6 +732,13 @@ export function validateHumanGateBinding(
     readonly capabilityCode: string;
     readonly providerId: string;
     readonly inputReference?: string;
+    /** Phase 3G: the action being evaluated (authoritative request action). */
+    readonly requestedAction?: ExecutionAction;
+    /**
+     * Phase 3G: authoritative artifact reference of the invocation context,
+     * when such a trusted surface exists.
+     */
+    readonly artifactReference?: string;
   },
 ): ReleaseGateStatus {
 
@@ -735,6 +773,39 @@ export function validateHumanGateBinding(
 
   // Validate input reference binding if present in binding
   if (binding.inputReference && binding.inputReference !== context.inputReference) {
+    return ReleaseGateStatus.NOT_REQUESTED;
+  }
+
+  // Phase 3G: Validate action scope. An approval must not silently
+  // authorize a different consequential action than the one being evaluated.
+  if (context.requestedAction) {
+    if (!binding.requestedAction) {
+      // Release/consequential actions: missing action scope MUST NOT become
+      // wildcard authority. This set is exactly the action set for which
+      // EO-01.4 evaluatePolicy() grants authority to
+      // ReleaseGateStatus.APPROVED.
+      const RELEASE_CONSEQUENTIAL_ACTIONS: readonly ExecutionAction[] = [
+        ExecutionAction.GIT_COMMIT,
+        ExecutionAction.GIT_PUSH,
+      ];
+      if (RELEASE_CONSEQUENTIAL_ACTIONS.includes(context.requestedAction)) {
+        return ReleaseGateStatus.NOT_REQUESTED;
+      }
+      // Non-consequential actions: Human Gate is optional; historical
+      // bindings without declared action scope remain valid here.
+    } else if (binding.requestedAction !== context.requestedAction) {
+      return ReleaseGateStatus.NOT_REQUESTED;
+    }
+  }
+
+  // Phase 3G: Validate artifact scope where the approval explicitly claims
+  // an artifact-bound authorization. Fail closed on mismatch AND when no
+  // authoritative artifact reference can be established for comparison —
+  // an artifact-scoped approval must not silently act unscoped.
+  if (
+    binding.artifactReference !== undefined &&
+    binding.artifactReference !== context.artifactReference
+  ) {
     return ReleaseGateStatus.NOT_REQUESTED;
   }
 

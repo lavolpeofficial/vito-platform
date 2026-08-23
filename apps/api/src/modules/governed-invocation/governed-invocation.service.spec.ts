@@ -33,6 +33,7 @@ import {
   ProviderType,
   providerSupportsCapability,
   ReleaseGateStatus,
+  validateHumanGateBinding,
   type CredentialBroker,
   type ExecutionPolicyConfig,
   type ExecutionPolicyResolutionContext,
@@ -599,6 +600,12 @@ describe('GovernedInvocationServiceImpl policy boundary', () => {
  * Strukturell gültiges, nicht abgelaufenes HumanGateBinding aus dem
  * TRUSTED Store — standardmäßig vollständig an den Invocation-Kontext
  * gebunden (Org/Run/Step/Capability/Provider/Input).
+ *
+ * Phase 3G: Eine release-gate-taugliche Bindung MUSS zusätzlich ihre
+ * Action-Scope deklarieren. Der Fixture-Default (GIT_COMMIT) entspricht dem
+ * etablierten Release-Szenario dieses Specs; fehlende Action-Scope wäre
+ * nach 3G KEINE Wildcard-Autorität mehr. Bestehende adversariale
+ * Assertions bleiben unverändert.
  */
 function makeMatchingHumanGateBinding(
   overrides: Record<string, any> = {},
@@ -610,6 +617,7 @@ function makeMatchingHumanGateBinding(
     workflowStepRunId: WORKFLOW_STEP_RUN_ID,
     capabilityCode: CAPABILITY_CODE,
     providerId: 'provider-1',
+    requestedAction: ExecutionAction.GIT_COMMIT,
     inputReference: 'gov://input/1',
     approverIdentity: 'human-approver-a',
     approvedAt: new Date(),
@@ -2253,5 +2261,321 @@ describe('GovernedInvocationServiceImpl Phase 3F.2 trusted secret redaction in m
     expect(serializedMetadata).toContain('first-entry');
     expect(serializedMetadata).not.toContain('second-entry');
     assertMarkerContainedNowhere(harness, result);
+  });
+});
+
+// ===========================================================================
+// EO-01.5 Phase 3G — Human Approval Scope Binding Tests
+//
+// Finding aus unabhängigem Review: Eine vertrauenswürdige Human-Gate-
+// Genehmigung muss nachweisbar für DIE konkrete consequential Action (und
+// ggf. das konkrete Artifact) gelten, dessen Gate sie befriedigt. Eine
+// Genehmigung für GIT_COMMIT darf NICHT stillschweigend GIT_PUSH
+// autorisieren — und umgekehrt.
+//
+// Fail-closed-Regel (aus bestehender EO-01.4-Policy-Semantik abgeleitet):
+// ReleaseGateStatus.APPROVED hat in evaluatePolicy() AUSSCHLIESSLICH
+// Autorität für GIT_COMMIT und GIT_PUSH. Genau dort darf eine Bindung ohne
+// deklarierte requestedAction KEINE Wildcard-Autorität werden. Für nicht-
+// release-Aktionen bleibt der Human Gate optional — historische Bindungen
+// ohne Action-Scope dürfen nicht pauschal invalidiert werden.
+//
+// Der echte EO-01.4 evaluatePolicy() läuft weiterhin (nicht gemockt).
+// Authority stammt ausschließlich aus dem trusted HumanGateResolver.
+// ===========================================================================
+
+describe('GovernedInvocationServiceImpl Phase 3G human approval scope binding', () => {
+  /**
+   * Release-Harness mit BOTH allowGitCommit und allowGitPush: die Policy
+   * kann damit KEIN blocking reason sein — ein Block kann ausschließlich
+   * aus der Action-/Artifact-Scope-Bindung der Genehmigung stammen.
+   */
+  function buildDualReleaseGateHarness(): Harness {
+    const dualReleasePolicy: ExecutionPolicyConfig = {
+      ...createBuilderPolicy(WORKTREE_ROOT),
+      allowGitCommit: true,
+      allowGitPush: true,
+    };
+    return buildHarness({
+      executionPolicyResolver: buildFakeExecutionPolicyResolver(dualReleasePolicy),
+      executionProfileResolver: buildFakeExecutionProfileResolver(
+        ExecutionProfile.RELEASE_AUTHORITY,
+      ),
+    });
+  }
+
+  it.each([
+    { approvedAction: ExecutionAction.GIT_COMMIT, requestedAction: ExecutionAction.GIT_PUSH },
+    { approvedAction: ExecutionAction.GIT_PUSH, requestedAction: ExecutionAction.GIT_COMMIT },
+  ])(
+    'human approval for $approvedAction does not authorize execution of $requestedAction',
+    async ({ approvedAction, requestedAction }) => {
+      const harness = buildDualReleaseGateHarness();
+      // Authentisches, nicht abgelaufenes Binding aus dem TRUSTED Store:
+      // Org/Run/Step/Capability/Provider/Input matchen vollständig — NUR die
+      // requestedAction-Scope unterscheidet sich von der angefragten Action.
+      (harness.humanGateResolver.resolve as jest.Mock).mockResolvedValue(
+        makeMatchingHumanGateBinding({
+          approvalId: 'approval-action-scoped',
+          requestedAction: approvedAction,
+        }),
+      );
+
+      // Positivkontrolle (Kontrafaktur in derselben Umgebung): Dasselbe
+      // Binding befriedigt das Gate seiner EIGENEN Action — die Umgebung
+      // ist bewusst so beschaffen, dass nur der Action-Scope blockieren kann.
+      const ownActionRequest = makeReleaseGateRequest({
+        invocationId: `inv-hg-scope-own-${approvedAction}`,
+        requestedAction: approvedAction,
+        humanApprovalReference: 'release-ref-action-scoped',
+      });
+      const ownResult = await harness.service.invoke(ownActionRequest);
+      expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+      expect(ownResult.status).toBe(AgentExecutionStatus.SUCCEEDED);
+
+      // Angriff: dieselbe authentische Genehmigung für die ANDERE
+      // consequential Action wiederverwendet.
+      const crossActionRequest = makeReleaseGateRequest({
+        invocationId: `inv-hg-scope-cross-${requestedAction}`,
+        requestedAction: requestedAction,
+        humanApprovalReference: 'release-ref-action-scoped',
+      });
+      const crossResult = await harness.service.invoke(crossActionRequest);
+
+      // Die Genehmigung wurde vertrauenswürdig aufgelöst (authentisch!),
+      // autorisiert aber nur ihre eigene Action-Scope.
+      expect(harness.humanGateResolver.resolve).toHaveBeenCalledWith(
+        'release-ref-action-scoped',
+        expect.objectContaining({
+          organizationId: ORG_A,
+          workflowRunId: WORKFLOW_RUN_ID,
+          workflowStepRunId: WORKFLOW_STEP_RUN_ID,
+          capabilityCode: CAPABILITY_CODE,
+          providerId: 'provider-1',
+        }),
+      );
+      // adapter.execute() genau 0 zusätzliche Male; fail closed / policy blocked.
+      expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+      expect(crossResult.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+      expect(crossResult.normalizedError?.executionOutcome).toBe(
+        ExecutionOutcome.POLICY_BLOCKED,
+      );
+      expect(JSON.stringify(crossResult)).not.toContain(ReleaseGateStatus.APPROVED);
+    },
+  );
+
+  it('approval without declared requested action is no wildcard authority for release gates', async () => {
+    const harness = buildDualReleaseGateHarness();
+    // Kontextuell vollständig gebundene, authentische, nicht abgelaufene
+    // Genehmigung OHNE deklarierte requestedAction (historische Form).
+    (harness.humanGateResolver.resolve as jest.Mock).mockResolvedValue(
+      makeMatchingHumanGateBinding({
+        approvalId: 'approval-without-action-scope',
+        requestedAction: undefined,
+      }),
+    );
+
+    const request = makeReleaseGateRequest({
+      invocationId: 'inv-hg-wildcard-release-1',
+      humanApprovalReference: 'release-ref-no-action',
+    });
+
+    const result = await harness.service.invoke(request);
+
+    // Fehlende Action-Scope darf für GIT_COMMIT/GIT_PUSH KEINE
+    // Wildcard-Autorität sein → fail closed vor adapter.execute().
+    expect(harness.humanGateResolver.resolve).toHaveBeenCalledTimes(1);
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(result.normalizedError?.executionOutcome).toBe(
+      ExecutionOutcome.POLICY_BLOCKED,
+    );
+    expect(JSON.stringify(result)).not.toContain(ReleaseGateStatus.APPROVED);
+  });
+
+  it('matching requested-action human approval may authorize release-gate execution', async () => {
+    const harness = buildDualReleaseGateHarness();
+    // Positive Kontrolle: trusted RELEASE_AUTHORITY-Kontext + BINDUNG mit
+    // passender requestedAction + gültig/nicht abgelaufen → EO-01.4 erlaubt.
+    (harness.humanGateResolver.resolve as jest.Mock).mockResolvedValue(
+      makeMatchingHumanGateBinding({
+        approvalId: 'approval-matching-action',
+        requestedAction: ExecutionAction.GIT_COMMIT,
+      }),
+    );
+
+    const request = makeReleaseGateRequest({
+      invocationId: 'inv-hg-matching-action-1',
+      humanApprovalReference: 'release-ref-matching-action',
+    });
+
+    const result = await harness.service.invoke(request);
+
+    // Der Validation-/Lookup-Kontext trägt die angefragte Action — der
+    // Scope-Vergleich erfolgt gegen DIESE Autorität, nicht gegen einen
+    // Caller-Claim.
+    expect(harness.humanGateResolver.resolve).toHaveBeenCalledWith(
+      'release-ref-matching-action',
+      expect.objectContaining({
+        organizationId: ORG_A,
+        workflowRunId: WORKFLOW_RUN_ID,
+        workflowStepRunId: WORKFLOW_STEP_RUN_ID,
+        capabilityCode: CAPABILITY_CODE,
+        providerId: 'provider-1',
+        inputReference: 'gov://input/1',
+        requestedAction: ExecutionAction.GIT_COMMIT,
+      }),
+    );
+
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    const [, executionContext] = harness.fakeAdapter.execute.mock.calls[0];
+    expect(executionContext.policyDecision.allowed).toBe(true);
+    expect(executionContext.policyDecision.reasonCode).toBe('POLICY_ALLOWED');
+  });
+
+  it('approval claiming artifact scope fails closed while invocation context cannot prove artifact authority', async () => {
+    // Das Invocation-Modell trägt heute KEINE autoritative artifactReference.
+    // Eine Genehmigung, die explizit artifact-gebunden Autorität behauptet,
+    // kann daher ihren Scope NICHT beweisen → fail closed statt stiller
+    // Unbegrenztheit auf alle Artifacts.
+    const harness = buildDualReleaseGateHarness();
+    (harness.humanGateResolver.resolve as jest.Mock).mockResolvedValue(
+      makeMatchingHumanGateBinding({
+        approvalId: 'approval-artifact-bound',
+        requestedAction: ExecutionAction.GIT_COMMIT,
+        artifactReference: 'gov://artifacts/approved-release-evidence',
+      }),
+    );
+
+    const request = makeReleaseGateRequest({
+      invocationId: 'inv-hg-artifact-unprovable-1',
+      humanApprovalReference: 'release-ref-artifact-bound',
+    });
+
+    const result = await harness.service.invoke(request);
+
+    expect(harness.humanGateResolver.resolve).toHaveBeenCalledTimes(1);
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(JSON.stringify(result)).not.toContain(ReleaseGateStatus.APPROVED);
+  });
+
+  describe('contract-level artifact scope semantics (validateHumanGateBinding)', () => {
+    const CONTEXT_BASE = {
+      organizationId: ORG_A,
+      workflowRunId: WORKFLOW_RUN_ID,
+      workflowStepRunId: WORKFLOW_STEP_RUN_ID,
+      capabilityCode: CAPABILITY_CODE,
+      providerId: 'provider-1',
+      inputReference: 'gov://input/1',
+      requestedAction: ExecutionAction.GIT_COMMIT,
+    };
+
+    function makeArtifactBoundBinding(artifactReference: string): HumanGateBinding {
+      return makeMatchingHumanGateBinding({
+        approvalId: 'approval-artifact-contract',
+        artifactReference,
+      });
+    }
+
+    it('matching artifact reference and matching action scope yields APPROVED', () => {
+      // Positive Kontrolle (Abschnitt B.4): exakte Artifact-Bindung ist
+      // implementierbar, sobald eine autoritative Invocation-Seite existiert.
+      const status = validateHumanGateBinding(
+        makeArtifactBoundBinding('gov://artifacts/release-evidence'),
+        { ...CONTEXT_BASE, artifactReference: 'gov://artifacts/release-evidence' },
+      );
+      expect(status).toBe(ReleaseGateStatus.APPROVED);
+    });
+
+    it('different artifact reference does NOT yield APPROVED', () => {
+      const status = validateHumanGateBinding(
+        makeArtifactBoundBinding('gov://artifacts/approved-artifact'),
+        { ...CONTEXT_BASE, artifactReference: 'gov://artifacts/other-artifact' },
+      );
+      expect(status).toBe(ReleaseGateStatus.NOT_REQUESTED);
+    });
+
+    it('action scope mismatch does NOT yield APPROVED', () => {
+      const status = validateHumanGateBinding(
+        makeArtifactBoundBinding('gov://artifacts/release-evidence'),
+        { ...CONTEXT_BASE, requestedAction: ExecutionAction.GIT_PUSH },
+      );
+      expect(status).toBe(ReleaseGateStatus.NOT_REQUESTED);
+    });
+  });
+
+  it('same-action approval bound to another workflow step run remains rejected', async () => {
+    // Re-Prove der Phase-3B-Bindung unter dem neuen action-aware Regime:
+    // passende requestedAction, fremder Step-Run → weiterhin fail closed.
+    const harness = buildDualReleaseGateHarness();
+    (harness.humanGateResolver.resolve as jest.Mock).mockResolvedValue(
+      makeMatchingHumanGateBinding({
+        approvalId: 'approval-other-step-same-action',
+        requestedAction: ExecutionAction.GIT_COMMIT,
+        workflowStepRunId: 'wf-step-OTHER-invocation',
+      }),
+    );
+
+    const request = makeReleaseGateRequest({
+      invocationId: 'inv-hg-step-reproof-1',
+      humanApprovalReference: 'release-ref-other-step',
+    });
+
+    const result = await harness.service.invoke(request);
+
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(JSON.stringify(result)).not.toContain(ReleaseGateStatus.APPROVED);
+  });
+
+  it('same-action approval with differing inputReference remains rejected', async () => {
+    // Re-Prove der Input-Bindung: passende requestedAction, fremde
+    // inputReference → weiterhin fail closed.
+    const harness = buildDualReleaseGateHarness();
+    (harness.humanGateResolver.resolve as jest.Mock).mockResolvedValue(
+      makeMatchingHumanGateBinding({
+        approvalId: 'approval-other-input-same-action',
+        requestedAction: ExecutionAction.GIT_COMMIT,
+        inputReference: 'gov://input/OTHER',
+      }),
+    );
+
+    const request = makeReleaseGateRequest({
+      invocationId: 'inv-hg-input-reproof-1',
+      humanApprovalReference: 'release-ref-other-input',
+    });
+
+    const result = await harness.service.invoke(request);
+
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(JSON.stringify(result)).not.toContain(ReleaseGateStatus.APPROVED);
+  });
+
+  it('historical approvals without action scope remain usable where human gate is optional', async () => {
+    // Gegenstück zur Wildcard-Regel: Der Human Gate ist für nicht-release-
+    // Aktionen optional (EO-01.4 konsultiert ReleaseGateStatus ausschließlich
+    // für GIT_COMMIT/GIT_PUSH). Historische Bindungen ohne Action-Scope
+    // dürfen deshalb NICHT pauschal invalidiert werden.
+    const harness = buildHarness(); // BUILDER-Kontext, etablierter READ_FILE-ALLOW-Fall
+    (harness.humanGateResolver.resolve as jest.Mock).mockResolvedValue(
+      makeMatchingHumanGateBinding({
+        approvalId: 'approval-legacy-no-action',
+        requestedAction: undefined,
+      }),
+    );
+
+    const request = makeInvocationRequest({
+      invocationId: 'inv-hg-legacy-non-release-1',
+      humanApprovalReference: 'legacy-ref-non-release',
+    });
+
+    const result = await harness.service.invoke(request);
+
+    expect(harness.humanGateResolver.resolve).toHaveBeenCalledTimes(1);
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
   });
 });

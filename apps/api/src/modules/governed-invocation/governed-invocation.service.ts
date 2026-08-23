@@ -171,6 +171,9 @@ async function createPolicyEvaluationContext(
       capabilityCode: request.capabilityCode,
       providerId: request.providerId,
       inputReference: request.inputReference,
+      // Phase 3G: die konkrete Action, deren Gate die Genehmigung befriedigen
+      // soll. Nur Lookup-/Validierungs-Kontext — niemals Caller-Autorität.
+      requestedAction: request.requestedAction,
     });
 
     effectiveReleaseGateStatus = validateHumanGateBinding(binding, {
@@ -180,6 +183,14 @@ async function createPolicyEvaluationContext(
       capabilityCode: request.capabilityCode,
       providerId: request.providerId,
       inputReference: request.inputReference,
+      // Phase 3G: Action-Scope-Bindung fail-closed gegen die evaluierte
+      // Action (GIT_COMMIT/GIT_PUSH ohne deklarierten Scope => keine
+      // Wildcard-Autorität).
+      requestedAction: request.requestedAction,
+      // Phase 3G/Follow-up: Das Invocation-Modell trägt heute KEINE
+      // autoritative artifactReference; eine artifact-gebundene Genehmigung
+      // kann ihren Scope daher nicht beweisen und failt geschlossen
+      // (validateHumanGateBinding). Kein erfundenes Artifact-Architecture.
     });
   } else if (request.humanApprovalReference && !dependencies.humanGateResolver) {
     effectiveReleaseGateStatus = ReleaseGateStatus.NOT_REQUESTED;
