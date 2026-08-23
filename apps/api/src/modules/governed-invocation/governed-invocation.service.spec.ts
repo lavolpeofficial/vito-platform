@@ -1237,3 +1237,173 @@ describe('GovernedInvocationServiceImpl Phase 3B.1 authority-profile escalation'
     expect(executionContext.policyDecision.reasonCode).toBe('POLICY_ALLOWED');
   });
 });
+
+// ===========================================================================
+// EO-01.5 Phase 3C — Runtime Failure Boundary Tests
+//
+// Kerninvariante: adapter.execute() wird ausschließlich nach echtem
+// EO-01.4 ALLOW erreicht. Runtime-Fehler NACH dieser Grenze (Timeout,
+// Adapter-Exception, illegaler Lifecycle-Status) werden normalisiert,
+// ohne eine zweite Lifecycle-State-Machine, Retry oder Fallback einzuführen.
+//
+// Der echte EO-01.4 evaluatePolicy() läuft weiterhin (nicht gemockt).
+// ===========================================================================
+
+describe('GovernedInvocationServiceImpl Phase 3C runtime failure boundary', () => {
+  function buildRuntimeFailureHarness(execute: jest.Mock): Harness {
+    return buildHarness({
+      fakeAdapter: {
+        adapter: { providerType: ProviderType.CLOUD_LLM, execute } as GovernedProviderAdapter,
+        execute,
+      },
+    });
+  }
+
+  function getCompletionAuditEvents(harness: Harness): Array<Record<string, any>> {
+    const auditMock = harness.auditService.record as unknown as jest.Mock;
+    return auditMock.mock.calls
+      .map((call) => call[0])
+      .filter((event) => event?.action === 'GOVERNED_INVOCATION_COMPLETE');
+  }
+
+  // =========================================================================
+  // A. Timeout-Enforcement: EO-01.5 selbst begrenzt einen nicht
+  //    zurückkehrenden Adapter — unabhängig davon, ob der Adapter freiwillig
+  //    context.timeoutMs honoriert.
+  // =========================================================================
+
+  it('adapter timeout is normalized as TIMED_OUT', async () => {
+    // Kontrollierter Fake-Adapter: nie auflösend — kein freiwilliges
+    // Timeout-Honoring möglich. Nur die EO-01.5-Grenze kann begrenzen.
+    const execute = jest.fn(
+      (_request: unknown, _context: GovernedExecutionContext): Promise<never> =>
+        new Promise(() => {
+          // bewusst nie auflösend
+        }),
+    );
+    const harness = buildRuntimeFailureHarness(execute);
+
+    const request = makeInvocationRequest({
+      invocationId: 'inv-runtime-timeout-1',
+      executionBudget: { maxDurationMs: 25, maxTokens: 100000 },
+    });
+
+    const result = await harness.service.invoke(request);
+
+    // EO-01.4 hat zuerst erlaubt; der Adapter wurde genau einmal aufgerufen.
+    expect(execute).toHaveBeenCalledTimes(1);
+    const [, executionContext] = execute.mock.calls[0];
+    expect(executionContext.policyDecision.allowed).toBe(true);
+    expect(executionContext.timeoutMs).toBe(25);
+
+    // Die Invocation ist begrenzt terminiert — kein Hang, kein Retry.
+    expect(result.durationMs).toBeLessThan(4000);
+
+    expect(result.status).toBe(AgentExecutionStatus.TIMED_OUT);
+    expect(result.normalizedError?.reason).toBe('EXECUTION_FAILED');
+    expect(result.normalizedError?.executionOutcome).toBe(
+      ExecutionOutcome.TIMED_OUT,
+    );
+    expect(result.normalizedError?.agentExecutionStatus).toBe(
+      AgentExecutionStatus.TIMED_OUT,
+    );
+    expect(result.normalizedError?.retryable).toBe(false);
+
+    // Audit-sichere Completion-Semantik bleibt konsistent.
+    const completionEvents = getCompletionAuditEvents(harness);
+    expect(completionEvents).toHaveLength(1);
+    expect(completionEvents[0]?.metadata?.status).toBe(
+      AgentExecutionStatus.TIMED_OUT,
+    );
+  });
+
+  // =========================================================================
+  // B. Adapter-Exception-Normalisierung: Die rohe Exception verlässt
+  //    invoke() NICHT als unhandled rejection; es entsteht ein normales,
+  //    audit-sicheres FAILED-Ergebnis ohne automatischen Retry/Fallback.
+  // =========================================================================
+
+  it('adapter exception is normalized as EXECUTION_FAILED', async () => {
+    const RAW_STACK_MARKER = 'RAW-ADAPTER-STACK-MARKER-7f3a';
+    const execute = jest.fn().mockImplementation(async () => {
+      const error = new Error('controlled adapter failure');
+      error.stack = RAW_STACK_MARKER;
+      throw error;
+    });
+    const harness = buildRuntimeFailureHarness(execute);
+
+    const request = makeInvocationRequest({
+      invocationId: 'inv-runtime-exception-1',
+    });
+
+    const result = await harness.service.invoke(request);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+
+    expect(result.status).toBe(AgentExecutionStatus.FAILED);
+    expect(result.normalizedError?.reason).toBe('EXECUTION_FAILED');
+    // Sichere Fehlermeldung bleibt erhalten.
+    expect(result.normalizedError?.message).toContain(
+      'controlled adapter failure',
+    );
+    expect(result.normalizedError?.retryable).toBe(false);
+
+    // Kein Leak der rohen Exception (Stack, Error-Klasse) durch das Result.
+    const serializedResult = JSON.stringify(result);
+    expect(serializedResult).not.toContain(RAW_STACK_MARKER);
+    expect(serializedResult).not.toContain('AdapterExecutionTimeoutError');
+
+    // Audit-Ausgaben enthalten keine rohen Exception-Materialien.
+    const auditMock = harness.auditService.record as unknown as jest.Mock;
+    for (const call of auditMock.mock.calls) {
+      expect(JSON.stringify(call)).not.toContain(RAW_STACK_MARKER);
+    }
+
+    // Konsistente Completion-Audits, kein automatischer Retry.
+    expect(getCompletionAuditEvents(harness)).toHaveLength(1);
+  });
+
+  // =========================================================================
+  // C. Illegale Lifecycle-Status-Terminalisierung: Ein Adapter darf QUEUED/
+  //    STARTING/RUNNING nicht als Abschluss einer produktiven Invocation
+  //    zurückgeben. isValidInvocationTransition() ist die bestehende
+  //    Enforcement-Mechanik — fail closed auf FAILED.
+  // =========================================================================
+
+  it.each([
+    AgentExecutionStatus.QUEUED,
+    AgentExecutionStatus.STARTING,
+    AgentExecutionStatus.RUNNING,
+  ])('illegal adapter lifecycle status %s is rejected', async (illegalStatus) => {
+    const execute = jest.fn().mockResolvedValue({
+      status: illegalStatus,
+      providerExecutionMetadata: {},
+      completedAt: new Date(),
+    });
+    const harness = buildRuntimeFailureHarness(execute);
+
+    const request = makeInvocationRequest({
+      invocationId: `inv-runtime-illegal-${illegalStatus}`,
+    });
+
+    const result = await harness.service.invoke(request);
+
+    // Genau ein produktiver Adapter-Aufruf nach EO-01.4 ALLOW ...
+    expect(execute).toHaveBeenCalledTimes(1);
+    const [, executionContext] = execute.mock.calls[0];
+    expect(executionContext.policyDecision.allowed).toBe(true);
+
+    // ... aber der illegale Status wird NICHT als valides Terminal-Ergebnis
+    // normalisiert — fail closed auf bestehendes Vokabular.
+    expect(result.status).toBe(AgentExecutionStatus.FAILED);
+    expect(result.status).not.toBe(illegalStatus);
+    expect(result.normalizedError?.reason).toBe('EXECUTION_FAILED');
+    expect(result.normalizedError?.agentExecutionStatus).toBe(
+      AgentExecutionStatus.FAILED,
+    );
+    expect(result.normalizedError?.retryable).toBe(false);
+    // Der Lifecycle-Fehler ist im normalisierten Fehler identifizierbar.
+    expect(result.normalizedError?.message).toContain(illegalStatus);
+    expect(getCompletionAuditEvents(harness)).toHaveLength(1);
+  });
+});

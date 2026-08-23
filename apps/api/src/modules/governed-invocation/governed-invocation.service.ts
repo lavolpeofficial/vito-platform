@@ -445,6 +445,139 @@ function createInvocationErrorResult(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Runtime Failure Boundary (nach EO-01.4 ALLOW, um adapter.execute())
+// ---------------------------------------------------------------------------
+
+/**
+ * Interner Marker für die EO-01.5-eigene Timeout-Grenze. Der Adapter wird
+ * NICHT darauf vertraut, context.timeoutMs freiwillig zu honorieren —
+ * EO-01.5 begrenzt nicht zurückkehrende Adapter selbst.
+ */
+class AdapterExecutionTimeoutError extends Error {
+  constructor(public readonly timeoutMs: number) {
+    super(`Adapter execution did not return within the governed time budget of ${timeoutMs}ms`);
+    this.name = 'AdapterExecutionTimeoutError';
+  }
+}
+
+/**
+ * Normalisiert Runtime-Fehler NACH echtem EO-01.4 ALLOW zu einem audit-
+ * sicheren Ergebnis auf Basis des BESTEHENDEN Vokabulars
+ * (AgentExecutionStatus / ExecutionOutcome / InvocationFailureReason).
+ * Kein Retry, kein Provider-Fallback, keine zweite State-Machine.
+ */
+function createRuntimeFailureResult(
+  request: GovernedCapabilityInvocationRequest,
+  provider: ProviderDeclaration,
+  policyDecision: PolicyDecision,
+  startedAt: Date,
+  status: AgentExecutionStatus,
+  message: string,
+  providerMetadata?: Record<string, unknown>,
+): GovernedCapabilityInvocationResult {
+  const completedAt = new Date();
+  const durationMs = completedAt.getTime() - startedAt.getTime();
+
+  const executionOutcome =
+    status === AgentExecutionStatus.TIMED_OUT ? ExecutionOutcome.TIMED_OUT : undefined;
+
+  return {
+    invocationId: request.invocationId,
+    organizationId: request.organizationId,
+    workflowRunId: request.workflowRunId,
+    workflowStepRunId: request.workflowStepRunId,
+    correlationId: request.correlationId,
+    capabilityCode: request.capabilityCode,
+    providerId: provider.id,
+    status,
+    startedAt,
+    completedAt,
+    durationMs,
+    providerExecutionMetadata: {},
+    normalizedError: {
+      reason: 'EXECUTION_FAILED',
+      message,
+      executionOutcome,
+      agentExecutionStatus: status,
+      retryable: false,
+      providerMetadata: sanitizeErrorProviderMetadata(providerMetadata),
+    },
+    policyDecisionReference: `${policyDecision.policyVersion}-${policyDecision.evaluatedAt.toISOString()}`,
+    sideEffectSummary: {
+      filesCreated: [],
+      filesModified: [],
+      filesDeleted: [],
+      commandsExecuted: [],
+      networkCalls: [],
+      artifactsCreated: [],
+    },
+  };
+}
+
+/**
+ * Normalisiert einen geworfenen Adapter-Fehler:
+ * - EO-01.5-Timeout-Grenze → TIMED_OUT / ExecutionOutcome.TIMED_OUT
+ * - sonstige Adapter-Exception → FAILED / EXECUTION_FAILED mit sicherer,
+ *   gekürzter Fehlermeldung (kein Stack-/Klassen-Material).
+ */
+function normalizeAdapterRuntimeFailure(
+  request: GovernedCapabilityInvocationRequest,
+  provider: ProviderDeclaration,
+  policyDecision: PolicyDecision,
+  startedAt: Date,
+  error: unknown,
+): GovernedCapabilityInvocationResult {
+  if (error instanceof AdapterExecutionTimeoutError) {
+    return createRuntimeFailureResult(
+      request,
+      provider,
+      policyDecision,
+      startedAt,
+      AgentExecutionStatus.TIMED_OUT,
+      `EXECUTION_FAILED: ${error.message}`,
+    );
+  }
+
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  // Defensive Kürzung: nur die Meldung, niemals Stack oder Error-Objekt.
+  const safeMessage = rawMessage.length > 2000 ? `${rawMessage.slice(0, 2000)}…` : rawMessage;
+
+  return createRuntimeFailureResult(
+    request,
+    provider,
+    policyDecision,
+    startedAt,
+    AgentExecutionStatus.FAILED,
+    `EXECUTION_FAILED: Adapter execution failed: ${safeMessage}`,
+  );
+}
+
+/**
+ * Illegaler Lifecycle-Terminalstatus: Ein abgeschlossener produktiver
+ * Adapter-Aufruf muss einen von RUNNING aus erreichbaren Terminalstatus
+ * liefern. QUEUED/STARTING/RUNNING (bzw. jeder andere illegale Übergang)
+ * wird via bestehender isValidInvocationTransition()-Semantik fail-closed
+ * auf FAILED normalisiert — niemals als valides Ergebnis durchgereicht.
+ */
+function createIllegalLifecycleFailureResult(
+  request: GovernedCapabilityInvocationRequest,
+  provider: ProviderDeclaration,
+  policyDecision: PolicyDecision,
+  startedAt: Date,
+  rejectedStatus: AgentExecutionStatus,
+): GovernedCapabilityInvocationResult {
+  return createRuntimeFailureResult(
+    request,
+    provider,
+    policyDecision,
+    startedAt,
+    AgentExecutionStatus.FAILED,
+    `EXECUTION_FAILED: Adapter returned illegal non-terminal lifecycle status "${rejectedStatus}" as terminal result`,
+    { rejectedLifecycleStatus: rejectedStatus },
+  );
+}
+
 @Injectable()
 export class GovernedInvocationServiceImpl implements GovernedInvocationService {
   private readonly logger = new Logger(GovernedInvocationServiceImpl.name);
@@ -510,7 +643,39 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
       governedInputPayload: request.governedInputPayload,
     };
 
-    const adapterResult = await adapter.execute(adapterRequest, executionContext);
+    // Runtime Failure Boundary: ALLES nach echtem EO-01.4 ALLOW wird
+    // normalisiert — Timeout, Adapter-Exception, illegaler Lifecycle-Status.
+    // Kein Retry, kein Provider-Fallback, keine zweite State-Machine.
+
+    let adapterResult: GovernedAdapterResult;
+    try {
+      adapterResult = await this.invokeAdapterWithTimeout(adapter, adapterRequest, executionContext);
+    } catch (error) {
+      return this.completeRuntimeFailure(
+        request,
+        provider,
+        executionProfile,
+        normalizeAdapterRuntimeFailure(request, provider, policyDecision, startedAt, error),
+      );
+    }
+
+    // Lifecycle-Enforcement über die bestehende Transition-Semantik:
+    // nur von RUNNING aus erreichbare Terminalstatus sind gültige
+    // Abschlusszustände einer produktiven Invocation.
+    if (!isValidInvocationTransition(AgentExecutionStatus.RUNNING, adapterResult.status)) {
+      return this.completeRuntimeFailure(
+        request,
+        provider,
+        executionProfile,
+        createIllegalLifecycleFailureResult(
+          request,
+          provider,
+          policyDecision,
+          startedAt,
+          adapterResult.status,
+        ),
+      );
+    }
 
     const completedAt = new Date();
 
@@ -526,6 +691,51 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
     await this.auditInvocationComplete(request, provider, executionProfile, result);
 
     return result;
+  }
+
+  /**
+   * Führt adapter.execute() unter EO-01.5-eigener Zeitbegrenzung aus.
+   * Der Adapter wird NICHT darauf vertraut, context.timeoutMs freiwillig zu
+   * honorieren: ein nicht zurückkehrender Adapter wird von dieser Grenze
+   * deterministisch terminiert. Genau ein Aufruf, kein Retry, kein Fallback.
+   */
+  private async invokeAdapterWithTimeout(
+    adapter: GovernedProviderAdapter,
+    adapterRequest: GovernedAdapterRequest,
+    context: GovernedExecutionContext,
+  ): Promise<GovernedAdapterResult> {
+    const execution = adapter.execute(adapterRequest, context);
+
+    // Verhindert unhandled rejection, falls die Timeout-Grenze das Rennen
+    // gegen eine später rejectende Adapter-Promise gewinnt.
+    void execution.catch(() => undefined);
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new AdapterExecutionTimeoutError(context.timeoutMs)),
+        context.timeoutMs,
+      );
+    });
+
+    try {
+      return await Promise.race([execution, timeoutPromise]);
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+    }
+  }
+
+  /** Konsistente audit-sichere Completion-Semantik für Runtime-Fehler. */
+  private async completeRuntimeFailure(
+    request: GovernedCapabilityInvocationRequest,
+    provider: ProviderDeclaration,
+    executionProfile: ExecutionProfile,
+    failure: GovernedCapabilityInvocationResult,
+  ): Promise<GovernedCapabilityInvocationResult> {
+    await this.auditInvocationComplete(request, provider, executionProfile, failure);
+    return failure;
   }
 
   private validateRequest(request: GovernedCapabilityInvocationRequest): void {
