@@ -42,6 +42,10 @@ import {
   WorkingDirectoryResolver,
   validateHumanGateBinding,
   HumanGateResolver,
+  isConsequentialExecutionAction,
+  GovernedInvocationIdempotencyStore,
+  type GovernedInvocationClaimState,
+  buildGovernedInvocationFingerprint,
   ProviderCredentialRequirement,
   sanitizeProviderExecutionMetadata,
   sanitizeErrorProviderMetadata,
@@ -78,6 +82,12 @@ export interface GovernedInvocationDependencies {
   workingDirectoryResolver: WorkingDirectoryResolver | null;
   humanGateResolver: HumanGateResolver | null;
   homeDirectoryResolver: HomeDirectoryResolver | null;
+  /**
+   * Trusted idempotency boundary (Phase 3H). Null is only acceptable for
+   * invocations without consequential actions — consequential actions fail
+   * closed (IDEMPOTENCY_STORE_MISSING) before adapter.execute().
+   */
+  idempotencyStore: GovernedInvocationIdempotencyStore | null;
   executionPolicyResolver: ExecutionPolicyResolver | null;
 }
 
@@ -457,6 +467,47 @@ function createPolicyBlockedResult(
   };
 }
 
+/**
+ * Fail-closed-Ergebnis der Idempotenz-Grenze (Phase 3H): DUPLICATE oder
+ * CONTEXT_CONFLICT verweigern die produktive Ausführung NACH bestehendem
+ * EO-01.4 ALLOW. Kein zweiter Side Effect, kein stiller Retry.
+ */
+function createIdempotencyBlockedResult(
+  request: GovernedCapabilityInvocationRequest,
+  provider: ProviderDeclaration,
+  reason: 'INVOCATION_DUPLICATE' | 'INVOCATION_IDEMPOTENCY_CONFLICT',
+  startedAt: Date,
+): GovernedCapabilityInvocationResult {
+  const completedAt = new Date();
+  const durationMs = completedAt.getTime() - startedAt.getTime();
+
+  return {
+    invocationId: request.invocationId,
+    organizationId: request.organizationId,
+    workflowRunId: request.workflowRunId,
+    workflowStepRunId: request.workflowStepRunId,
+    correlationId: request.correlationId,
+    capabilityCode: request.capabilityCode,
+    providerId: provider.id,
+    status: AgentExecutionStatus.POLICY_BLOCKED,
+    startedAt,
+    completedAt,
+    durationMs,
+    providerExecutionMetadata: {},
+    normalizedError: {
+      reason,
+      message: INVOCATION_FAILURE_MESSAGES[reason],
+      executionOutcome: ExecutionOutcome.POLICY_BLOCKED,
+      agentExecutionStatus: AgentExecutionStatus.POLICY_BLOCKED,
+      retryable: false,
+      providerMetadata: sanitizeProviderExecutionMetadata({
+        idempotencyReason: reason,
+      }),
+    },
+    policyDecisionReference: 'idempotency-boundary',
+  };
+}
+
 function createInvocationErrorResult(
   request: GovernedCapabilityInvocationRequest,
   provider: ProviderDeclaration | null,
@@ -498,6 +549,24 @@ function createInvocationErrorResult(
 // ---------------------------------------------------------------------------
 // Runtime Failure Boundary (nach EO-01.4 ALLOW, um adapter.execute())
 // ---------------------------------------------------------------------------
+
+/**
+ * Konservative Abbildung eines Terminal-Status auf den Idempotenz-Claim-
+ * Zustand (Phase 3H). Nur SUCCEEDED beweist einen vollständigen, gewollten
+ * Side Effect; TIMED_OUT lässt den Ausgang offen (der Adapter kann weiter-
+ * laufen); jeder andere Status wird als unbekannter Ausgang behandelt.
+ * Es gibt KEINEN Zustand, der einen Claim freigibt.
+ */
+function claimStateForResultStatus(status: AgentExecutionStatus): GovernedInvocationClaimState {
+  switch (status) {
+    case AgentExecutionStatus.SUCCEEDED:
+      return 'COMPLETED';
+    case AgentExecutionStatus.TIMED_OUT:
+      return 'TIMED_OUT_UNKNOWN';
+    default:
+      return 'FAILED_UNKNOWN';
+  }
+}
 
 /**
  * Interner Marker für die EO-01.5-eigene Timeout-Grenze. Der Adapter wird
@@ -818,6 +887,18 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
 
     this.validateRequest(request);
 
+    // Phase 3H Fail-closed: consequential Aktionen ohne trusted
+    // Idempotenz-Store können Duplicate-Safety nicht beweisen und dürfen
+    // adapter.execute() nie erreichen (Timeout != Cancellation).
+    if (
+      isConsequentialExecutionAction(request.requestedAction) &&
+      !this.dependencies.idempotencyStore
+    ) {
+      throw new Error(
+        'IDEMPOTENCY_STORE_MISSING: Consequential invocation requires a trusted idempotency store',
+      );
+    }
+
     const provider = await this.resolveAndValidateProvider(request);
 
     const adapter = this.resolveAdapter(provider);
@@ -870,6 +951,80 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
       governedInputPayload: request.governedInputPayload,
     };
 
+    // Phase 3H Claim-Gate: so spät wie möglich, unmittelbar vor dem
+    // einzigen produktiven adapter.execute(). Der Claim bindet die
+    // invocationId an den kanonischen governed Kontext-Fingerprint
+    // (inkl. trusted ExecutionProfile). DUPLICATE und CONTEXT_CONFLICT
+    // sind fail-closed: kein zweiter Side Effect, kein Attacker-Reuse
+    // einer Identität für fremden Kontext.
+    let executionClaimed = false;
+    if (this.dependencies.idempotencyStore) {
+      const contextFingerprint = buildGovernedInvocationFingerprint({
+        organizationId: request.organizationId,
+        workflowRunId: request.workflowRunId,
+        workflowStepRunId: request.workflowStepRunId,
+        capabilityCode: request.capabilityCode,
+        providerId: provider.id,
+        requestedAction: request.requestedAction,
+        executionProfile,
+        assuranceLevel: request.assuranceLevel,
+        inputReference: request.inputReference,
+      });
+
+      let claimResult: Awaited<ReturnType<GovernedInvocationIdempotencyStore['claim']>>;
+      try {
+        claimResult = await this.dependencies.idempotencyStore.claim(
+          request.invocationId,
+          contextFingerprint,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Governed idempotency claim failed for ${request.invocationId}: ${String(error)}`,
+        );
+        return this.finalizeInvocation(
+          request,
+          provider,
+          executionProfile,
+          createRuntimeFailureResult(
+            request,
+            provider,
+            policyDecision,
+            startedAt,
+            AgentExecutionStatus.FAILED,
+            `EXECUTION_FAILED: Governed idempotency claim failed: ${INVOCATION_FAILURE_MESSAGES.INVOCATION_DUPLICATE}`,
+            undefined,
+            executionContext.credentialReference,
+          ),
+          false,
+        );
+      }
+
+      if (claimResult.outcome === 'DUPLICATE') {
+        return this.finalizeInvocation(
+          request,
+          provider,
+          executionProfile,
+          createIdempotencyBlockedResult(request, provider, 'INVOCATION_DUPLICATE', startedAt),
+          false,
+        );
+      }
+      if (claimResult.outcome === 'CONTEXT_CONFLICT') {
+        return this.finalizeInvocation(
+          request,
+          provider,
+          executionProfile,
+          createIdempotencyBlockedResult(
+            request,
+            provider,
+            'INVOCATION_IDEMPOTENCY_CONFLICT',
+            startedAt,
+          ),
+          false,
+        );
+      }
+      executionClaimed = true;
+    }
+
     // Runtime Failure Boundary: ALLES nach echtem EO-01.4 ALLOW wird
     // normalisiert — Timeout, Adapter-Exception, illegaler Lifecycle-Status.
     // Kein Retry, kein Provider-Fallback, keine zweite State-Machine.
@@ -878,7 +1033,7 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
     try {
       adapterResult = await this.invokeAdapterWithTimeout(adapter, adapterRequest, executionContext);
     } catch (error) {
-      return this.completeRuntimeFailure(
+      return this.finalizeInvocation(
         request,
         provider,
         executionProfile,
@@ -890,6 +1045,7 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
           error,
           executionContext.credentialReference,
         ),
+        executionClaimed,
       );
     }
 
@@ -897,7 +1053,7 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
     // nur von RUNNING aus erreichbare Terminalstatus sind gültige
     // Abschlusszustände einer produktiven Invocation.
     if (!isValidInvocationTransition(AgentExecutionStatus.RUNNING, adapterResult.status)) {
-      return this.completeRuntimeFailure(
+      return this.finalizeInvocation(
         request,
         provider,
         executionProfile,
@@ -909,6 +1065,7 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
           adapterResult.status,
           executionContext.credentialReference,
         ),
+        executionClaimed,
       );
     }
 
@@ -924,9 +1081,7 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
           executionContext.credentialReference,
         );
 
-    await this.auditInvocationComplete(request, provider, executionProfile, result);
-
-    return result;
+    return this.finalizeInvocation(request, provider, executionProfile, result, executionClaimed);
   }
 
   /**
@@ -963,15 +1118,41 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
     }
   }
 
-  /** Konsistente audit-sichere Completion-Semantik für Runtime-Fehler. */
-  private async completeRuntimeFailure(
+  /**
+   * Konsistente audit-sichere Completion-Semantik für ALLE Terminalpfade
+   * nach bestehendem EO-01.4 ALLOW (Phase 3H): Erfolg, Runtime-Fehler,
+   * illegaler Lifecycle-Status und Idempotenz-Verweigerung.
+   *
+   * markCompleted wird NUR ausgeführt, wenn dieser Aufruf den Claim selbst
+   * gesetzt hat (executionClaimed) — ein raced-out später Adapter-Abschluss
+   * oder ein Duplikat-Versuch manipuliert den Claim nie. Die Abbildung ist
+   * bewusst konservativ: Timeout ist keine Cancellation (TIMED_OUT_UNKNOWN),
+   * jeder andere Nicht-Erfolg ist FAILED_UNKNOWN — Claims werden NIE
+   * freigegeben. Best-effort: ein Store-Fehler maskiert niemals das
+   * eigentliche Invocation-Ergebnis.
+   */
+  private async finalizeInvocation(
     request: GovernedCapabilityInvocationRequest,
     provider: ProviderDeclaration,
     executionProfile: ExecutionProfile,
-    failure: GovernedCapabilityInvocationResult,
+    result: GovernedCapabilityInvocationResult,
+    markCompletion: boolean,
   ): Promise<GovernedCapabilityInvocationResult> {
-    await this.auditInvocationComplete(request, provider, executionProfile, failure);
-    return failure;
+    if (markCompletion && this.dependencies.idempotencyStore) {
+      try {
+        await this.dependencies.idempotencyStore.markCompleted(
+          request.invocationId,
+          claimStateForResultStatus(result.status),
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Governed idempotency completion marking failed for ${request.invocationId}: ${String(error)}`,
+        );
+      }
+    }
+
+    await this.auditInvocationComplete(request, provider, executionProfile, result);
+    return result;
   }
 
   private validateRequest(request: GovernedCapabilityInvocationRequest): void {

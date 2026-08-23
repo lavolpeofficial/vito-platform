@@ -39,6 +39,8 @@ export type InvocationFailureReason =
   | 'HUMAN_GATE_NOT_BOUND'
   | 'HUMAN_GATE_EXPIRED'
   | 'HUMAN_GATE_CONTEXT_MISMATCH'
+  | 'INVOCATION_DUPLICATE'
+  | 'INVOCATION_IDEMPOTENCY_CONFLICT'
   | 'EXECUTABLE_NOT_TRUSTED'
   | 'ENVIRONMENT_NOT_ALLOWED'
   | 'CREDENTIAL_INJECTION_FAILED'
@@ -61,6 +63,8 @@ export const INVOCATION_FAILURE_MESSAGES: Record<InvocationFailureReason, string
   HUMAN_GATE_NOT_BOUND: 'Human-Gate-Genehmigung ist nicht an den Invocation-Kontext gebunden',
   HUMAN_GATE_EXPIRED: 'Human-Gate-Genehmigung ist abgelaufen',
   HUMAN_GATE_CONTEXT_MISMATCH: 'Human-Gate-Genehmigung passt nicht zum Invocation-Kontext',
+  INVOCATION_DUPLICATE: 'Governed Invocation mit dieser Identität wurde bereits geclaimed — Timeout ist keine Cancellation, keine zweite produktive Ausführung',
+  INVOCATION_IDEMPOTENCY_CONFLICT: 'Invocation-Identität wurde mit abweichendem governed Kontext verwendet — Fail-closed',
   EXECUTABLE_NOT_TRUSTED: 'Ausführbare Datei kann nicht als vertrauenswürdig verifiziert werden',
   ENVIRONMENT_NOT_ALLOWED: 'Angeforderte Umgebungsvariablen sind nicht in der Allowlist',
   CREDENTIAL_INJECTION_FAILED: 'Credential-Injektion am Adapter-Boundary fehlgeschlagen',
@@ -405,6 +409,8 @@ export function invocationFailureToStatus(reason: InvocationFailureReason): Agen
     case 'HUMAN_GATE_NOT_BOUND':
     case 'HUMAN_GATE_EXPIRED':
     case 'HUMAN_GATE_CONTEXT_MISMATCH':
+    case 'INVOCATION_DUPLICATE':
+    case 'INVOCATION_IDEMPOTENCY_CONFLICT':
     case 'EXECUTION_PROFILE_NOT_GOVERNED':
     case 'POLICY_BLOCKED':
       return AgentExecutionStatus.POLICY_BLOCKED;
@@ -421,6 +427,8 @@ export function invocationFailureToOutcome(reason: InvocationFailureReason): Exe
     case 'HUMAN_GATE_NOT_BOUND':
     case 'HUMAN_GATE_EXPIRED':
     case 'HUMAN_GATE_CONTEXT_MISMATCH':
+    case 'INVOCATION_DUPLICATE':
+    case 'INVOCATION_IDEMPOTENCY_CONFLICT':
     case 'EXECUTION_PROFILE_NOT_GOVERNED':
     case 'POLICY_BLOCKED':
       return ExecutionOutcome.POLICY_BLOCKED;
@@ -611,6 +619,145 @@ export interface HumanGateResolver {
       readonly requestedAction?: ExecutionAction;
     },
   ): Promise<HumanGateBinding | null>;
+}
+
+// ---------------------------------------------------------------------------
+// Governed Invocation Idempotency (Phase 3H — Duplicate Execution Boundary)
+// ---------------------------------------------------------------------------
+
+/**
+ * Consequential execution actions requiring duplicate-execution protection.
+ *
+ * Exactly the actions that CAN produce consequential side effects at the
+ * adapter boundary: file mutation, command execution, network egress and
+ * release-relevant git mutations. GIT_MERGE/GIT_REBASE/GIT_BRANCH_DELETE/
+ * REMOTE_REF_DELETE are unconditionally denied by EO-01.4 evaluatePolicy()
+ * in v0.1 and can therefore never reach adapter.execute(); READ_FILE/
+ * GIT_READ are read-only; READ_SECRET is unconditionally denied.
+ */
+export const CONSEQUENTIAL_INVOCATION_ACTIONS: readonly ExecutionAction[] = [
+  ExecutionAction.WRITE_FILE,
+  ExecutionAction.CREATE_FILE,
+  ExecutionAction.DELETE_FILE,
+  ExecutionAction.RUN_COMMAND,
+  ExecutionAction.NETWORK_ACCESS,
+  ExecutionAction.GIT_COMMIT,
+  ExecutionAction.GIT_PUSH,
+];
+
+export function isConsequentialExecutionAction(action: ExecutionAction): boolean {
+  return CONSEQUENTIAL_INVOCATION_ACTIONS.includes(action);
+}
+
+/**
+ * Minimal internal claim state of the idempotency abstraction.
+ *
+ * Deliberately NOT a second lifecycle engine and NOT part of
+ * AgentExecutionStatus: it records only what the idempotency boundary must
+ * know to prevent duplicate side effects.
+ *
+ * - IN_PROGRESS: claimed, adapter executing.
+ * - COMPLETED: adapter returned a governed SUCCEEDED result.
+ * - TIMED_OUT_UNKNOWN: VITO returned TIMED_OUT, but timeout != cancellation —
+ *   the underlying adapter operation may still be running or may still
+ *   complete side effects later. The claim MUST NOT be released.
+ * - FAILED_UNKNOWN: the invocation ended in a non-success terminal state;
+ *   whether partial side effects occurred is unknowable at this boundary,
+ *   so the claim is likewise never released.
+ */
+export type GovernedInvocationClaimState =
+  | 'IN_PROGRESS'
+  | 'COMPLETED'
+  | 'TIMED_OUT_UNKNOWN'
+  | 'FAILED_UNKNOWN';
+
+/** A recorded execution claim for one logical governed invocation identity. */
+export interface GovernedInvocationExecutionClaim {
+  readonly invocationId: string;
+  /** Canonical fingerprint of the governed context first accepted. */
+  readonly contextFingerprint: string;
+  readonly state: GovernedInvocationClaimState;
+  readonly claimedAt: Date;
+}
+
+/**
+ * Outcome of an atomic claim-or-inspect for one logical invocation identity.
+ * The store decides DUPLICATE vs CONTEXT_CONFLICT; the caller must treat both
+ * as fail-closed refusals of productive execution.
+ */
+export type GovernedInvocationClaimResult =
+  | { readonly outcome: 'CLAIMED'; readonly claim: GovernedInvocationExecutionClaim }
+  | { readonly outcome: 'DUPLICATE'; readonly existing: GovernedInvocationExecutionClaim }
+  | { readonly outcome: 'CONTEXT_CONFLICT'; readonly existingInvocationId: string };
+
+/**
+ * Trusted idempotency store for governed invocations.
+ *
+ * Der Caller DARF weder Store noch Claim-Eintrag liefern — die Abstraktion
+ * wird vertrauenswürdig injiziert. Semantik:
+ *
+ * - claim() ist atomar "claim-or-inspect" je invocationId und bindet die
+ *   Identität an den Kontext-Fingerprint des ERST akzeptierten Kontexts.
+ * - Ein bestehender Claim (welchen Status auch immer) blockiert jede
+ *   erneute produktive Ausführung derselben Identität.
+ * - Abweichender Fingerprint unter gleicher Identität ist CONTEXT_CONFLICT
+ *   (Attacker-Reuse einer Idempotenz-Identität für eine andere Aktion).
+ * - markCompleted() gibt einen Claim NIE frei: nur der Zustand wird
+ *   fortgeschrieben; TIMED_OUT_UNKNOWN/FAILED_UNKNOWN bleiben gesperrt.
+ */
+export interface GovernedInvocationIdempotencyStore {
+  claim(
+    invocationId: string,
+    contextFingerprint: string,
+  ): Promise<GovernedInvocationClaimResult>;
+
+  markCompleted(invocationId: string, state: GovernedInvocationClaimState): Promise<void>;
+}
+
+/**
+ * Kanonischer, deterministischer Kontext-Fingerprint einer governed
+ * Invocation (Phase 3H).
+ *
+ * Bewusst KEIN JSON.stringify unkontrollierter Objekte: nur explizite,
+ * kontrollierte Skalar-Felder mit length-präfixierter Kodierung, sodass
+ * Feldwerte die Struktur nicht verschmelzen können (kein
+ * Delimiter-Injection-Feldgleichzug). Die Bindung des Claims an diesen
+ * Fingerprint verhindert Attacker-Reuse einer invocationId für einen
+ * anderen governed Kontext.
+ */
+export function buildGovernedInvocationFingerprint(fields: {
+  readonly organizationId: string;
+  readonly workflowRunId: string;
+  readonly workflowStepRunId: string;
+  readonly capabilityCode: string;
+  readonly providerId: string;
+  readonly requestedAction: ExecutionAction;
+  readonly executionProfile: ExecutionProfile;
+  readonly assuranceLevel?: string;
+  readonly inputReference?: string;
+}): string {
+  const parts: string[] = ['v1'];
+
+  const append = (label: string, value: string | undefined): void => {
+    if (value === undefined) return;
+    parts.push(`${label}:${value.length}:${value}`);
+  };
+
+  append('org', fields.organizationId);
+  append('run', fields.workflowRunId);
+  append('step', fields.workflowStepRunId);
+  append('cap', fields.capabilityCode);
+  append('prov', fields.providerId);
+  append('action', fields.requestedAction);
+  append('profile', fields.executionProfile);
+  if (fields.assuranceLevel !== undefined) {
+    append('al', fields.assuranceLevel);
+  }
+  if (fields.inputReference !== undefined) {
+    append('in', fields.inputReference);
+  }
+
+  return parts.join('|');
 }
 
 /**

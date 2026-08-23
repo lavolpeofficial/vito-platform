@@ -34,6 +34,9 @@ import {
   providerSupportsCapability,
   ReleaseGateStatus,
   validateHumanGateBinding,
+  type GovernedInvocationClaimResult,
+  type GovernedInvocationClaimState,
+  type GovernedInvocationIdempotencyStore,
   type CredentialBroker,
   type ExecutionPolicyConfig,
   type ExecutionPolicyResolutionContext,
@@ -207,6 +210,63 @@ function buildFakeHomeDirectoryResolver(): HomeDirectoryResolver {
 }
 
 /**
+ * In-Memory-Fake der trusted GovernedInvocationIdempotencyStore-Abstraktion
+ * (Phase 3H). Atomares claim-or-inspect je invocationId; Bindung an den
+ * governed Kontext-Fingerprint. Nur Test-Infrastruktur — die produktive
+ * Architektur bleibt die injizierte Schnittstelle.
+ */
+type FakeIdempotencyStore = GovernedInvocationIdempotencyStore & {
+  claim: jest.Mock;
+  markCompleted: jest.Mock;
+};
+
+function buildFakeIdempotencyStore(): FakeIdempotencyStore {
+  const claims = new Map<
+    string,
+    { contextFingerprint: string; state: GovernedInvocationClaimState; claimedAt: Date }
+  >();
+
+  const claim = jest.fn(
+    async (
+      invocationId: string,
+      contextFingerprint: string,
+    ): Promise<GovernedInvocationClaimResult> => {
+      const existing = claims.get(invocationId);
+      if (!existing) {
+        const record = {
+          contextFingerprint,
+          state: 'IN_PROGRESS' as GovernedInvocationClaimState,
+          claimedAt: new Date(),
+        };
+        claims.set(invocationId, record);
+        return {
+          outcome: 'CLAIMED',
+          claim: { invocationId, ...record },
+        };
+      }
+      if (existing.contextFingerprint !== contextFingerprint) {
+        return { outcome: 'CONTEXT_CONFLICT', existingInvocationId: invocationId };
+      }
+      return {
+        outcome: 'DUPLICATE',
+        existing: { invocationId, ...existing },
+      };
+    },
+  );
+
+  const markCompleted = jest.fn(
+    async (invocationId: string, state: GovernedInvocationClaimState): Promise<void> => {
+      const existing = claims.get(invocationId);
+      if (existing) {
+        existing.state = state;
+      }
+    },
+  );
+
+  return { claim, markCompleted };
+}
+
+/**
  * Trusted ExecutionProfileResolver-Fake.
  *
  * Modelliert die AUTHORITATIVE Profil-Bindung des Workflow-Step-Runs aus
@@ -249,6 +309,7 @@ interface Harness {
   trustedExecutableResolver: TrustedExecutableResolver;
   workingDirectoryResolver: WorkingDirectoryResolver;
   homeDirectoryResolver: HomeDirectoryResolver;
+  idempotencyStore: FakeIdempotencyStore;
   executionProfileResolver: ExecutionProfileResolver & { resolve: jest.Mock };
   executionPolicyResolver: ExecutionPolicyResolver & { resolve: jest.Mock };
 }
@@ -277,6 +338,13 @@ function buildHarness(overrides: Partial<Record<string, any>> = {}): Harness {
     overrides.workingDirectoryResolver ?? buildFakeWorkingDirectoryResolver();
   const homeDirectoryResolver =
     overrides.homeDirectoryResolver ?? buildFakeHomeDirectoryResolver();
+  // Expliziter undefined-Vergleich (statt ??): Phase-3H-Missing-Store-Tests
+  // injizieren bewusst idempotencyStore = null; `??` würde das stillschweigend
+  // zum Fake-Store kollabieren und die Fail-closed-Prämisse zerstören.
+  const idempotencyStore =
+    overrides.idempotencyStore !== undefined
+      ? overrides.idempotencyStore
+      : buildFakeIdempotencyStore();
   const executionProfileResolver =
     overrides.executionProfileResolver ?? buildFakeExecutionProfileResolver();
   const executionPolicyResolver =
@@ -291,6 +359,7 @@ function buildHarness(overrides: Partial<Record<string, any>> = {}): Harness {
     workingDirectoryResolver,
     humanGateResolver,
     homeDirectoryResolver,
+    idempotencyStore,
     executionProfileResolver,
     executionPolicyResolver,
   });
@@ -306,6 +375,7 @@ function buildHarness(overrides: Partial<Record<string, any>> = {}): Harness {
     trustedExecutableResolver,
     workingDirectoryResolver,
     homeDirectoryResolver,
+    idempotencyStore,
     executionProfileResolver,
     executionPolicyResolver,
   };
@@ -2577,5 +2647,291 @@ describe('GovernedInvocationServiceImpl Phase 3G human approval scope binding', 
     expect(harness.humanGateResolver.resolve).toHaveBeenCalledTimes(1);
     expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
     expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+  });
+});
+
+// ===========================================================================
+// EO-01.5 Phase 3H — Idempotency + Late Side-Effect Boundary Tests
+//
+// Finding aus unabhängigem Review: Die EO-01.5-Timeout-Grenze begrenzt nur
+// VITOs Wartezeit (Promise-Race), NICHT die zugrunde liegende Adapter-
+// Operation. Timeout != Cancellation. Ohne Idempotenz-Grenze kann eine
+// Retry-Invocation dieselbe consequential Side Effect ein zweites Mal
+// ausführen (Doppel-Write, Doppel-Push, externe Doppel-Mutation).
+//
+// Kerninvariante: Dieselbe governed logische Operation darf einen
+// consequentialen Adapter-Side Effect NICHT mehr als einmal ausführen —
+// auch nicht nach Timeout/Retry.
+//
+// Architektur (kleinste notwendige Abstraktion):
+// - Trusted, injizierte GovernedInvocationIdempotencyStore (Contracts).
+// - Identität: invocationId + kanonischer Kontext-Fingerprint
+//   (Org/Run/Step/Capability/Provider/Action/Profile[/Assurance/Input]),
+//   length-präfixiert, KEIN unkontrolliertes JSON.stringify.
+// - Consequential Actions OHNE trusted Store: fail closed.
+// - TIMED_OUT gibt den Claim NIEMALS frei (TIMED_OUT_UNKNOWN):
+//   der Adapter könnte noch laufen.
+//
+// Der echte EO-01.4 evaluatePolicy() läuft weiterhin (nicht gemockt).
+// ===========================================================================
+
+describe('GovernedInvocationServiceImpl Phase 3H idempotency boundary', () => {
+  /** Consequentieller, policy-erlaubter Fall: BUILDER + WRITE_FILE im Worktree. */
+  function makeWriteFileRequest(
+    overrides: Record<string, any> = {},
+  ): GovernedCapabilityInvocationRequest {
+    return makeInvocationRequest({
+      requestedAction: ExecutionAction.WRITE_FILE,
+      requestedPath: `${WORKTREE_ROOT}/src/generated/report.ts`,
+      ...overrides,
+    });
+  }
+
+  function getCompletionAuditEvents(harness: Harness): Array<Record<string, any>> {
+    const auditMock = harness.auditService.record as unknown as jest.Mock;
+    return auditMock.mock.calls
+      .map((call) => call[0])
+      .filter((event) => event?.action === 'GOVERNED_INVOCATION_COMPLETE');
+  }
+
+  it('duplicate invocation with same governed identity does not execute adapter twice', async () => {
+    const harness = buildHarness();
+    const request = makeWriteFileRequest({ invocationId: 'inv-idem-dup-1' });
+
+    // Erster legitimer Aufruf: darf ausführen.
+    const first = await harness.service.invoke(request);
+    expect(first.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    expect(harness.idempotencyStore.claim).toHaveBeenCalledTimes(1);
+    expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledWith(
+      'inv-idem-dup-1',
+      'COMPLETED',
+    );
+
+    const [claimedInvocationId, firstFingerprint] =
+      harness.idempotencyStore.claim.mock.calls[0];
+
+    // Zweiter Aufruf mit IDENTISCHER governed Identität: kein zweiter
+    // produktiver Adapter-Aufruf, fail closed statt zweiter Side Effect.
+    const second = await harness.service.invoke({ ...request });
+
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    expect(second.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(second.normalizedError?.reason).toBe('INVOCATION_DUPLICATE');
+    expect(second.normalizedError?.executionOutcome).toBe(
+      ExecutionOutcome.POLICY_BLOCKED,
+    );
+
+    // Gleicher Kontext ⇒ identischer Fingerprint (deterministische Bindung,
+    // kein Konflikt-Missbrauch als Ausrede für Re-Execution).
+    expect(harness.idempotencyStore.claim).toHaveBeenCalledTimes(2);
+    const [, secondFingerprint] = harness.idempotencyStore.claim.mock.calls[1];
+    expect(claimedInvocationId).toBe('inv-idem-dup-1');
+    expect(secondFingerprint).toBe(firstFingerprint);
+
+    // Der ursprüngliche Claim wurde durch den Duplikat-Versuch nicht
+    // angetastet (kein zweites Completion-Buchhalten).
+    expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledTimes(1);
+  });
+
+  it('retry after timed-out invocation does not re-execute the consequential action', async () => {
+    // Adapter kehrt nie freiwillig zurück — nur die EO-01.5-Grenze beendet
+    // den ersten Versuch (TIMED_OUT); die Operation selbst bleibt unbekannt.
+    const execute = jest.fn(
+      (_request: unknown, _context: GovernedExecutionContext): Promise<never> =>
+        new Promise(() => {}),
+    );
+    const harness = buildHarness({
+      fakeAdapter: {
+        adapter: { providerType: ProviderType.CLOUD_LLM, execute } as GovernedProviderAdapter,
+        execute,
+      },
+    });
+
+    const request = makeWriteFileRequest({
+      invocationId: 'inv-idem-timeout-1',
+      executionBudget: { maxDurationMs: 25, maxTokens: 100000 },
+    });
+
+    const first = await harness.service.invoke(request);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(first.status).toBe(AgentExecutionStatus.TIMED_OUT);
+
+    // Timeout != Cancellation: der Claim bleibt bestehen (TIMED_OUT_UNKNOWN),
+    // wird NIEMALS freigegeben.
+    expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledWith(
+      'inv-idem-timeout-1',
+      'TIMED_OUT_UNKNOWN',
+    );
+
+    // Retry mit derselben logischen Identität: KEINE zweite produktive
+    // Adapter-Ausführung.
+    const retry = await harness.service.invoke({ ...request });
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(retry.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(retry.normalizedError?.reason).toBe('INVOCATION_DUPLICATE');
+  });
+
+  it('distinct invocation identities may execute independently', async () => {
+    // Positive Kontrolle: gleicher Provider/Capability/Action, verschiedene
+    // legitime Identitäten → je genau eine Ausführung. Keine globale Lock.
+    const harness = buildHarness();
+
+    const first = await harness.service.invoke(
+      makeWriteFileRequest({ invocationId: 'inv-idem-indep-1' }),
+    );
+    const second = await harness.service.invoke(
+      makeWriteFileRequest({ invocationId: 'inv-idem-indep-2' }),
+    );
+
+    expect(first.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(second.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(2);
+    expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledWith(
+      'inv-idem-indep-1',
+      'COMPLETED',
+    );
+    expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledWith(
+      'inv-idem-indep-2',
+      'COMPLETED',
+    );
+  });
+
+  it.each([
+    { dimension: 'workflowRunId', overrides: { workflowRunId: 'wf-run-CONFLICT' } },
+    { dimension: 'workflowStepRunId', overrides: { workflowStepRunId: 'wf-step-CONFLICT' } },
+    { dimension: 'requestedAction', overrides: { requestedAction: ExecutionAction.CREATE_FILE } },
+    { dimension: 'inputReference', overrides: { inputReference: 'gov://input/CONFLICT' } },
+  ])(
+    'same invocation id with conflicting $dimension fails closed',
+    async ({ overrides }) => {
+      const harness = buildHarness();
+      const baseRequest = makeWriteFileRequest({ invocationId: 'inv-idem-conflict-1' });
+
+      const first = await harness.service.invoke(baseRequest);
+      expect(first.status).toBe(AgentExecutionStatus.SUCCEEDED);
+      expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+
+      // Angriff: bekannte Idempotenz-Identität unter anderem governed
+      // Kontext wiederverwenden. Kein "sicherer Retry" — fail closed.
+      const tampered = await harness.service.invoke(
+        makeWriteFileRequest({ invocationId: 'inv-idem-conflict-1', ...overrides }),
+      );
+
+      expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+      expect(tampered.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+      expect(tampered.normalizedError?.reason).toBe('INVOCATION_IDEMPOTENCY_CONFLICT');
+      expect(tampered.normalizedError?.executionOutcome).toBe(
+        ExecutionOutcome.POLICY_BLOCKED,
+      );
+    },
+  );
+
+  it('same invocation id with conflicting organization fails closed before adapter execution', async () => {
+    // Fremde Organisation scheitert bereits an der Provider-Bindung
+    // (ORGANIZATION_MISMATCH) — jedenfalls kein zweiter Side Effect.
+    const harness = buildHarness();
+    const baseRequest = makeWriteFileRequest({ invocationId: 'inv-idem-conflict-org-1' });
+
+    const first = await harness.service.invoke(baseRequest);
+    expect(first.status).toBe(AgentExecutionStatus.SUCCEEDED);
+
+    await expect(
+      harness.service.invoke(
+        makeWriteFileRequest({
+          invocationId: 'inv-idem-conflict-org-1',
+          organizationId: 'org-b',
+        }),
+      ),
+    ).rejects.toThrow('ORGANIZATION_MISMATCH');
+
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('late adapter completion after timeout does not cause second execution or duplicate audit completion', async () => {
+    // Kontrollierbar verzögerter Adapter: der erste Versuch läuft in das
+    // governed Timeout, die Promise löst sich erst DANNEACH auf.
+    let resolveFirst!: (result: GovernedAdapterResult) => void;
+    const execute = jest.fn(
+      (_request: unknown, _context: GovernedExecutionContext) =>
+        new Promise<GovernedAdapterResult>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    const harness = buildHarness({
+      fakeAdapter: {
+        adapter: { providerType: ProviderType.CLOUD_LLM, execute } as GovernedProviderAdapter,
+        execute,
+      },
+    });
+
+    const request = makeWriteFileRequest({
+      invocationId: 'inv-idem-late-1',
+      executionBudget: { maxDurationMs: 25, maxTokens: 100000 },
+    });
+
+    const first = await harness.service.invoke(request);
+    expect(first.status).toBe(AgentExecutionStatus.TIMED_OUT);
+    expect(getCompletionAuditEvents(harness)).toHaveLength(1);
+
+    // Späte Fertigstellung der Original-Operation NACH dem Timeout:
+    // darf keinen zweiten Completion-Audit und keine Claim-Manipulation
+    // erzeugen (das Ergebnis ist verworfen; Timeout != Cancellation).
+    resolveFirst({
+      status: AgentExecutionStatus.SUCCEEDED,
+      outputReference: 'gov://output/late-completion',
+      artifactReferences: [],
+      evidenceReferences: [],
+      providerExecutionMetadata: {},
+      completedAt: new Date(),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(getCompletionAuditEvents(harness)).toHaveLength(1);
+    expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledTimes(1);
+    expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledWith(
+      'inv-idem-late-1',
+      'TIMED_OUT_UNKNOWN',
+    );
+
+    // Und der Retry bleibt blockiert — die späte Fertigstellung macht die
+    // Operation nicht "wieder ausführbar".
+    const retry = await harness.service.invoke(makeWriteFileRequest({ invocationId: 'inv-idem-late-1' }));
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(retry.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(retry.normalizedError?.reason).toBe('INVOCATION_DUPLICATE');
+  });
+
+  it('consequential invocation without trusted idempotency store fails closed before adapter execution', async () => {
+    // Ohne trusted Store kann Duplicate-Safety für consequential Aktionen
+    // nicht bewiesen werden → fail closed (keine stille Ausführung).
+    const harness = buildHarness({ idempotencyStore: null });
+
+    const request = makeWriteFileRequest({ invocationId: 'inv-idem-no-store-1' });
+
+    await expect(harness.service.invoke(request)).rejects.toThrow(
+      'IDEMPOTENCY_STORE_MISSING',
+    );
+
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+  });
+
+  it('non-consequential invocation remains executable without idempotency store', async () => {
+    // Gegenstück: harmlose Lese-Aktionen werden nicht mit Idempotenz-
+    // Anforderungen belastet (bestehende Read-Semantik bleibt erhalten).
+    const harness = buildHarness({ idempotencyStore: null });
+
+    const request = makeInvocationRequest({
+      invocationId: 'inv-idem-read-no-store-1',
+    });
+
+    const result = await harness.service.invoke(request);
+
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
   });
 });
