@@ -315,11 +315,16 @@ function normalizeAdapterResult(
 
   const trustedSecretValues = credentialReference ? [credentialReference] : [];
 
-  const sanitizedProviderMetadata =
-    sanitizeProviderExecutionMetadata(adapterResult.providerExecutionMetadata);
+  const sanitizedProviderMetadata = redactTrustedSecretsDeep(
+    sanitizeProviderExecutionMetadata(adapterResult.providerExecutionMetadata),
+    trustedSecretValues,
+  );
 
   const sanitizedUsageMetadata = adapterResult.usageMetadata
-    ? sanitizeProviderExecutionMetadata(adapterResult.usageMetadata)
+    ? redactTrustedSecretsDeep(
+        sanitizeProviderExecutionMetadata(adapterResult.usageMetadata),
+        trustedSecretValues,
+      )
     : undefined;
 
   const error = adapterResult.error
@@ -331,7 +336,10 @@ function normalizeAdapterResult(
         executionOutcome: undefined,
         agentExecutionStatus: adapterResult.status,
         retryable: adapterResult.error.retryable,
-        providerMetadata: sanitizeErrorProviderMetadata(adapterResult.error.providerMetadata),
+        providerMetadata: redactTrustedSecretsDeep(
+          sanitizeErrorProviderMetadata(adapterResult.error.providerMetadata),
+          trustedSecretValues,
+        ),
       }
     : undefined;
 
@@ -535,7 +543,10 @@ function createRuntimeFailureResult(
       executionOutcome,
       agentExecutionStatus: status,
       retryable: false,
-      providerMetadata: sanitizeErrorProviderMetadata(providerMetadata),
+      providerMetadata: redactTrustedSecretsDeep(
+        sanitizeErrorProviderMetadata(providerMetadata),
+        trustedSecretValues,
+      ),
     },
     policyDecisionReference: `${policyDecision.policyVersion}-${policyDecision.evaluatedAt.toISOString()}`,
     sideEffectSummary: {
@@ -660,6 +671,50 @@ function containsSecretMaterial(
 }
 
 /**
+ * Exakte Wert-Redaction: ersetzt Vorkommen vertrauenswürdiger Geheimwerte
+ * (z. B. die credentialReference dieser Invocation) unabhängig vom
+ * Feldnamen. Kein Rate von Schlüsselnamen — der Wert selbst ist das Kriterium.
+ */
+function redactExactSecretValues(
+  text: string,
+  trustedSecretValues: readonly string[],
+): string {
+  let redacted = text;
+  for (const secret of trustedSecretValues) {
+    if (secret.length > 0 && redacted.includes(secret)) {
+      redacted = redacted.split(secret).join(REDACTED);
+    }
+  }
+  return redacted;
+}
+
+/**
+ * Rekursive exakte Wert-Redaction für beliebig verschachtelte
+ * Metadaten-Strukturen (Objekte und Arrays). Date-Instanzen und primitive
+ * Nicht-Strings bleiben unverändert.
+ */
+function redactTrustedSecretsDeep<T>(value: T, trustedSecretValues: readonly string[]): T {
+  if (typeof value === 'string') {
+    return redactExactSecretValues(value, trustedSecretValues) as unknown as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactTrustedSecretsDeep(entry, trustedSecretValues)) as unknown as T;
+  }
+  if (
+    value &&
+    typeof value === 'object' &&
+    !(value instanceof Date)
+  ) {
+    const output: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      output[key] = redactTrustedSecretsDeep(entry, trustedSecretValues);
+    }
+    return output as unknown as T;
+  }
+  return value;
+}
+
+/**
  * Redactiert Geheimmaterial aus freiem Text:
  * 1. exakte vertrauenswürdige Werte (z. B. die credentialReference dieser
  *    Invocation — niemals selbst persistiert),
@@ -671,12 +726,7 @@ function redactSecretMaterial(
   text: string,
   trustedSecretValues: readonly string[],
 ): string {
-  let redacted = text;
-  for (const secret of trustedSecretValues) {
-    if (secret.length > 0 && redacted.includes(secret)) {
-      redacted = redacted.split(secret).join(REDACTED);
-    }
-  }
+  let redacted = redactExactSecretValues(text, trustedSecretValues);
   for (const pattern of LEAK_SECRET_TEXT_PATTERNS) {
     redacted = redacted.replace(new RegExp(pattern.source, `${pattern.flags}g`), REDACTED);
   }

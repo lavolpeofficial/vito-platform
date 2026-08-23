@@ -1959,3 +1959,150 @@ describe('GovernedInvocationServiceImpl Phase 3F output and error leakage bounda
     expect(JSON.stringify(result)).not.toContain(TOKEN);
   });
 });
+
+// ===========================================================================
+// EO-01.5 Phase 3F.1 — Exact Trusted Secret Value Redaction in Metadata
+//
+// Finding aus unabhängigem Review: sanitizeProviderExecutionMetadata()
+// filtert primär über sensible Schlüsselnamen und generische Geheimformen.
+// Ein vertrauenswürdiger Wert (die credentialReference dieser Invocation)
+// kann daher unter unschuldigem Feldnamen entweichen.
+//
+// Korrektur: exakte Wert-Redaction der credentialReference auf ALLEN
+// Metadaten-Flächen (providerExecutionMetadata, usageMetadata, normalized
+// error provider metadata) — rekursiv, unabhängig von Verschachtelungstiefe
+// oder Feldnamen.
+// ===========================================================================
+
+describe('GovernedInvocationServiceImpl Phase 3F.1 exact trusted secret value redaction', () => {
+  const SECRET_MARKER = 'SECRET_REF_DO_NOT_LEAK_7f3a';
+
+  function buildLeakageHarness(execute: jest.Mock): Harness {
+    const provider = makeProviderDeclaration({
+      credentialRequirement: ProviderCredentialRequirement.REQUIRED,
+    });
+    const broker: CredentialBroker = {
+      getCredentialReference: jest.fn().mockResolvedValue(SECRET_MARKER),
+      validateCredentialReference: jest.fn().mockResolvedValue(true),
+    };
+    return buildHarness({
+      provider,
+      credentialBroker: broker,
+      fakeAdapter: {
+        adapter: { providerType: ProviderType.CLOUD_LLM, execute } as GovernedProviderAdapter,
+        execute,
+      },
+    });
+  }
+
+  function boundaryExecute(
+    resultOverride: Partial<GovernedAdapterResult>,
+  ): jest.Mock {
+    return jest.fn(
+      async (_request: unknown, context: GovernedExecutionContext): Promise<GovernedAdapterResult> => {
+        expect(context.credentialReference).toBe(SECRET_MARKER);
+        return {
+          status: AgentExecutionStatus.SUCCEEDED,
+          providerExecutionMetadata: {},
+          completedAt: new Date(),
+          ...resultOverride,
+        };
+      },
+    );
+  }
+
+  function assertMarkerContainedNowhere(harness: Harness, result: GovernedCapabilityInvocationResult): void {
+    expect(JSON.stringify(result)).not.toContain(SECRET_MARKER);
+    const auditMock = harness.auditService.record as unknown as jest.Mock;
+    for (const call of auditMock.mock.calls) {
+      expect(JSON.stringify(call)).not.toContain(SECRET_MARKER);
+    }
+  }
+
+  it('exact credential reference in provider metadata is redacted regardless of field name', async () => {
+    // Bewusst unsensibler Feldname: der Schutz muss vom WERT kommen,
+    // nicht vom Schlüsselnamen-Filter.
+    const execute = boundaryExecute({
+      providerExecutionMetadata: {
+        harmlessFieldName: SECRET_MARKER,
+      },
+    });
+    const harness = buildLeakageHarness(execute);
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-leak-meta-innocent-key-1' }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result.providerExecutionMetadata ?? {})).not.toContain(SECRET_MARKER);
+    assertMarkerContainedNowhere(harness, result);
+  });
+
+  it('exact credential reference in usage metadata is redacted regardless of field name', async () => {
+    const execute = boundaryExecute({
+      usageMetadata: {
+        innocentDescription: SECRET_MARKER,
+      },
+    });
+    const harness = buildLeakageHarness(execute);
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-leak-usage-innocent-key-1' }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.usageMetadata).toBeDefined();
+    expect(JSON.stringify(result.usageMetadata ?? {})).not.toContain(SECRET_MARKER);
+    assertMarkerContainedNowhere(harness, result);
+  });
+
+  it('exact credential reference nested in metadata arrays and objects is redacted', async () => {
+    // Verschachtelte Strukturen dürfen die exakte Wert-Redaction nicht
+    // umgehen können.
+    const execute = boundaryExecute({
+      providerExecutionMetadata: {
+        outer: {
+          innerList: [{ deepField: SECRET_MARKER }, 'clean-entry'],
+          plain: SECRET_MARKER,
+        },
+        list: [SECRET_MARKER, 'also-clean'],
+      },
+    });
+    const harness = buildLeakageHarness(execute);
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-leak-meta-nested-1' }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result.providerExecutionMetadata ?? {})).not.toContain(SECRET_MARKER);
+    expect(JSON.stringify(result.providerExecutionMetadata ?? {})).toContain('clean-entry');
+    expect(JSON.stringify(result.providerExecutionMetadata ?? {})).toContain('also-clean');
+    assertMarkerContainedNowhere(harness, result);
+  });
+
+  it('exact credential reference in adapter error provider metadata is redacted', async () => {
+    const execute = boundaryExecute({
+      status: AgentExecutionStatus.FAILED,
+      error: {
+        code: 'PROVIDER_UPSTREAM_ERROR',
+        message: 'upstream failed',
+        retryable: false,
+        providerMetadata: {
+          contextHint: SECRET_MARKER,
+        },
+      },
+    });
+    const harness = buildLeakageHarness(execute);
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-leak-error-meta-innocent-key-1' }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(AgentExecutionStatus.FAILED);
+    expect(result.normalizedError?.providerMetadata).toBeDefined();
+    expect(JSON.stringify(result.normalizedError?.providerMetadata ?? {})).not.toContain(SECRET_MARKER);
+    assertMarkerContainedNowhere(harness, result);
+  });
+});
