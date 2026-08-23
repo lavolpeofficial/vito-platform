@@ -238,6 +238,81 @@ The separation is:
 - **TIMO coordinates ATERIMA operations**
 - **PAVEL / KONRAD perform specialist work**
 
+## Dual Human Authority Model
+
+A Company Operations Manager must not have one undifferentiated human owner for both business and technical authority.
+
+VITO defines two separate human authority roles for each Company Operations Manager instance:
+
+### Business Authority Owner
+
+The Business Authority Owner is accountable for what the Company Operations Manager is permitted to do from an organizational and commercial perspective.
+
+Responsibilities include:
+
+- business-process authority
+- operational decision boundaries
+- company priorities
+- customer and recruiting rules
+- exceptional business approvals
+- commercial commitments
+- escalation policy
+- final business accountability
+
+For **ATERIMA v0.1**, the Business Authority Owner for TIMO is:
+
+> **Peter — Geschäftsführer / Managing Director of ATERIMA**
+
+Peter is the highest business escalation and decision authority for TIMO. This does not imply that every routine action requires Peter's approval. Human Gates should be used only where the defined authority model requires them.
+
+### Technical Authority Owner
+
+The Technical Authority Owner is accountable for what the Company Operations Manager is technically permitted to access and execute.
+
+Responsibilities include:
+
+- system access and permissions
+- integration authorization
+- credential governance
+- API and infrastructure access
+- security controls
+- deployment / technical release authority where applicable
+- technical incident handling
+- technical revocation and containment
+
+For **ATERIMA v0.1**, the Technical Authority Owner remains a **configurable role to be assigned to an appropriate ATERIMA IT responsible person**.
+
+The Technical Authority Owner must not automatically gain business authority merely because they control technical systems. Likewise, the Business Authority Owner must not automatically bypass technical security, credential, deployment, or access-control boundaries.
+
+### Separation of Authority
+
+```text
+                    PETER
+             Business Authority
+                    │
+                    │
+VITO ───────────── TIMO ───────────── IT
+Governance     ATERIMA Manager    Technical Authority
+                    │
+             ┌──────┴──────┐
+           PAVEL          KONRAD
+         Recruiting       Customer
+```
+
+The two authority dimensions are intentionally independent:
+
+```text
+BUSINESS AUTHORITY
+What may the company operation decide or promise?
+
+TECHNICAL AUTHORITY
+What may the system access or execute?
+```
+
+A consequential action may require one or both authority dimensions depending on the capability and risk class.
+
+This separation should become a reusable VITO product primitive for larger tenants. In smaller organizations both authority roles may be assigned to the same human, but the roles remain logically distinct in the model.
+
 ## Initial Autonomy Model
 
 For early production, the Company Operations Manager should start conservatively.
@@ -259,6 +334,9 @@ Do not build:
 4. Unbounded agent-to-agent planning loops.
 5. Specialized employees that also become company orchestrators.
 6. Cross-tenant operational context sharing.
+7. A single undifferentiated human authority role that conflates business and technical power.
+8. Technical administrators automatically acquiring business decision authority.
+9. Business executives automatically bypassing technical security boundaries.
 
 ## Product Implication
 
@@ -270,6 +348,8 @@ Conceptually:
 VITO Platform
 + Tenant / Company DNA
 + Company Operations Manager
++ Business Authority Owner
++ Technical Authority Owner
 + Specialized Digital Employees
 + AOE Intelligence
 + Governance
@@ -283,6 +363,8 @@ This allows VITO to support many organizations without turning the central orche
 ```text
 VITO
 └── ATERIMA
+    ├── Business Authority: Peter · Geschäftsführer
+    ├── Technical Authority: ATERIMA IT · TBD
     └── TIMO · Company Operations Manager
         ├── PAVEL · Recruiting
         └── KONRAD · Customer Operations / Customer Portal
@@ -290,8 +372,10 @@ VITO
 
 This is the canonical starting structure for the ATERIMA VITO instance.
 
-## Architectural Rule
+## Architectural Rules
 
 > **Company-specific operational intelligence belongs primarily to the Company Operations Manager / Company DNA layer, not to the VITO core.**
+
+> **Business authority and technical authority are separate governance dimensions. Neither role implicitly inherits the authority of the other.**
 
 VITO should scale by delegating organization-specific management, not by accumulating it centrally.
