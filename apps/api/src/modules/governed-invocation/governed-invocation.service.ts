@@ -972,7 +972,17 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
     //   Ausführungsberechtigung.
     let executionClaimed = false;
     let claimedLogicalOperationKey: string | undefined;
-    if (this.dependencies.idempotencyStore) {
+    // F1 Freeze-Blocker-Korrektur: Die Claim-Grenze gilt AUSSCHLIESSLICH für
+    // Aktionen, die die kanonische Vertragshilfsfunktion
+    // isConsequentialExecutionAction() als consequential klassifiziert
+    // (CONSEQUENTIAL_INVOCATION_ACTIONS). Lese-Aktionen (READ_FILE/GIT_READ)
+    // erwerben keinen Claim und kollidieren nicht als DUPLICATE — auch wenn
+    // ein trusted Store injiziert ist. Keine zweite Aktionsliste, keine
+    // duplizierte Klassifikation.
+    if (
+      isConsequentialExecutionAction(request.requestedAction) &&
+      this.dependencies.idempotencyStore
+    ) {
       const contextFingerprint = buildGovernedInvocationFingerprint({
         organizationId: request.organizationId,
         workflowRunId: request.workflowRunId,

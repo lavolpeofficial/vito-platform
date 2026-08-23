@@ -3547,3 +3547,82 @@ describe('Phase 3H.3 action-aware logical operation key', () => {
     },
   );
 });
+
+// ===========================================================================
+// EO-01.5 F1 Freeze Blocker — Idempotenz nur für consequential Aktionen
+//
+// BEFUND (F1): Die Claim-/Finalisierungs-Grenze wurde bisher allein nach
+// idempotencyStore-Präsenz betreten — nicht nach der kanonischen
+// consequential-Klassifikation. Dadurch konnten NICHT-konsequenzielle
+// READ_FILE/GIT_READ-Vorgänge in den logop-v2-Claim-Pfad gelangen, obwohl
+// CONSEQUENTIAL_INVOCATION_ACTIONS Lese-Aktionen explizit ausschließt.
+// Distinkte Lesevorgänge im selben governed Kontext kollidierten fälschlich
+// als INVOCATION_DUPLICATE.
+//
+// Invariante: Duplicate-Schutz gilt AUSSCHLIESSLICH für Aktionen, die die
+// kanonische Vertragshilfsfunktion isConsequentialExecutionAction() als
+// consequential klassifiziert. Keine zweite Aktionsliste, keine duplizierte
+// Klassifikation.
+// ===========================================================================
+
+describe('F1 freeze blocker: idempotency claims restricted to consequential actions', () => {
+  function makeReadRequest(
+    overrides: Record<string, any> = {},
+  ): GovernedCapabilityInvocationRequest {
+    return makeInvocationRequest(overrides);
+  }
+
+  it('distinct READ_FILE operations in the same governed context both execute', async () => {
+    // Gleiche org/run/step/capability/inputReference, verschiedene
+    // requestedPath + invocationIds: zwei unabhängige Lesevorgänge dürfen
+    // sich NIEMALS als Duplicate kollidieren — und dürfen keinen Claim
+    // erwerben, da READ_FILE nicht consequential ist.
+    const harness = buildHarness();
+
+    const first = await harness.service.invoke(
+      makeReadRequest({
+        invocationId: 'inv-read-op-1',
+        requestedPath: `${WORKTREE_ROOT}/src/a.ts`,
+      }),
+    );
+    const second = await harness.service.invoke(
+      makeReadRequest({
+        invocationId: 'inv-read-op-2',
+        requestedPath: `${WORKTREE_ROOT}/src/b.ts`,
+      }),
+    );
+
+    expect(first.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(second.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(2);
+
+    // Kerninvariante: Lese-Aktionen erwerben KEINEN Idempotenz-Claim.
+    expect(harness.idempotencyStore.claim).not.toHaveBeenCalled();
+    expect(harness.idempotencyStore.markCompleted).not.toHaveBeenCalled();
+  });
+
+  it('GIT_READ invocations are not duplicate-blocked while an idempotency store is live', async () => {
+    const harness = buildHarness();
+
+    const first = await harness.service.invoke(
+      makeReadRequest({
+        invocationId: 'inv-gitread-1',
+        requestedAction: ExecutionAction.GIT_READ,
+      }),
+    );
+    const second = await harness.service.invoke(
+      makeReadRequest({
+        invocationId: 'inv-gitread-2',
+        requestedAction: ExecutionAction.GIT_READ,
+      }),
+    );
+
+    expect(first.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(second.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(2);
+    expect(second.normalizedError?.reason).toBeUndefined();
+
+    expect(harness.idempotencyStore.claim).not.toHaveBeenCalled();
+    expect(harness.idempotencyStore.markCompleted).not.toHaveBeenCalled();
+  });
+});
