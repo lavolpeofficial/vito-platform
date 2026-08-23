@@ -671,8 +671,21 @@ export type GovernedInvocationClaimState =
   | 'TIMED_OUT_UNKNOWN'
   | 'FAILED_UNKNOWN';
 
-/** A recorded execution claim for one logical governed invocation identity. */
+/**
+ * A recorded execution claim for one LOGICAL governed operation (Phase 3H.1).
+ *
+ * Identity separation (do NOT collapse these):
+ * - ATTEMPT IDENTITY: invocationId — which attempt owns/owned the claim;
+ *   audit and conflict/replay evidence only, never the dedup key.
+ * - LOGICAL OPERATION IDENTITY: logicalOperationKey — trusted-derived
+ *   stable key of the governed context; the store's duplicate-prevention
+ *   primary key. A new invocationId on the same key is a DUPLICATE.
+ * - GOVERNED CONTEXT FINGERPRINT: contextFingerprint — canonical proof of
+ *   the exact first-accepted context; conflict/replay forensics.
+ */
 export interface GovernedInvocationExecutionClaim {
+  readonly logicalOperationKey: string;
+  /** Owning attempt identity at claim time. Never silently transferred. */
   readonly invocationId: string;
   /** Canonical fingerprint of the governed context first accepted. */
   readonly contextFingerprint: string;
@@ -681,7 +694,7 @@ export interface GovernedInvocationExecutionClaim {
 }
 
 /**
- * Outcome of an atomic claim-or-inspect for one logical invocation identity.
+ * Outcome of an atomic claim-or-inspect for one logical governed operation.
  * The store decides DUPLICATE vs CONTEXT_CONFLICT; the caller must treat both
  * as fail-closed refusals of productive execution.
  */
@@ -691,41 +704,45 @@ export type GovernedInvocationClaimResult =
   | { readonly outcome: 'CONTEXT_CONFLICT'; readonly existingInvocationId: string };
 
 /**
- * Trusted idempotency store for governed invocations.
+ * Trusted idempotency store for governed invocations (Phase 3H.1).
  *
  * Der Caller DARF weder Store noch Claim-Eintrag liefern — die Abstraktion
  * wird vertrauenswürdig injiziert. Semantik:
  *
- * - claim() ist atomar "claim-or-inspect" je invocationId und bindet die
- *   Identität an den Kontext-Fingerprint des ERST akzeptierten Kontexts.
- * - Ein bestehender Claim (welchen Status auch immer) blockiert jede
- *   erneute produktive Ausführung derselben Identität.
- * - Abweichender Fingerprint unter gleicher Identität ist CONTEXT_CONFLICT
- *   (Attacker-Reuse einer Idempotenz-Identität für eine andere Aktion).
- * - markCompleted() gibt einen Claim NIE frei: nur der Zustand wird
- *   fortgeschrieben; TIMED_OUT_UNKNOWN/FAILED_UNKNOWN bleiben gesperrt.
+ * - Dedup-Primärschlüssel ist die LOGISCHE OPERATION (logicalOperationKey),
+ *   abgeleitet aus dem trusted governed Kontext — NIEMALS die Attempt-
+ *   Identität. Ein Retry mit neuer invocationId auf derselben logischen
+ *   Operation ist ein DUPLICATE (kein Autoritäts-Neubezug durch neue IDs).
+ * - claim() ist atomar "claim-or-inspect": erster Versuch claimed die
+ *   logische Operation und wird deren Besitzer; jeder weitere Versuch —
+ *   gleiche oder andere invocationId — erhält DUPLICATE mit Besitzer-
+ *   Evidenz. Ownership wird nie stillschweigend übertragen.
+ * - Dieselbe invocationId unter einem ANDEREN logischen Schlüssel ist
+ *   CONTEXT_CONFLICT (Attacker-Reuse einer Attempt-Identität).
+ * - markCompleted() schreibt ausschließlich dem Besitzer zu und gibt einen
+ *   Claim NIE frei: nur der Zustand wird fortgeschrieben;
+ *   TIMED_OUT_UNKNOWN/FAILED_UNKNOWN bleiben gesperrt.
  */
 export interface GovernedInvocationIdempotencyStore {
   claim(
+    logicalOperationKey: string,
     invocationId: string,
     contextFingerprint: string,
   ): Promise<GovernedInvocationClaimResult>;
 
-  markCompleted(invocationId: string, state: GovernedInvocationClaimState): Promise<void>;
+  markCompleted(
+    logicalOperationKey: string,
+    invocationId: string,
+    state: GovernedInvocationClaimState,
+  ): Promise<void>;
 }
 
 /**
- * Kanonischer, deterministischer Kontext-Fingerprint einer governed
- * Invocation (Phase 3H).
- *
- * Bewusst KEIN JSON.stringify unkontrollierter Objekte: nur explizite,
- * kontrollierte Skalar-Felder mit length-präfixierter Kodierung, sodass
- * Feldwerte die Struktur nicht verschmelzen können (kein
- * Delimiter-Injection-Feldgleichzug). Die Bindung des Claims an diesen
- * Fingerprint verhindert Attacker-Reuse einer invocationId für einen
- * anderen governed Kontext.
+ * Shared length-prefixed encoder for governed identity fields.
+ * Explicit controlled scalar fields only — no arbitrary JSON.stringify;
+ * label:len:value encoding prevents field-value delimiter merging.
  */
-export function buildGovernedInvocationFingerprint(fields: {
+function encodeGovernedContextFields(fields: {
   readonly organizationId: string;
   readonly workflowRunId: string;
   readonly workflowStepRunId: string;
@@ -735,8 +752,8 @@ export function buildGovernedInvocationFingerprint(fields: {
   readonly executionProfile: ExecutionProfile;
   readonly assuranceLevel?: string;
   readonly inputReference?: string;
-}): string {
-  const parts: string[] = ['v1'];
+}): string[] {
+  const parts: string[] = [];
 
   const append = (label: string, value: string | undefined): void => {
     if (value === undefined) return;
@@ -757,7 +774,46 @@ export function buildGovernedInvocationFingerprint(fields: {
     append('in', fields.inputReference);
   }
 
-  return parts.join('|');
+  return parts;
+}
+
+/** Field set shared by fingerprint and logical-operation-key builders. */
+export type GovernedContextIdentityFields = Parameters<
+  typeof encodeGovernedContextFields
+>[0];
+
+/**
+ * Kanonischer, deterministischer Kontext-Fingerprint einer governed
+ * Invocation (Phase 3H / 3H.1).
+ *
+ * Bewusst KEIN JSON.stringify unkontrollierter Objekte: nur explizite,
+ * kontrollierte Skalar-Felder mit length-präfixierter Kodierung, sodass
+ * Feldwerte die Struktur nicht verschmelzen können (kein
+ * Delimiter-Injection-Feldgleichzug). Die Bindung des Claims an diesen
+ * Fingerprint verhindert Attacker-Reuse einer invocationId für einen
+ * anderen governed Kontext. Rolle: GOVERNED CONTEXT FINGERPRINT — exakte
+ * Kontextbindung und Konflikt-/Replay-Evidenz.
+ */
+export function buildGovernedInvocationFingerprint(
+  fields: GovernedContextIdentityFields,
+): string {
+  return ['v1', ...encodeGovernedContextFields(fields)].join('|');
+}
+
+/**
+ * Stabiler, trusted abgeleiteter Schlüssel der LOGISCHEN OPERATION
+ * (Phase 3H.1). Primärschlüssel der Duplicate-Prävention: dieselbe
+ * governed logische Operation ergibt denselben Schlüssel — unabhängig
+ * davon, welche invocationId der Aufrufer wählt. Keine mutierbaren
+ * Zeitstempel, kein unkontrolliertes JSON.stringify; dieselben
+ * kontrollierten Felder wie der Kontext-Fingerprint, aber eigener
+ * Namespace-Präfix, sodass die beiden Identitäten nie vermischt oder
+ * kreuzweise verglichen werden können.
+ */
+export function buildGovernedLogicalOperationKey(
+  fields: GovernedContextIdentityFields,
+): string {
+  return ['logop-v1', ...encodeGovernedContextFields(fields)].join('|');
 }
 
 /**

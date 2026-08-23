@@ -211,9 +211,16 @@ function buildFakeHomeDirectoryResolver(): HomeDirectoryResolver {
 
 /**
  * In-Memory-Fake der trusted GovernedInvocationIdempotencyStore-Abstraktion
- * (Phase 3H). Atomares claim-or-inspect je invocationId; Bindung an den
- * governed Kontext-Fingerprint. Nur Test-Infrastruktur — die produktive
- * Architektur bleibt die injizierte Schnittstelle.
+ * (Phase 3H.1). Atomares claim-or-inspect je LOGISCHER OPERATION
+ * (logicalOperationKey = trusted abgeleiteter Schlüssel); der Versuch
+ * (invocationId) ist nur Besitzer-Evidenz, NICHT der Dedup-Schlüssel.
+ * Zwei Indizes:
+ * - logicalOperationKey → Claim (Duplicate-Prevention, primär)
+ * - invocationId → logicalOperationKey (Attacker-Reuse-Erkennung:
+ *   dieselbe Attempt-Identität unter anderem logischen Kontext)
+ * markCompleted schreibt NUR dem Besitzer zu — Ownership wird nie übertragen.
+ * Nur Test-Infrastruktur — die produktive Architektur bleibt die injizierte
+ * Schnittstelle.
  */
 type FakeIdempotencyStore = GovernedInvocationIdempotencyStore & {
   claim: jest.Mock;
@@ -221,43 +228,63 @@ type FakeIdempotencyStore = GovernedInvocationIdempotencyStore & {
 };
 
 function buildFakeIdempotencyStore(): FakeIdempotencyStore {
-  const claims = new Map<
+  const claimsByLogicalKey = new Map<
     string,
-    { contextFingerprint: string; state: GovernedInvocationClaimState; claimedAt: Date }
+    {
+      invocationId: string;
+      contextFingerprint: string;
+      state: GovernedInvocationClaimState;
+      claimedAt: Date;
+    }
   >();
+  const logicalKeyByInvocationId = new Map<string, string>();
 
   const claim = jest.fn(
     async (
+      logicalOperationKey: string,
       invocationId: string,
       contextFingerprint: string,
     ): Promise<GovernedInvocationClaimResult> => {
-      const existing = claims.get(invocationId);
-      if (!existing) {
-        const record = {
-          contextFingerprint,
-          state: 'IN_PROGRESS' as GovernedInvocationClaimState,
-          claimedAt: new Date(),
-        };
-        claims.set(invocationId, record);
-        return {
-          outcome: 'CLAIMED',
-          claim: { invocationId, ...record },
-        };
-      }
-      if (existing.contextFingerprint !== contextFingerprint) {
+      // Attacker-Reuse: bekannte Attempt-Identität unter anderem logischen
+      // Kontext → fail closed (Konflikt hat Vorrang vor Duplicate-Prüfung).
+      const knownLogicalKey = logicalKeyByInvocationId.get(invocationId);
+      if (knownLogicalKey !== undefined && knownLogicalKey !== logicalOperationKey) {
         return { outcome: 'CONTEXT_CONFLICT', existingInvocationId: invocationId };
       }
+
+      const existing = claimsByLogicalKey.get(logicalOperationKey);
+      if (existing) {
+        return {
+          outcome: 'DUPLICATE',
+          existing: { logicalOperationKey, ...existing },
+        };
+      }
+
+      const record = {
+        invocationId,
+        contextFingerprint,
+        state: 'IN_PROGRESS' as GovernedInvocationClaimState,
+        claimedAt: new Date(),
+      };
+      claimsByLogicalKey.set(logicalOperationKey, record);
+      logicalKeyByInvocationId.set(invocationId, logicalOperationKey);
       return {
-        outcome: 'DUPLICATE',
-        existing: { invocationId, ...existing },
+        outcome: 'CLAIMED',
+        claim: { logicalOperationKey, ...record },
       };
     },
   );
 
   const markCompleted = jest.fn(
-    async (invocationId: string, state: GovernedInvocationClaimState): Promise<void> => {
-      const existing = claims.get(invocationId);
-      if (existing) {
+    async (
+      logicalOperationKey: string,
+      invocationId: string,
+      state: GovernedInvocationClaimState,
+    ): Promise<void> => {
+      const existing = claimsByLogicalKey.get(logicalOperationKey);
+      // Ownership-Guard: ein Nicht-Besitzer (z. B. später fremder Versuch)
+      // darf den Claim nie anfassen oder übernehmen.
+      if (existing && existing.invocationId === invocationId) {
         existing.state = state;
       }
     },
@@ -2663,14 +2690,16 @@ describe('GovernedInvocationServiceImpl Phase 3G human approval scope binding', 
 // consequentialen Adapter-Side Effect NICHT mehr als einmal ausführen —
 // auch nicht nach Timeout/Retry.
 //
-// Architektur (kleinste notwendige Abstraktion):
-// - Trusted, injizierte GovernedInvocationIdempotencyStore (Contracts).
-// - Identität: invocationId + kanonischer Kontext-Fingerprint
-//   (Org/Run/Step/Capability/Provider/Action/Profile[/Assurance/Input]),
-//   length-präfixiert, KEIN unkontrolliertes JSON.stringify.
-// - Consequential Actions OHNE trusted Store: fail closed.
-// - TIMED_OUT gibt den Claim NIEMALS frei (TIMED_OUT_UNKNOWN):
-//   der Adapter könnte noch laufen.
+// Phase 3H.1 Korrektur: Die Dedup-Schutzgrenze ist die LOGISCHE OPERATION
+// (trusted aus governed Kontext abgeleitet), NICHT die Attempt-Identität.
+// Eine neue invocationId auf derselben logischen Operation ist ein
+// Duplicate, kein neuer Autoritätsbezug.
+//
+// Identitäts-Trennung:
+// - ATTEMPT IDENTITY: invocationId (Audit-/Konflikt-Evidenz)
+// - LOGICAL OPERATION IDENTITY: trusted abgeleiteter Operationsschlüssel
+//   (Dedup-Primärschlüssel des Stores)
+// - GOVERNED CONTEXT FINGERPRINT: exakte Kontextbindung/Konfliktnachweis
 //
 // Der echte EO-01.4 evaluatePolicy() läuft weiterhin (nicht gemockt).
 // ===========================================================================
@@ -2703,13 +2732,14 @@ describe('GovernedInvocationServiceImpl Phase 3H idempotency boundary', () => {
     expect(first.status).toBe(AgentExecutionStatus.SUCCEEDED);
     expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
     expect(harness.idempotencyStore.claim).toHaveBeenCalledTimes(1);
+    const [firstLogicalKey, claimedInvocationId, firstFingerprint] =
+      harness.idempotencyStore.claim.mock.calls[0];
+    expect(claimedInvocationId).toBe('inv-idem-dup-1');
     expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledWith(
+      firstLogicalKey,
       'inv-idem-dup-1',
       'COMPLETED',
     );
-
-    const [claimedInvocationId, firstFingerprint] =
-      harness.idempotencyStore.claim.mock.calls[0];
 
     // Zweiter Aufruf mit IDENTISCHER governed Identität: kein zweiter
     // produktiver Adapter-Aufruf, fail closed statt zweiter Side Effect.
@@ -2722,16 +2752,95 @@ describe('GovernedInvocationServiceImpl Phase 3H idempotency boundary', () => {
       ExecutionOutcome.POLICY_BLOCKED,
     );
 
-    // Gleicher Kontext ⇒ identischer Fingerprint (deterministische Bindung,
-    // kein Konflikt-Missbrauch als Ausrede für Re-Execution).
+    // Gleicher Kontext ⇒ identischer logischer Schlüssel UND identischer
+    // Fingerprint (deterministische Bindung, kein Konflikt-Missbrauch als
+    // Ausrede für Re-Execution).
     expect(harness.idempotencyStore.claim).toHaveBeenCalledTimes(2);
-    const [, secondFingerprint] = harness.idempotencyStore.claim.mock.calls[1];
-    expect(claimedInvocationId).toBe('inv-idem-dup-1');
+    const [secondLogicalKey, , secondFingerprint] =
+      harness.idempotencyStore.claim.mock.calls[1];
+    expect(secondLogicalKey).toBe(firstLogicalKey);
     expect(secondFingerprint).toBe(firstFingerprint);
 
     // Der ursprüngliche Claim wurde durch den Duplikat-Versuch nicht
     // angetastet (kein zweites Completion-Buchhalten).
     expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledTimes(1);
+  });
+
+  it('same logical consequential operation with different invocation ids does not execute twice', async () => {
+    // Phase 3H.1 Kernbefund: ein Retry darf Duplicate-Schutz NICHT durch
+    // eine neue Attempt-/Invocation-Identität umgehen. Verschiedene
+    // invocationIds, SONST exakt derselbe governed logische Kontext →
+    // genau EINE produktive Ausführung.
+    const harness = buildHarness();
+
+    const first = await harness.service.invoke(
+      makeWriteFileRequest({ invocationId: 'attempt-A' }),
+    );
+    expect(first.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+
+    const retry = await harness.service.invoke(
+      makeWriteFileRequest({ invocationId: 'attempt-B' }),
+    );
+
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    expect(retry.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(retry.normalizedError?.reason).toBe('INVOCATION_DUPLICATE');
+    expect(retry.normalizedError?.executionOutcome).toBe(
+      ExecutionOutcome.POLICY_BLOCKED,
+    );
+
+    // Beide Versuche münden im SELBEN logischen Operationsschlüssel;
+    // der zweite Claim-Versuch wird als DUPLICATE mit Besitzer-Evidenz
+    // des Originalversuchs abgewiesen.
+    expect(harness.idempotencyStore.claim).toHaveBeenCalledTimes(2);
+    const [keyA, attemptA] = harness.idempotencyStore.claim.mock.calls[0];
+    const [keyB, attemptB] = harness.idempotencyStore.claim.mock.calls[1];
+    expect(attemptA).toBe('attempt-A');
+    expect(attemptB).toBe('attempt-B');
+    expect(keyB).toBe(keyA);
+    expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledTimes(1);
+  });
+
+  it('retry after timeout with a different invocation id remains blocked', async () => {
+    // Timeout != Cancellation UND != Freigabe: Auch ein neuer Attempt-Bezug
+    // (andere invocationId) auf dieselbe logische Operation bleibt gesperrt,
+    // solange der Ausgang unbekannt ist (TIMED_OUT_UNKNOWN).
+    const execute = jest.fn(
+      (_request: unknown, _context: GovernedExecutionContext): Promise<never> =>
+        new Promise(() => {}),
+    );
+    const harness = buildHarness({
+      fakeAdapter: {
+        adapter: { providerType: ProviderType.CLOUD_LLM, execute } as GovernedProviderAdapter,
+        execute,
+      },
+    });
+
+    const first = await harness.service.invoke(
+      makeWriteFileRequest({
+        invocationId: 'attempt-A',
+        executionBudget: { maxDurationMs: 25, maxTokens: 100000 },
+      }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(first.status).toBe(AgentExecutionStatus.TIMED_OUT);
+
+    const [logicalKey, ownerAttemptId] = harness.idempotencyStore.markCompleted.mock.calls[0];
+    expect(ownerAttemptId).toBe('attempt-A');
+
+    const retry = await harness.service.invoke(
+      makeWriteFileRequest({ invocationId: 'attempt-B' }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(retry.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(retry.normalizedError?.reason).toBe('INVOCATION_DUPLICATE');
+    // TIMED_OUT_UNKNOWN gibt den logischen Claim weder frei noch überträgt
+    // er Ownership an attempt-B.
+    expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledTimes(1);
+    expect(logicalKey).toBeDefined();
   });
 
   it('retry after timed-out invocation does not re-execute the consequential action', async () => {
@@ -2760,7 +2869,11 @@ describe('GovernedInvocationServiceImpl Phase 3H idempotency boundary', () => {
 
     // Timeout != Cancellation: der Claim bleibt bestehen (TIMED_OUT_UNKNOWN),
     // wird NIEMALS freigegeben.
+    const [timeoutLogicalKey, timeoutOwnerAttemptId] =
+      harness.idempotencyStore.markCompleted.mock.calls[0];
+    expect(timeoutOwnerAttemptId).toBe('inv-idem-timeout-1');
     expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledWith(
+      timeoutLogicalKey,
       'inv-idem-timeout-1',
       'TIMED_OUT_UNKNOWN',
     );
@@ -2774,26 +2887,43 @@ describe('GovernedInvocationServiceImpl Phase 3H idempotency boundary', () => {
     expect(retry.normalizedError?.reason).toBe('INVOCATION_DUPLICATE');
   });
 
-  it('distinct invocation identities may execute independently', async () => {
-    // Positive Kontrolle: gleicher Provider/Capability/Action, verschiedene
-    // legitime Identitäten → je genau eine Ausführung. Keine globale Lock.
+  it('different logical operations may execute independently even with different invocation ids', async () => {
+    // Korrigierte positive Kontrolle (Phase 3H.1): Verschiedene invocationIds
+    // dürfen sich unabhängig ausführen — aber NUR, weil sie VERSCHIEDENE
+    // logische Operationen repräsentieren (hier: andere workflowStepRunId).
+    // Keine globale Lock; gleichzeitig keine Umgehung über neue Attempt-IDs.
     const harness = buildHarness();
 
     const first = await harness.service.invoke(
-      makeWriteFileRequest({ invocationId: 'inv-idem-indep-1' }),
+      makeWriteFileRequest({
+        invocationId: 'inv-idem-indep-1',
+        workflowStepRunId: 'wf-step-run-A',
+      }),
     );
     const second = await harness.service.invoke(
-      makeWriteFileRequest({ invocationId: 'inv-idem-indep-2' }),
+      makeWriteFileRequest({
+        invocationId: 'inv-idem-indep-2',
+        workflowStepRunId: 'wf-step-run-B',
+      }),
     );
 
     expect(first.status).toBe(AgentExecutionStatus.SUCCEEDED);
     expect(second.status).toBe(AgentExecutionStatus.SUCCEEDED);
     expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(2);
+
+    // Zwei Versuche → zwei VERSCHIEDENE logische Schlüssel (keine globale
+    // Sperre), jeder Versuch besitzt und schließt seinen eigenen Claim.
+    expect(harness.idempotencyStore.claim).toHaveBeenCalledTimes(2);
+    const [keyOne] = harness.idempotencyStore.claim.mock.calls[0];
+    const [keyTwo] = harness.idempotencyStore.claim.mock.calls[1];
+    expect(keyTwo).not.toBe(keyOne);
     expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledWith(
+      keyOne,
       'inv-idem-indep-1',
       'COMPLETED',
     );
     expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledWith(
+      keyTwo,
       'inv-idem-indep-2',
       'COMPLETED',
     );
@@ -2891,8 +3021,12 @@ describe('GovernedInvocationServiceImpl Phase 3H idempotency boundary', () => {
 
     expect(execute).toHaveBeenCalledTimes(1);
     expect(getCompletionAuditEvents(harness)).toHaveLength(1);
+    const [lateLogicalKey, lateOwnerAttemptId] =
+      harness.idempotencyStore.markCompleted.mock.calls[0];
+    expect(lateOwnerAttemptId).toBe('inv-idem-late-1');
     expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledTimes(1);
     expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledWith(
+      lateLogicalKey,
       'inv-idem-late-1',
       'TIMED_OUT_UNKNOWN',
     );

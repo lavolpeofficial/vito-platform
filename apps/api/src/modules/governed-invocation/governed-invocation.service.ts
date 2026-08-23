@@ -46,6 +46,7 @@ import {
   GovernedInvocationIdempotencyStore,
   type GovernedInvocationClaimState,
   buildGovernedInvocationFingerprint,
+  buildGovernedLogicalOperationKey,
   ProviderCredentialRequirement,
   sanitizeProviderExecutionMetadata,
   sanitizeErrorProviderMetadata,
@@ -468,15 +469,18 @@ function createPolicyBlockedResult(
 }
 
 /**
- * Fail-closed-Ergebnis der Idempotenz-Grenze (Phase 3H): DUPLICATE oder
+ * Fail-closed-Ergebnis der Idempotenz-Grenze (Phase 3H/3H.1): DUPLICATE oder
  * CONTEXT_CONFLICT verweigern die produktive Ausführung NACH bestehendem
- * EO-01.4 ALLOW. Kein zweiter Side Effect, kein stiller Retry.
+ * EO-01.4 ALLOW. Kein zweiter Side Effect, kein stiller Retry. Für einen
+ * blockierten Retry unter fremder Attempt-Identität wird der Besitzer der
+ * logischen Operation als sanitisierte Audit-Evidenz mitgeführt (IDs only).
  */
 function createIdempotencyBlockedResult(
   request: GovernedCapabilityInvocationRequest,
   provider: ProviderDeclaration,
   reason: 'INVOCATION_DUPLICATE' | 'INVOCATION_IDEMPOTENCY_CONFLICT',
   startedAt: Date,
+  duplicateOfInvocationId?: string,
 ): GovernedCapabilityInvocationResult {
   const completedAt = new Date();
   const durationMs = completedAt.getTime() - startedAt.getTime();
@@ -502,6 +506,9 @@ function createIdempotencyBlockedResult(
       retryable: false,
       providerMetadata: sanitizeProviderExecutionMetadata({
         idempotencyReason: reason,
+        ...(duplicateOfInvocationId !== undefined
+          ? { duplicateOfInvocationId }
+          : {}),
       }),
     },
     policyDecisionReference: 'idempotency-boundary',
@@ -951,15 +958,19 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
       governedInputPayload: request.governedInputPayload,
     };
 
-    // Phase 3H Claim-Gate: so spät wie möglich, unmittelbar vor dem
-    // einzigen produktiven adapter.execute(). Der Claim bindet die
-    // invocationId an den kanonischen governed Kontext-Fingerprint
-    // (inkl. trusted ExecutionProfile). DUPLICATE und CONTEXT_CONFLICT
-    // sind fail-closed: kein zweiter Side Effect, kein Attacker-Reuse
-    // einer Identität für fremden Kontext.
+    // Phase 3H/3H.1 Claim-Gate: so spät wie möglich, unmittelbar vor dem
+    // einzigen produktiven adapter.execute(). Identitäts-Trennung:
+    // - ATTEMPT IDENTITY: request.invocationId (Besitzer-/Audit-Evidenz)
+    // - LOGICAL OPERATION IDENTITY: trusted abgeleiteter Operationsschlüssel
+    //   (Dedup-Primärschlüssel — ein Retry mit NEUER invocationId auf
+    //   derselben logischen Operation ist DUPLICATE, kein Neubezug)
+    // - GOVERNED CONTEXT FINGERPRINT: exakte Kontextbindung/Konfliktnachweis
+    // DUPLICATE und CONTEXT_CONFLICT sind fail-closed: kein zweiter Side
+    // Effect, kein Attacker-Reuse einer Identität für fremden Kontext.
     let executionClaimed = false;
+    let claimedLogicalOperationKey: string | undefined;
     if (this.dependencies.idempotencyStore) {
-      const contextFingerprint = buildGovernedInvocationFingerprint({
+      const identityFields = {
         organizationId: request.organizationId,
         workflowRunId: request.workflowRunId,
         workflowStepRunId: request.workflowStepRunId,
@@ -969,11 +980,14 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
         executionProfile,
         assuranceLevel: request.assuranceLevel,
         inputReference: request.inputReference,
-      });
+      };
+      const contextFingerprint = buildGovernedInvocationFingerprint(identityFields);
+      const logicalOperationKey = buildGovernedLogicalOperationKey(identityFields);
 
       let claimResult: Awaited<ReturnType<GovernedInvocationIdempotencyStore['claim']>>;
       try {
         claimResult = await this.dependencies.idempotencyStore.claim(
+          logicalOperationKey,
           request.invocationId,
           contextFingerprint,
         );
@@ -996,16 +1010,29 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
             executionContext.credentialReference,
           ),
           false,
+          undefined,
         );
       }
 
       if (claimResult.outcome === 'DUPLICATE') {
+        // Audit-Unterscheidung (Phase 3H.1): Blockierter Retry unter fremder
+        // Attempt-Identität trägt den Besitzer der logischen Operation als
+        // sanitisierte Evidenz (IDs only, keine Payload).
         return this.finalizeInvocation(
           request,
           provider,
           executionProfile,
-          createIdempotencyBlockedResult(request, provider, 'INVOCATION_DUPLICATE', startedAt),
+          createIdempotencyBlockedResult(
+            request,
+            provider,
+            'INVOCATION_DUPLICATE',
+            startedAt,
+            claimResult.existing.invocationId !== request.invocationId
+              ? claimResult.existing.invocationId
+              : undefined,
+          ),
           false,
+          undefined,
         );
       }
       if (claimResult.outcome === 'CONTEXT_CONFLICT') {
@@ -1020,9 +1047,11 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
             startedAt,
           ),
           false,
+          undefined,
         );
       }
       executionClaimed = true;
+      claimedLogicalOperationKey = logicalOperationKey;
     }
 
     // Runtime Failure Boundary: ALLES nach echtem EO-01.4 ALLOW wird
@@ -1046,6 +1075,7 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
           executionContext.credentialReference,
         ),
         executionClaimed,
+        claimedLogicalOperationKey,
       );
     }
 
@@ -1066,6 +1096,7 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
           executionContext.credentialReference,
         ),
         executionClaimed,
+        claimedLogicalOperationKey,
       );
     }
 
@@ -1081,7 +1112,14 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
           executionContext.credentialReference,
         );
 
-    return this.finalizeInvocation(request, provider, executionProfile, result, executionClaimed);
+    return this.finalizeInvocation(
+      request,
+      provider,
+      executionProfile,
+      result,
+      executionClaimed,
+      claimedLogicalOperationKey,
+    );
   }
 
   /**
@@ -1125,11 +1163,13 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
    *
    * markCompleted wird NUR ausgeführt, wenn dieser Aufruf den Claim selbst
    * gesetzt hat (executionClaimed) — ein raced-out später Adapter-Abschluss
-   * oder ein Duplikat-Versuch manipuliert den Claim nie. Die Abbildung ist
-   * bewusst konservativ: Timeout ist keine Cancellation (TIMED_OUT_UNKNOWN),
-   * jeder andere Nicht-Erfolg ist FAILED_UNKNOWN — Claims werden NIE
-   * freigegeben. Best-effort: ein Store-Fehler maskiert niemals das
-   * eigentliche Invocation-Ergebnis.
+   * oder ein Duplikat-Versuch manipuliert den Claim nie. Die Zuweisung
+   * adressiert den Claim über (logicalOperationKey, invocationId); der
+   * Store vollzieht ausschließlich dem Besitzer nach (Ownership wird nie
+   * übertragen). Die Abbildung ist bewusst konservativ: Timeout ist keine
+   * Cancellation (TIMED_OUT_UNKNOWN), jeder andere Nicht-Erfolg ist
+   * FAILED_UNKNOWN — Claims werden NIE freigegeben. Best-effort: ein
+   * Store-Fehler maskiert niemals das eigentliche Invocation-Ergebnis.
    */
   private async finalizeInvocation(
     request: GovernedCapabilityInvocationRequest,
@@ -1137,10 +1177,16 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
     executionProfile: ExecutionProfile,
     result: GovernedCapabilityInvocationResult,
     markCompletion: boolean,
+    logicalOperationKey?: string,
   ): Promise<GovernedCapabilityInvocationResult> {
-    if (markCompletion && this.dependencies.idempotencyStore) {
+    if (
+      markCompletion &&
+      this.dependencies.idempotencyStore &&
+      logicalOperationKey !== undefined
+    ) {
       try {
         await this.dependencies.idempotencyStore.markCompleted(
+          logicalOperationKey,
           request.invocationId,
           claimStateForResultStatus(result.status),
         );
