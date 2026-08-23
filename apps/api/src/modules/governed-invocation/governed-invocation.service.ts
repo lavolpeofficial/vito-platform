@@ -43,6 +43,7 @@ import {
   validateHumanGateBinding,
   HumanGateResolver,
   isConsequentialExecutionAction,
+  isFileMutationExecutionAction,
   GovernedInvocationIdempotencyStore,
   type GovernedInvocationClaimState,
   buildGovernedInvocationFingerprint,
@@ -1225,6 +1226,21 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
     }
     if (!request.requestedAction || !Object.values(ExecutionAction).includes(request.requestedAction)) {
       throw new Error('MALFORMED_INVOCATION: Invalid requestedAction');
+    }
+    // Phase 3H.3 Fail-closed: widersprüchliche Aktions-/Ziel-Feld-Kombinationen
+    // werden abgewiesen, bevor Provider-Auflösung, Policy oder Idempotenz-
+    // Claim erreicht werden. Irrelevante Felder dürfen weder die logische
+    // Operations-Identität verschieben noch stillschweigend toleriert werden.
+    if (isFileMutationExecutionAction(request.requestedAction) && request.requestedCommand !== undefined) {
+      throw new Error(
+        'MALFORMED_INVOCATION: requestedCommand is not authoritative for file mutation actions',
+      );
+    }
+    if (
+      request.requestedAction === ExecutionAction.RUN_COMMAND &&
+      request.requestedPath !== undefined
+    ) {
+      throw new Error('MALFORMED_INVOCATION: requestedPath is not authoritative for RUN_COMMAND');
     }
     if (!request.executionBudget) {
       throw new Error('MALFORMED_INVOCATION: Missing executionBudget');

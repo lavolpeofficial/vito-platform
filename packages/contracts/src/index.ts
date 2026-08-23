@@ -132,6 +132,8 @@ export {
   HumanGateResolver,
   CONSEQUENTIAL_INVOCATION_ACTIONS,
   isConsequentialExecutionAction,
+  FILE_MUTATION_INVOCATION_ACTIONS,
+  isFileMutationExecutionAction,
   buildGovernedInvocationFingerprint,
   buildGovernedLogicalOperationKey,
   GovernedInvocationIdempotencyStore,

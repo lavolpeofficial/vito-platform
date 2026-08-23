@@ -3145,7 +3145,9 @@ describe('Phase 3H.2 logical operation key semantics', () => {
       makeOperationIdentityFields(),
     );
     expect(keyA).toBe(keyB);
-    expect(keyA).toMatch(/^logop-v1\|/);
+    // Phase 3H.3: Selektionssemantik ist jetzt aktionsbewusst —
+    // Schema-Version entsprechend logop-v2.
+    expect(keyA).toMatch(/^logop-v2\|/);
     expect(keyA).not.toContain('provider');
 
     const fingerprintA = buildGovernedInvocationFingerprint(
@@ -3291,4 +3293,257 @@ describe('Phase 3H.2 logical operation key semantics', () => {
       'COMPLETED',
     );
   });
+});
+
+// ===========================================================================
+// EO-01.5 Phase 3H.3 — Action-Aware Logical Operation Key
+//
+// Schlusskorrektur der Idempotenz-Identität vor dem Merge-Gate:
+//
+// FINDING: buildGovernedLogicalOperationKey() nahm bisher requestedPath UND
+// requestedCommand auf, sobald vorhanden. Da GovernedCapabilityInvocationRequest
+// beide Felder unabhängig erlaubt, konnte ein IRRELEVANTRUFER-kontrolliertes
+// Feld (z. B. requestedCommand-Noise bei WRITE_FILE) die Idempotenz-Identität
+// verschieben und Duplicate-Schutz umgehen.
+//
+// Kerninvariante: Nur FELDER, die für die angefragte Aktion AUTHORITATIV sind,
+// dürfen den logischen Operationsschlüssel beeinflussen.
+//
+// - Datei-Mutation (WRITE_FILE/CREATE_FILE/DELETE_FILE): ausschließlich
+//   requestedPath; requestedCommand wird ignoriert.
+// - RUN_COMMAND: ausschließlich requestedCommand; requestedPath wird ignoriert.
+// - Übrige consequential Aktionen: keine modellierten Ziel-Felder — minimale
+//   sichere Semantik bleibt; fehlende autoritative Netzwerk-Ziele sind als
+//   Follow-up dokumentiert.
+// - inputReference bleibt operative Identitätsdimension.
+//
+// Zusätzlich Fail-closed auf Vertragsebene: widersprüchliche Aktions-/Feld-
+// Kombinationen werden bereits in validateRequest() abgewiesen (Phase 3H.3),
+// während der Schlüssel-Builder unabhängig davon aktionsbewusst selektiert
+// (Defense in Depth).
+// ===========================================================================
+
+describe('Phase 3H.3 action-aware logical operation key', () => {
+  function makeOperationIdentityFields(
+    overrides: Partial<GovernedOperationIdentityFields> = {},
+  ): GovernedOperationIdentityFields {
+    return {
+      organizationId: ORG_A,
+      workflowRunId: WORKFLOW_RUN_ID,
+      workflowStepRunId: WORKFLOW_STEP_RUN_ID,
+      capabilityCode: CAPABILITY_CODE,
+      requestedAction: ExecutionAction.WRITE_FILE,
+      ...overrides,
+    };
+  }
+
+  function makeWriteFileRequest(
+    overrides: Record<string, any> = {},
+  ): GovernedCapabilityInvocationRequest {
+    return makeInvocationRequest({
+      requestedAction: ExecutionAction.WRITE_FILE,
+      requestedPath: `${WORKTREE_ROOT}/src/generated/report.ts`,
+      ...overrides,
+    });
+  }
+
+  it('irrelevant requestedCommand does not change WRITE_FILE logical operation key', () => {
+    const clean = makeOperationIdentityFields({
+      requestedAction: ExecutionAction.WRITE_FILE,
+      requestedPath: `${WORKTREE_ROOT}/src/generated/report.ts`,
+    });
+    const noisy = makeOperationIdentityFields({
+      requestedAction: ExecutionAction.WRITE_FILE,
+      requestedPath: `${WORKTREE_ROOT}/src/generated/report.ts`,
+      // Angriffsvektor: irrelevante Rauschen-Feld-Injektion darf die
+      // Side-Effect-Identität nicht verschieben.
+      requestedCommand: 'irrelevant-noise',
+    });
+
+    expect(buildGovernedLogicalOperationKey(noisy)).toBe(
+      buildGovernedLogicalOperationKey(clean),
+    );
+    expect(buildGovernedLogicalOperationKey(clean)).not.toContain('cmd:');
+  });
+
+  it('irrelevant requestedPath does not change RUN_COMMAND logical operation key', () => {
+    const clean = makeOperationIdentityFields({
+      requestedAction: ExecutionAction.RUN_COMMAND,
+      requestedCommand: 'git status',
+    });
+    const noisy = makeOperationIdentityFields({
+      requestedAction: ExecutionAction.RUN_COMMAND,
+      requestedCommand: 'git status',
+      requestedPath: '/irrelevant/noise/path',
+    });
+
+    expect(buildGovernedLogicalOperationKey(noisy)).toBe(
+      buildGovernedLogicalOperationKey(clean),
+    );
+    expect(buildGovernedLogicalOperationKey(clean)).not.toContain('path:');
+  });
+
+  it('different WRITE_FILE paths and different commands remain distinct logical operations', () => {
+    // Erhaltene positive Kontrollen (keine Über-Generalisierung):
+    const pathA = buildGovernedLogicalOperationKey(
+      makeOperationIdentityFields({ requestedPath: `${WORKTREE_ROOT}/a.ts` }),
+    );
+    const pathB = buildGovernedLogicalOperationKey(
+      makeOperationIdentityFields({ requestedPath: `${WORKTREE_ROOT}/b.ts` }),
+    );
+    expect(pathA).not.toBe(pathB);
+
+    const cmdA = buildGovernedLogicalOperationKey(
+      makeOperationIdentityFields({
+        requestedAction: ExecutionAction.RUN_COMMAND,
+        requestedCommand: 'git status',
+      }),
+    );
+    const cmdB = buildGovernedLogicalOperationKey(
+      makeOperationIdentityFields({
+        requestedAction: ExecutionAction.RUN_COMMAND,
+        requestedCommand: 'npm test',
+      }),
+    );
+    expect(cmdA).not.toBe(cmdB);
+  });
+
+  it('irrelevant requestedCommand cannot create new execution authority for the same WRITE_FILE', async () => {
+    // Service-Level-Bypass-Proof: zweiter Versuch mit neuer invocationId,
+    // identischem Pfad und injiziertem Command-Rauschen darf NIE eine zweite
+    // produktive Ausführung erzeugen. Phase 3H.3 wählt Sicherheitspostur A:
+    // widersprüchliche Kombinationen werden bereits in validateRequest()
+    // abgewiesen (strenger als ein nachgelagerter DUPLICATE-Block) — der
+    // Claim-Gate/Duplicate-Schutz bleibt unangetastet dahinter bestehen.
+    const harness = buildHarness();
+
+    const first = await harness.service.invoke(makeWriteFileRequest({ invocationId: 'attempt-A' }));
+    expect(first.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+
+    await expect(
+      harness.service.invoke(
+        makeWriteFileRequest({
+          invocationId: 'attempt-B',
+          requestedCommand: 'irrelevant-noise',
+        }),
+      ),
+    ).rejects.toThrow('MALFORMED_INVOCATION');
+
+    // Genau ein produktiver Side Effect insgesamt; Buchhaltung des
+    // Originalversuchs unangetastet.
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    expect(harness.idempotencyStore.claim).toHaveBeenCalledTimes(1);
+    expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledTimes(1);
+    expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledWith(
+      harness.idempotencyStore.claim.mock.calls[0][0],
+      'attempt-A',
+      'COMPLETED',
+    );
+  });
+
+  it('irrelevant target-field injection cannot bypass timeout retry protection', async () => {
+    // Timeout != Cancellation UND != Neue-Autorität-durch-Rauschen:
+    // Retry mit neuer invocationId, gleichem Pfad und Command-Rauschen wird
+    // abgewiesen (Phase 3H.3 Postur A: Malformed-Rejection vor Claim-Gate);
+    // der TIMED_OUT_UNKNOWN-Claim des Originalversuchs bleibt bestehen.
+    let resolveFirst!: (result: GovernedAdapterResult) => void;
+    const execute = jest.fn(
+      (_request: unknown, _context: GovernedExecutionContext) =>
+        new Promise<GovernedAdapterResult>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    const harness = buildHarness({
+      fakeAdapter: {
+        adapter: { providerType: ProviderType.CLOUD_LLM, execute } as GovernedProviderAdapter,
+        execute,
+      },
+    });
+
+    const first = await harness.service.invoke(
+      makeWriteFileRequest({
+        invocationId: 'attempt-A',
+        executionBudget: { maxDurationMs: 25, maxTokens: 100000 },
+      }),
+    );
+    expect(first.status).toBe(AgentExecutionStatus.TIMED_OUT);
+    expect(execute).toHaveBeenCalledTimes(1);
+    const [timeoutLogicalKey] = harness.idempotencyStore.markCompleted.mock.calls[0];
+
+    // Späte Fertigstellung des Originalversuchs ändert nichts.
+    resolveFirst({
+      status: AgentExecutionStatus.SUCCEEDED,
+      outputReference: 'gov://output/late',
+      artifactReferences: [],
+      evidenceReferences: [],
+      providerExecutionMetadata: {},
+      completedAt: new Date(),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    await expect(
+      harness.service.invoke(
+        makeWriteFileRequest({
+          invocationId: 'attempt-B',
+          requestedCommand: 'irrelevant-noise',
+        }),
+      ),
+    ).rejects.toThrow('MALFORMED_INVOCATION');
+
+    // Genau eine produktive Ausführung; Claim verbleibt beim Originalversuch
+    // im Zustand TIMED_OUT_UNKNOWN — Rauschen hat keine neue Autorität
+    // geschaffen und den Schutz nicht umgangen.
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledTimes(1);
+    expect(harness.idempotencyStore.markCompleted).toHaveBeenCalledWith(
+      timeoutLogicalKey,
+      'attempt-A',
+      'TIMED_OUT_UNKNOWN',
+    );
+
+    // Zusatznachweis: auch ein sauberer Retry (ohne Rauschen) bleibt am
+    // logischen Claim blockiert — DUPLICATE statt neuer Ausführung.
+    const cleanRetry = await harness.service.invoke(
+      makeWriteFileRequest({ invocationId: 'attempt-C' }),
+    );
+    expect(cleanRetry.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(cleanRetry.normalizedError?.reason).toBe('INVOCATION_DUPLICATE');
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      dimension: 'WRITE_FILE with irrelevant requestedCommand',
+      request: () =>
+        makeWriteFileRequest({
+          invocationId: 'inv-malformed-file-cmd',
+          requestedCommand: 'irrelevant-noise',
+        }),
+    },
+    {
+      dimension: 'RUN_COMMAND with irrelevant requestedPath',
+      request: () =>
+        makeInvocationRequest({
+          invocationId: 'inv-malformed-cmd-path',
+          requestedAction: ExecutionAction.RUN_COMMAND,
+          requestedCommand: 'git status',
+          requestedPath: '/irrelevant/noise/path',
+        }),
+    },
+  ])(
+    'contradictory combination ($dimension) fails closed in request validation',
+    async ({ request }) => {
+      // Phase 3H.3 Vertragsverschärfung (bevorzugte Sicherheitspostur):
+      // irrelevante Ziel-Felder werden nicht stillschweigend toleriert,
+      // sondern bereits in validateRequest() abgewiesen — bevor Provider-
+      // auflösung, Policy oder Claim-Gate erreicht werden.
+      const harness = buildHarness();
+
+      await expect(harness.service.invoke(request())).rejects.toThrow(
+        'MALFORMED_INVOCATION',
+      );
+      expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    },
+  );
 });

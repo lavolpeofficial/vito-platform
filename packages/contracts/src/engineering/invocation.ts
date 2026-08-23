@@ -650,6 +650,22 @@ export function isConsequentialExecutionAction(action: ExecutionAction): boolean
 }
 
 /**
+ * File-mutation subset of the consequential actions (Phase 3H.3).
+ * For these actions requestedPath is the ONLY authoritative target field;
+ * requestedCommand is not authoritative and must neither influence the
+ * logical operation key nor be accepted on requests.
+ */
+export const FILE_MUTATION_INVOCATION_ACTIONS: readonly ExecutionAction[] = [
+  ExecutionAction.WRITE_FILE,
+  ExecutionAction.CREATE_FILE,
+  ExecutionAction.DELETE_FILE,
+];
+
+export function isFileMutationExecutionAction(action: ExecutionAction): boolean {
+  return FILE_MUTATION_INVOCATION_ACTIONS.includes(action);
+}
+
+/**
  * Minimal internal claim state of the idempotency abstraction.
  *
  * Deliberately NOT a second lifecycle engine and NOT part of
@@ -824,31 +840,46 @@ export function buildGovernedInvocationFingerprint(
 
 /**
  * Stabiler, trusted abgeleiteter Schlüssel der LOGISCHEN OPERATION
- * (Phase 3H.1, Feldsemantik geschärft in Phase 3H.2).
+ * (Phase 3H.1; Feldsemantik 3H.2; AKTIONSBEWUSSTE Zielselektion 3H.3).
  *
  * Primärschlüssel der Duplicate-Prävention: derselbe consequential Vorgang
  * ergibt denselben Schlüssel — unabhängig von invocationId (Attempt),
  * Provider, ExecutionProfile oder AssuranceLevel (Ausführungsmechanismus).
- * Material verschiedene Side-Effect-Ziele ergeben verschiedene Schlüssel:
- * autoritatives requestedPath/requestedCommand (je nach Aktionsart) sowie
- * inputReference. Version-präfixiert, deterministisch, keine mutierbaren
- * Zeitstempel, kein unkontrolliertes JSON.stringify; eigener Namespace
- * ('logop-v1'), sodass Schlüssel und Kontext-Fingerprint nie kreuzweise
- * vergleichbar sind.
+ *
+ * Aktionsbewusste Ziel-Selektion (Phase 3H.3): NUR für die angefragte
+ * Aktion autoritative Felder fließen ein —
+ * - Datei-Mutation (WRITE_FILE/CREATE_FILE/DELETE_FILE): ausschließlich
+ *   requestedPath;
+ * - RUN_COMMAND: ausschließlich requestedCommand;
+ * - übrige consequential Aktionen (NETWORK_ACCESS, GIT_COMMIT, GIT_PUSH):
+ *   keine modellierten Ziel-Felder (fehlende autoritative Netzwerk-/Revisions-
+ *   Referenzen sind als Follow-up dokumentiert; bewusst KEINE Serialisierung
+ *   von governedInputPayload als Ersatz).
+ * Irrelevante Felder können die Identität NICHT verschieben — ein Aufrufer
+ * kann Duplicate-Schutz nicht durch Rauschen in nicht-autoritativen Feldern
+ * umgehen. inputReference bleibt operative Eingabe-Dimension.
+ *
+ * Version-präfixiert ('logop-v2' seit 3H.3: Selektionssemantik geändert),
+ * deterministisch, keine Zeitstempel, kein unkontrolliertes JSON.stringify.
  */
 export function buildGovernedLogicalOperationKey(
   fields: GovernedOperationIdentityFields,
 ): string {
-  const parts: string[] = ['logop-v1'];
+  const parts: string[] = ['logop-v2'];
   appendLengthPrefixed(parts, 'org', fields.organizationId);
   appendLengthPrefixed(parts, 'run', fields.workflowRunId);
   appendLengthPrefixed(parts, 'step', fields.workflowStepRunId);
   appendLengthPrefixed(parts, 'cap', fields.capabilityCode);
   appendLengthPrefixed(parts, 'action', fields.requestedAction);
-  // Autoritative Ziel-Referenz je Aktionsart; nur EIN Zielfeld ist je
-  // Operation maßgeblich, beide Labels bleiben strukturell getrennt.
-  appendLengthPrefixed(parts, 'path', fields.requestedPath);
-  appendLengthPrefixed(parts, 'cmd', fields.requestedCommand);
+
+  // Aktionsbewusste autoritative Ziel-Referenz: genau EINE Quelle je
+  // Aktionsfamilie; nicht-autoritative Felder werden ignoriert.
+  if (isFileMutationExecutionAction(fields.requestedAction)) {
+    appendLengthPrefixed(parts, 'path', fields.requestedPath);
+  } else if (fields.requestedAction === ExecutionAction.RUN_COMMAND) {
+    appendLengthPrefixed(parts, 'cmd', fields.requestedCommand);
+  }
+
   appendLengthPrefixed(parts, 'in', fields.inputReference);
   return parts.join('|');
 }
