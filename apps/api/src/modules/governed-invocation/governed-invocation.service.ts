@@ -690,7 +690,12 @@ function redactExactSecretValues(
 
 /**
  * Rekursive exakte Wert-Redaction für beliebig verschachtelte
- * Metadaten-Strukturen (Objekte und Arrays). Date-Instanzen und primitive
+ * Metadaten-Strukturen (Objekte und Arrays). Objekt-Schlüssel werden mit
+ * derselben exakten Wert-Logik redactiert — die credentialReference darf
+ * weder als Wert noch als Schlüssel entweichen. Kollisionen nach der
+ * Schlüssel-Redaction werden kollisions-sicher aufgelöst: der erste
+ * Eintrag gewinnt deterministisch, attacker-kontrollierte Duplikate werden
+ * verworfen statt zu überschreiben. Date-Instanzen und primitive
  * Nicht-Strings bleiben unverändert.
  */
 function redactTrustedSecretsDeep<T>(value: T, trustedSecretValues: readonly string[]): T {
@@ -707,7 +712,11 @@ function redactTrustedSecretsDeep<T>(value: T, trustedSecretValues: readonly str
   ) {
     const output: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-      output[key] = redactTrustedSecretsDeep(entry, trustedSecretValues);
+      const safeKey = redactExactSecretValues(key, trustedSecretValues);
+      if (Object.prototype.hasOwnProperty.call(output, safeKey)) {
+        continue;
+      }
+      output[safeKey] = redactTrustedSecretsDeep(entry, trustedSecretValues);
     }
     return output as unknown as T;
   }

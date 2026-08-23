@@ -2106,3 +2106,152 @@ describe('GovernedInvocationServiceImpl Phase 3F.1 exact trusted secret value re
     assertMarkerContainedNowhere(harness, result);
   });
 });
+
+// ===========================================================================
+// EO-01.5 Phase 3F.2 — Trusted Secret Redaction in Metadata KEYS
+//
+// Finding aus unabhängigem Review: 3F.1 redactiert Werte rekursiv, erhält
+// aber Objekt-Schlüssel unverändert. Ein bösartiger Adapter kann die
+// credentialReference als JSON-Property-Name entweichen lassen.
+//
+// Kerninvariante: Die exakte vertrauenswürdige credentialReference darf
+// NERGENDWO im normalisierten Ergebnis oder Audit-Output erscheinen —
+// weder als Wert noch als Objekt-Schlüssel.
+// ===========================================================================
+
+describe('GovernedInvocationServiceImpl Phase 3F.2 trusted secret redaction in metadata keys', () => {
+  // Bewusst OHNE sensible Schlüsselnamen-Substrings (kein "secret"/"token"/
+  // "credential"): der Schutz muss über die exakte WERT-Gleichheit wirken,
+  // nicht über zufälliges Ansprechen des Schlüsselnamen-Filters des
+  // Contracts-Sanitizers.
+  const SECRET_MARKER = 'REF_DO_NOT_LEAK_7f3a9c4e';
+
+  function buildLeakageHarness(execute: jest.Mock): Harness {
+    const provider = makeProviderDeclaration({
+      credentialRequirement: ProviderCredentialRequirement.REQUIRED,
+    });
+    const broker: CredentialBroker = {
+      getCredentialReference: jest.fn().mockResolvedValue(SECRET_MARKER),
+      validateCredentialReference: jest.fn().mockResolvedValue(true),
+    };
+    return buildHarness({
+      provider,
+      credentialBroker: broker,
+      fakeAdapter: {
+        adapter: { providerType: ProviderType.CLOUD_LLM, execute } as GovernedProviderAdapter,
+        execute,
+      },
+    });
+  }
+
+  function boundaryExecute(
+    resultOverride: Partial<GovernedAdapterResult>,
+  ): jest.Mock {
+    return jest.fn(
+      async (_request: unknown, context: GovernedExecutionContext): Promise<GovernedAdapterResult> => {
+        expect(context.credentialReference).toBe(SECRET_MARKER);
+        return {
+          status: AgentExecutionStatus.SUCCEEDED,
+          providerExecutionMetadata: {},
+          completedAt: new Date(),
+          ...resultOverride,
+        };
+      },
+    );
+  }
+
+  function assertMarkerContainedNowhere(harness: Harness, result: GovernedCapabilityInvocationResult): void {
+    expect(JSON.stringify(result)).not.toContain(SECRET_MARKER);
+    const auditMock = harness.auditService.record as unknown as jest.Mock;
+    for (const call of auditMock.mock.calls) {
+      expect(JSON.stringify(call)).not.toContain(SECRET_MARKER);
+    }
+  }
+
+  it('exact credential reference used as metadata key is redacted', async () => {
+    const execute = boundaryExecute({
+      providerExecutionMetadata: {
+        [SECRET_MARKER]: 'harmless',
+      },
+    });
+    const harness = buildLeakageHarness(execute);
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-leak-meta-key-top-1' }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    // Der Inhalt unter dem redactierten Schlüssel bleibt erhalten —
+    // Redaction des Schlüssels, keine Vernichtung des Objekts.
+    const serializedMetadata = JSON.stringify(result.providerExecutionMetadata ?? {});
+    expect(serializedMetadata).toContain('[REDACTED]');
+    expect(serializedMetadata).toContain('harmless');
+    assertMarkerContainedNowhere(harness, result);
+  });
+
+  it('exact credential reference used as nested metadata key is redacted', async () => {
+    const execute = boundaryExecute({
+      providerExecutionMetadata: {
+        outer: {
+          [SECRET_MARKER]: 'harmless',
+        },
+      },
+    });
+    const harness = buildLeakageHarness(execute);
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-leak-meta-key-nested-1' }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    const serializedMetadata = JSON.stringify(result.providerExecutionMetadata ?? {});
+    expect(serializedMetadata).toContain('[REDACTED]');
+    expect(serializedMetadata).toContain('outer');
+    expect(serializedMetadata).toContain('harmless');
+    assertMarkerContainedNowhere(harness, result);
+  });
+
+  it('exact credential reference used as usage metadata key is redacted', async () => {
+    const execute = boundaryExecute({
+      usageMetadata: {
+        [SECRET_MARKER]: 'usage-value',
+        plainKey: 'plain-value',
+      },
+    });
+    const harness = buildLeakageHarness(execute);
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-leak-usage-key-1' }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    const serializedUsage = JSON.stringify(result.usageMetadata ?? {});
+    expect(serializedUsage).toContain('[REDACTED]');
+    expect(serializedUsage).toContain('usage-value');
+    expect(serializedUsage).toContain('plainKey');
+    assertMarkerContainedNowhere(harness, result);
+  });
+
+  it('metadata key collision after key redaction does not overwrite existing entry', async () => {
+    // Zwei Einträge, deren Schlüssel nach der Redaction kollidieren:
+    // der erste gewinnt deterministisch; kein attacker-kontrolliertes
+    // Überschreiben eines sicherheitsrelevanten Feldes.
+    const execute = boundaryExecute({
+      providerExecutionMetadata: {
+        [SECRET_MARKER]: 'first-entry',
+        '[REDACTED]': 'second-entry',
+      },
+    });
+    const harness = buildLeakageHarness(execute);
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-leak-meta-key-collision-1' }),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    const serializedMetadata = JSON.stringify(result.providerExecutionMetadata ?? {});
+    expect(serializedMetadata).toContain('first-entry');
+    expect(serializedMetadata).not.toContain('second-entry');
+    assertMarkerContainedNowhere(harness, result);
+  });
+});
