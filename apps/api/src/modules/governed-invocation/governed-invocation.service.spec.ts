@@ -1407,3 +1407,138 @@ describe('GovernedInvocationServiceImpl Phase 3C runtime failure boundary', () =
     expect(getCompletionAuditEvents(harness)).toHaveLength(1);
   });
 });
+
+// ===========================================================================
+// EO-01.5 Phase 3D — Provider Eligibility Revalidation Tests
+//
+// Invariante: Routing-Eligibility ist KEIN permanentes Authorization-Token.
+// Der Provider-State kann zwischen EO-01.3 Routing → EO-01.4 Policy →
+// EO-01.5 Adapter-Ausführung kippen. Die Invocation-Grenze prüft die
+// CURRENT Declaration deterministisch und fail-closed — ohne Re-Routing,
+// ohne Ranking-Duplikat, ohne Fallback.
+//
+// EO-01.3 QUOTA-Semantik (provider-router.service.ts): AVAILABLE/LIMITED
+// routbar (LIMITED explizit getestet); EXHAUSTED ineligible; UNKNOWN
+// fail-closed (QUOTA_STATUS_UNKNOWN).
+// ===========================================================================
+
+describe('GovernedInvocationServiceImpl Phase 3D provider eligibility revalidation', () => {
+  it('provider with exhausted quota is rejected before adapter execution', async () => {
+    // Stale-Routing-Szenario: Status/Health/Capability bleiben voll routing-
+    // tauglich — NUR die Quote ist seit der EO-01.3-Routing-Entscheidung
+    // EXHAUSTED geworden.
+    const provider = makeProviderDeclaration({
+      quotaStatus: ProviderQuotaStatus.EXHAUSTED,
+    });
+    const harness = buildHarness({ provider });
+
+    expect(provider.status).toBe(ProviderStatus.ACTIVE);
+    expect(provider.healthStatus).toBe(ProviderHealthStatus.HEALTHY);
+    expect(isProviderRoutable(provider)).toBe(true);
+
+    const request = makeInvocationRequest({
+      invocationId: 'inv-quota-exhausted-1',
+    });
+
+    await expect(harness.service.invoke(request)).rejects.toThrow(
+      'PROVIDER_NOT_ELIGIBLE',
+    );
+
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    // Kein Fallback: nur der eine registrierte Adapter existiert und wurde
+    // nicht aufgerufen.
+    expect(harness.adapterRegistry.getSupportedProviderTypes()).toHaveLength(1);
+  });
+
+  it('provider with unknown quota is rejected before adapter execution', async () => {
+    const provider = makeProviderDeclaration({
+      quotaStatus: ProviderQuotaStatus.UNKNOWN,
+    });
+    const harness = buildHarness({ provider });
+
+    expect(provider.status).toBe(ProviderStatus.ACTIVE);
+    expect(provider.healthStatus).toBe(ProviderHealthStatus.HEALTHY);
+
+    const request = makeInvocationRequest({
+      invocationId: 'inv-quota-unknown-1',
+    });
+
+    await expect(harness.service.invoke(request)).rejects.toThrow(
+      'PROVIDER_NOT_ELIGIBLE',
+    );
+
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+  });
+
+  it('provider with available quota may proceed', async () => {
+    // Positive Kontrolle: vollständige CURRENT-Eligibility → genau ein
+    // produktiver Adapter-Aufruf nach echtem EO-01.4 ALLOW.
+    const provider = makeProviderDeclaration({
+      quotaStatus: ProviderQuotaStatus.AVAILABLE,
+    });
+    const harness = buildHarness({ provider });
+
+    const request = makeInvocationRequest({
+      invocationId: 'inv-quota-available-1',
+    });
+
+    const result = await harness.service.invoke(request);
+
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    const [, executionContext] = harness.fakeAdapter.execute.mock.calls[0];
+    expect(executionContext.policyDecision.allowed).toBe(true);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+  });
+
+  it('provider with limited quota remains eligible at the invocation boundary', async () => {
+    // LIMITED ist laut EO-01.3 explizit routbar ("LIMITED explizit getestet").
+    // Die Invocation-Grenze darf keine strengere Quota-Semantik erfinden.
+    const provider = makeProviderDeclaration({
+      quotaStatus: ProviderQuotaStatus.LIMITED,
+    });
+    const harness = buildHarness({ provider });
+
+    const request = makeInvocationRequest({
+      invocationId: 'inv-quota-limited-1',
+    });
+
+    const result = await harness.service.invoke(request);
+
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+  });
+
+  it('provider eligibility loss after routing does not become execution authority', async () => {
+    // Dieselbe providerId wurde soeben noch erfolgreich gerouted UND
+    // produktiv ausgeführt. Danach kippt der Provider-State (Quote →
+    // EXHAUSTED). Historische Auswahl/Ausführung ist KEIN Permission-Token:
+    // die CURRENT Declaration entscheidet.
+    let currentProvider = makeProviderDeclaration();
+    const providerResolver: ProviderResolver = {
+      resolve: jest.fn(async () => currentProvider),
+    };
+    const harness = buildHarness({ providerResolver });
+
+    const firstResult = await harness.service.invoke(
+      makeInvocationRequest({ invocationId: 'inv-stale-route-1' }),
+    );
+    expect(firstResult.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+
+    // State-Flip NACH erfolgreichem Routing/Execution desselben Providers.
+    currentProvider = makeProviderDeclaration({
+      id: currentProvider.id,
+      quotaStatus: ProviderQuotaStatus.EXHAUSTED,
+    });
+
+    await expect(
+      harness.service.invoke(
+        makeInvocationRequest({ invocationId: 'inv-stale-route-2' }),
+      ),
+    ).rejects.toThrow('PROVIDER_NOT_ELIGIBLE');
+
+    // Kein zweiter produktiver Aufruf, kein Fallback.
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    expect(harness.adapterRegistry.getSupportedProviderTypes()).toHaveLength(1);
+  });
+});

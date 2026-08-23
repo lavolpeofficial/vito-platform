@@ -16,6 +16,7 @@ import {
   ExecutionOutcome,
   ProviderDeclaration,
   ProviderType,
+  ProviderQuotaStatus,
   providerSupportsCapability,
   isProviderRoutable,
   ExecutionProfile,
@@ -780,6 +781,21 @@ export class GovernedInvocationServiceImpl implements GovernedInvocationService 
 
     if (!isProviderRoutable(provider)) {
       throw new Error('PROVIDER_NOT_ELIGIBLE: Provider is not routable (status/health/quota)');
+    }
+
+    // Stale-Routing-/TOCTOU-Schutz: Die CURRENT Declaration muss unmittelbar
+    // vor produktiver Ausführung weiterhin vollständig eligibility-geeignet
+    // sein. isProviderRoutable() deckt Status/Health ab; die QUOTA-Semantik
+    // von EO-01.3 (EXHAUSTED ineligible, UNKNOWN fail-closed,
+    // AVAILABLE/LIMITED routbar) wird hier deterministisch nachgeprüft.
+    // Historische Routing-Auswahl ist KEIN Execution-Permission-Token.
+    if (
+      provider.quotaStatus === ProviderQuotaStatus.EXHAUSTED ||
+      provider.quotaStatus === ProviderQuotaStatus.UNKNOWN
+    ) {
+      throw new Error(
+        `PROVIDER_NOT_ELIGIBLE: Provider quota status ${provider.quotaStatus} is not eligible for productive invocation`,
+      );
     }
 
     return provider;
