@@ -1,24 +1,32 @@
 import { createHash } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, normalize, resolve, sep } from 'node:path';
 
 import type { TrustedExecutable, TrustedExecutableResolver } from '@vito/contracts';
 
 /**
- * TrustedLocalExecutableResolver
+ * Resolves agent command aliases to admin-installed launchers outside any
+ * governed worktree. No PATH lookup, shell expansion, relative path or
+ * caller-controlled executable identity is accepted.
  *
- * Resolves command aliases to an explicit admin-controlled executable map.
- * No PATH lookup, shell expansion, relative paths, aliases from the worktree,
- * or caller-controlled executable paths are accepted.
+ * Productive configuration requires BOTH:
  *
- * Environment format:
- *   VITO_TRUSTED_LOCAL_EXECUTABLES='{"opencode":"/usr/local/bin/opencode","codex":"/usr/local/bin/codex"}'
+ *   VITO_TRUSTED_AGENT_LAUNCHER_ROOT=/usr/local/lib/vito-agent-launchers
+ *   VITO_TRUSTED_LOCAL_EXECUTABLES='{"opencode":"/usr/local/lib/vito-agent-launchers/opencode","codex":"/usr/local/lib/vito-agent-launchers/codex"}'
+ *
+ * The launcher root is an explicit trust boundary. Production launchers are
+ * expected to establish the OS/container sandbox before starting the agent.
  */
 export class TrustedLocalExecutableResolver implements TrustedExecutableResolver {
   private readonly executableMap: ReadonlyMap<string, string>;
+  private readonly launcherRoot: string | null;
 
-  constructor(rawConfig = process.env.VITO_TRUSTED_LOCAL_EXECUTABLES) {
+  constructor(
+    rawConfig = process.env.VITO_TRUSTED_LOCAL_EXECUTABLES,
+    rawLauncherRoot = process.env.VITO_TRUSTED_AGENT_LAUNCHER_ROOT,
+  ) {
     this.executableMap = parseExecutableMap(rawConfig);
+    this.launcherRoot = parseLauncherRoot(rawLauncherRoot, this.executableMap.size > 0);
   }
 
   async resolve(
@@ -30,14 +38,17 @@ export class TrustedLocalExecutableResolver implements TrustedExecutableResolver
       providerId: string;
     },
   ): Promise<TrustedExecutable | null> {
-    if (!isSafeAlias(requestedCommand)) return null;
+    if (!isSafeAlias(requestedCommand) || !this.launcherRoot) return null;
 
     const configuredPath = this.executableMap.get(requestedCommand);
     if (!configuredPath || !isAbsolute(configuredPath)) return null;
 
     let realPath: string;
+    let realRoot: string;
     try {
+      realRoot = await fs.realpath(this.launcherRoot);
       realPath = await fs.realpath(resolve(configuredPath));
+      if (!isInside(realPath, realRoot)) return null;
       const stat = await fs.stat(realPath);
       if (!stat.isFile()) return null;
       await fs.access(realPath, fsConstants.X_OK);
@@ -57,8 +68,28 @@ export class TrustedLocalExecutableResolver implements TrustedExecutableResolver
   }
 }
 
+function isInside(child: string, parent: string): boolean {
+  return child === parent || child.startsWith(parent + sep);
+}
+
 function isSafeAlias(value: string): boolean {
   return /^[a-z0-9][a-z0-9._-]{0,63}$/u.test(value);
+}
+
+function parseLauncherRoot(raw: string | undefined, required: boolean): string | null {
+  if (!raw?.trim()) {
+    if (required) {
+      throw new Error(
+        'VITO_TRUSTED_AGENT_LAUNCHER_ROOT is required when local executables are configured',
+      );
+    }
+    return null;
+  }
+  if (!isAbsolute(raw)) {
+    throw new Error('VITO_TRUSTED_AGENT_LAUNCHER_ROOT must be absolute');
+  }
+  const normalized = normalize(raw);
+  return normalized.length > 1 ? normalized.replace(/[\\/]+$/u, '') : normalized;
 }
 
 function parseExecutableMap(rawConfig: string | undefined): ReadonlyMap<string, string> {
@@ -77,9 +108,7 @@ function parseExecutableMap(rawConfig: string | undefined): ReadonlyMap<string, 
 
   const entries: Array<[string, string]> = [];
   for (const [alias, executablePath] of Object.entries(parsed as Record<string, unknown>)) {
-    if (!isSafeAlias(alias)) {
-      throw new Error(`Invalid trusted executable alias: ${alias}`);
-    }
+    if (!isSafeAlias(alias)) throw new Error(`Invalid trusted executable alias: ${alias}`);
     if (typeof executablePath !== 'string' || !isAbsolute(executablePath)) {
       throw new Error(`Trusted executable path for ${alias} must be absolute`);
     }
