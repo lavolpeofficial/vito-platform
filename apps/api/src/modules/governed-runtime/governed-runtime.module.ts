@@ -7,6 +7,7 @@ import { GovernedInvocationServiceImpl } from '../governed-invocation/governed-i
 import { GovernedAdapterRegistryImpl } from '../governed-invocation/governed-adapter-registry';
 import { PrismaGovernedIdempotencyStore } from './persistence/prisma-governed-idempotency.store';
 import { WorkspaceFileToolAdapter } from './adapters/workspace-file.adapter';
+import { HeadlessLocalAgentAdapter } from './adapters/headless-local-agent.adapter';
 import {
   GovernedHomeDirectoryResolver,
   GovernedWorkingDirectoryResolver,
@@ -15,6 +16,7 @@ import {
 import { PrismaProviderDeclarationResolver } from './resolvers/prisma-provider-declaration.resolver';
 import { TrustedExecutionPolicyResolver } from './resolvers/trusted-execution-policy.resolver';
 import { TrustedExecutionProfileResolver } from './resolvers/trusted-execution-profile.resolver';
+import { TrustedLocalExecutableResolver } from './resolvers/trusted-local-executable.resolver';
 import { GovernedRuntimeService } from './governed-runtime.service';
 import { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-runtime.tokens';
 
@@ -28,6 +30,7 @@ export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-r
       useFactory: () => parseGovernedWorkspaceRoot(process.env.GOVERNED_WORKSPACE_ROOT),
     },
     TrustedExecutionProfileResolver,
+    TrustedLocalExecutableResolver,
     {
       provide: TrustedExecutionPolicyResolver,
       useFactory: (workspaceRoot: string) => new TrustedExecutionPolicyResolver(workspaceRoot),
@@ -44,19 +47,29 @@ export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-r
       inject: [GOVERNED_WORKSPACE_ROOT],
     },
     WorkspaceFileToolAdapter,
+    HeadlessLocalAgentAdapter,
     {
       provide: GOVERNED_ADAPTER_REGISTRY,
-      useFactory: (adapter: WorkspaceFileToolAdapter): GovernedAdapterRegistry => {
+      useFactory: (
+        workspaceAdapter: WorkspaceFileToolAdapter,
+        localAgentAdapter: HeadlessLocalAgentAdapter,
+      ): GovernedAdapterRegistry => {
         const registry = new GovernedAdapterRegistryImpl();
         registry.register({
           providerType: ProviderType.DETERMINISTIC_TOOL,
-          adapter,
+          adapter: workspaceAdapter,
           registeredAt: new Date(),
           version: 'b2c.1',
         });
+        registry.register({
+          providerType: ProviderType.LOCAL_TOOL,
+          adapter: localAgentAdapter,
+          registeredAt: new Date(),
+          version: 'agent-workforce.0.1',
+        });
         return registry;
       },
-      inject: [WorkspaceFileToolAdapter],
+      inject: [WorkspaceFileToolAdapter, HeadlessLocalAgentAdapter],
     },
     PrismaProviderDeclarationResolver,
     PrismaGovernedIdempotencyStore,
@@ -67,6 +80,7 @@ export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-r
         adapterRegistry: GovernedAdapterRegistry,
         auditService: AuditService,
         executionProfileResolver: TrustedExecutionProfileResolver,
+        trustedExecutableResolver: TrustedLocalExecutableResolver,
         workingDirectoryResolver: GovernedWorkingDirectoryResolver,
         homeDirectoryResolver: GovernedHomeDirectoryResolver,
         idempotencyStore: PrismaGovernedIdempotencyStore,
@@ -81,9 +95,11 @@ export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-r
           homeDirectoryResolver,
           idempotencyStore,
           executionPolicyResolver,
-          // B2c bewusste Deferred Dependencies (fail-closed belegt):
+          trustedExecutableResolver,
+          // Deliberately deferred until a secret broker and approval resolver
+          // are durable. Credential-requiring providers and consequential
+          // actions continue to fail closed.
           credentialBroker: null,
-          trustedExecutableResolver: null,
           humanGateResolver: null,
         }),
       inject: [
@@ -91,6 +107,7 @@ export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-r
         GOVERNED_ADAPTER_REGISTRY,
         AuditService,
         TrustedExecutionProfileResolver,
+        TrustedLocalExecutableResolver,
         GovernedWorkingDirectoryResolver,
         GovernedHomeDirectoryResolver,
         PrismaGovernedIdempotencyStore,
