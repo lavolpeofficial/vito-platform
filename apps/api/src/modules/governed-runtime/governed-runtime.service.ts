@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -50,8 +50,6 @@ export interface TrustedGovernedWorkspaceFileOperation {
 
 @Injectable()
 export class GovernedRuntimeService {
-  private readonly logger = new Logger(GovernedRuntimeService.name);
-
   constructor(
     private readonly invocationService: GovernedInvocationServiceImpl,
     private readonly prisma: PrismaService,
