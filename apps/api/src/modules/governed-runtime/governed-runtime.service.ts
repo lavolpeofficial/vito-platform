@@ -7,6 +7,7 @@ import {
   AgentExecutionStatus,
   ExecutionAction,
   ExecutionProfile,
+  type ExecutionBudget,
   GovernedCapabilityInvocationResult,
 } from '@vito/contracts';
 import { Prisma } from '@prisma/client';
@@ -37,15 +38,11 @@ export interface TrustedGovernedWorkspaceFileOperation {
   readonly relativePath?: string;
   readonly content?: string;
   readonly command?: string;
-  /**
-   * Trusted, server-side payload for governed adapters. This is intentionally
-   * not an external DTO. For headless local agents it may contain bounded
-   * `args` and `prompt` fields; the adapter validates its own payload schema.
-   */
   readonly governedInputPayload?: Record<string, unknown>;
   readonly correlationId?: string;
   readonly workflowRunId?: string;
   readonly workflowStepRunId?: string;
+  readonly executionBudget?: ExecutionBudget;
 }
 
 @Injectable()
@@ -81,7 +78,7 @@ export class GovernedRuntimeService {
         capabilityCode: input.capabilityCode,
         providerId: input.providerId,
         executionProfile: ExecutionProfile.BUILDER,
-        executionBudget: { maxDurationMs: 30_000 },
+        executionBudget: input.executionBudget ?? { maxDurationMs: 30_000 },
         requestedAction: input.requestedAction as ExecutionAction,
         requestedPath: input.relativePath,
         requestedCommand: input.command,
@@ -140,10 +137,7 @@ export class GovernedRuntimeService {
   }
 
   private assertTrustedOperation(input: TrustedGovernedWorkspaceFileOperation): void {
-    if (
-      !input ||
-      (input as { trustOrigin?: unknown }).trustOrigin !== TRUSTED_RUNTIME_ORIGIN
-    ) {
+    if (!input || (input as { trustOrigin?: unknown }).trustOrigin !== TRUSTED_RUNTIME_ORIGIN) {
       throw new Error(
         'GOVERNED_RUNTIME_UNTRUSTED_CONTEXT: Governed runtime entry requires a trusted server-side operation context',
       );
@@ -171,9 +165,7 @@ export class GovernedRuntimeService {
 
     if (input.requestedAction === 'RUN_COMMAND') {
       if (typeof input.command !== 'string' || input.command.length === 0) {
-        throw new Error(
-          'GOVERNED_RUNTIME_MALFORMED_OPERATION: RUN_COMMAND requires a command',
-        );
+        throw new Error('GOVERNED_RUNTIME_MALFORMED_OPERATION: RUN_COMMAND requires a command');
       }
       if (input.content !== undefined) {
         throw new Error(
@@ -183,9 +175,7 @@ export class GovernedRuntimeService {
       return;
     }
 
-    if (input.requestedAction === 'GIT_PUSH') {
-      return;
-    }
+    if (input.requestedAction === 'GIT_PUSH') return;
 
     if (
       typeof input.relativePath !== 'string' ||
@@ -197,9 +187,7 @@ export class GovernedRuntimeService {
       );
     }
 
-    if (input.requestedAction === 'READ_FILE') {
-      return;
-    }
+    if (input.requestedAction === 'READ_FILE') return;
 
     if (
       typeof input.content !== 'string' ||
