@@ -188,15 +188,15 @@ async function runProcess(input: {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    let stdout = Buffer.alloc(0);
-    let stderr = Buffer.alloc(0);
+    let stdout = '';
+    let stderr = '';
     let timedOut = false;
 
-    const appendBounded = (current: Buffer, chunk: Buffer): Buffer => {
-      const combined = Buffer.concat([current, chunk]);
-      return combined.byteLength <= MAX_CAPTURE_BYTES
-        ? combined
-        : combined.subarray(combined.byteLength - MAX_CAPTURE_BYTES);
+    const appendBounded = (current: string, chunk: Buffer): string => {
+      const combined = current + chunk.toString('utf8');
+      const bytes = Buffer.from(combined, 'utf8');
+      if (bytes.byteLength <= MAX_CAPTURE_BYTES) return combined;
+      return bytes.subarray(bytes.byteLength - MAX_CAPTURE_BYTES).toString('utf8');
     };
 
     child.stdout.on('data', (chunk: Buffer) => {
@@ -216,12 +216,7 @@ async function runProcess(input: {
 
     child.on('close', (code) => {
       clearTimeout(timer);
-      resolve({
-        exitCode: code,
-        stdout: stdout.toString('utf8'),
-        stderr: stderr.toString('utf8'),
-        timedOut,
-      });
+      resolve({ exitCode: code, stdout, stderr, timedOut });
     });
 
     if (input.prompt !== undefined) child.stdin.end(input.prompt, 'utf8');
