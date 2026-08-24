@@ -21,8 +21,9 @@ describe('GovernedRuntimeModule (B2c assembly)', () => {
     process.env = ORIGINAL_ENV;
   });
 
-  it('assembles the governed runtime with a valid absolute workspace root', async () => {
+  it('assembles deterministic and local-tool adapters with a valid absolute workspace root', async () => {
     process.env.GOVERNED_WORKSPACE_ROOT = `/tmp/vito-b2c-module-${randomUUID()}`;
+    process.env.VITO_TRUSTED_LOCAL_EXECUTABLES = '{}';
 
     const moduleRef = await Test.createTestingModule({
       imports: [CommonModule, PrismaModule, GovernedRuntimeModule],
@@ -40,6 +41,7 @@ describe('GovernedRuntimeModule (B2c assembly)', () => {
 
     const registry = moduleRef.get('GOVERNED_ADAPTER_REGISTRY');
     expect(registry.has(ProviderType.DETERMINISTIC_TOOL)).toBe(true);
+    expect(registry.has(ProviderType.LOCAL_TOOL)).toBe(true);
 
     const root = moduleRef.get<string>(GOVERNED_WORKSPACE_ROOT);
     expect(root).toBe(process.env.GOVERNED_WORKSPACE_ROOT);
