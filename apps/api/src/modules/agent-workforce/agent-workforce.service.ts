@@ -1,6 +1,5 @@
 import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import {
-  ProviderCredentialRequirement,
   ProviderType,
   type ExecutionBudget,
   type IndependenceContext,
@@ -30,13 +29,10 @@ export interface DispatchAgentTaskInput {
 }
 
 /**
- * AgentWorkforceService
- *
  * Server-side bridge from "VITO needs a capability" to a governed provider
  * invocation. Callers choose the capability and task, never the executable or
  * provider. Provider selection stays with ProviderRouterService; executable
- * identity comes only from trusted provider metadata and the trusted
- * executable resolver.
+ * identity and credential authority are re-proven inside governed invocation.
  */
 @Injectable()
 export class AgentWorkforceService {
@@ -78,15 +74,6 @@ export class AgentWorkforceService {
         code: 'AGENT_PROVIDER_ADAPTER_NOT_READY',
         providerId: provider.id,
         providerType: provider.providerType,
-        routingDecisionId: routing.routingDecisionId,
-      });
-    }
-
-    if (provider.credentialRequirement !== ProviderCredentialRequirement.NOT_REQUIRED) {
-      throw new ServiceUnavailableException({
-        code: 'AGENT_PROVIDER_CREDENTIAL_BOUNDARY_NOT_READY',
-        providerId: provider.id,
-        credentialRequirement: provider.credentialRequirement,
         routingDecisionId: routing.routingDecisionId,
       });
     }
@@ -139,9 +126,7 @@ export class AgentWorkforceService {
   private providerCommandAlias(metadata: Record<string, unknown>): string {
     const alias = metadata.commandAlias;
     if (typeof alias !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(alias)) {
-      throw new ServiceUnavailableException({
-        code: 'AGENT_PROVIDER_COMMAND_ALIAS_INVALID',
-      });
+      throw new ServiceUnavailableException({ code: 'AGENT_PROVIDER_COMMAND_ALIAS_INVALID' });
     }
     return alias;
   }
