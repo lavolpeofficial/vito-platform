@@ -5,7 +5,10 @@ import type {
   TrustedExecutable,
 } from '@vito/contracts';
 import { HeadlessLocalAgentAdapter } from './headless-local-agent.adapter';
-import type { RemoteExecutionWorkerService, ExecuteSandboxedResult } from '../../remote-execution-worker/remote-execution-worker.service';
+import type {
+  RemoteExecutionWorkerService,
+  ExecuteSandboxedResult,
+} from '../../remote-execution-worker/remote-execution-worker.service';
 
 function makeMockWorkerService(): RemoteExecutionWorkerService {
   return {
@@ -13,7 +16,9 @@ function makeMockWorkerService(): RemoteExecutionWorkerService {
   } as unknown as RemoteExecutionWorkerService;
 }
 
-function makeTrustedExecutable(overrides: Partial<TrustedExecutable> = {}): TrustedExecutable {
+function makeTrustedExecutable(
+  overrides: Partial<TrustedExecutable> = {},
+): TrustedExecutable {
   return {
     commandName: 'node',
     resolvedPath: '/usr/bin/node',
@@ -23,7 +28,9 @@ function makeTrustedExecutable(overrides: Partial<TrustedExecutable> = {}): Trus
   };
 }
 
-function makeContext(overrides: Partial<GovernedExecutionContext> = {}): GovernedExecutionContext {
+function makeContext(
+  overrides: Partial<GovernedExecutionContext> = {},
+): GovernedExecutionContext {
   return {
     invocationId: 'inv-001',
     organizationId: 'org-123',
@@ -52,7 +59,9 @@ function makeContext(overrides: Partial<GovernedExecutionContext> = {}): Governe
   } as GovernedExecutionContext;
 }
 
-function makeWorkerResult(overrides: Partial<ExecuteSandboxedResult> = {}): ExecuteSandboxedResult {
+function makeWorkerResult(
+  overrides: Partial<ExecuteSandboxedResult> = {},
+): ExecuteSandboxedResult {
   return {
     executionId: 'exec-001',
     exitCode: 0,
@@ -64,6 +73,14 @@ function makeWorkerResult(overrides: Partial<ExecuteSandboxedResult> = {}): Exec
     baseSha: 'a'.repeat(40),
     repositoryId: 'lavolpeofficial/vito-platform',
     workspacePath: '/tmp/workspaces/org/run/builder',
+    governedResultSettling: {
+      executionId: 'exec-001',
+      baseSha: 'a'.repeat(40),
+      changedFiles: ['src/foo.ts'],
+      patch: 'diff --git a/src/foo.ts...',
+      patchTruncated: false,
+      empty: false,
+    },
     ...overrides,
   };
 }
@@ -71,7 +88,9 @@ function makeWorkerResult(overrides: Partial<ExecuteSandboxedResult> = {}): Exec
 describe('HeadlessLocalAgentAdapter', () => {
   it('delegates to workerService.executeSandboxed (not child_process.spawn)', async () => {
     const workerService = makeMockWorkerService();
-    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(makeWorkerResult());
+    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(
+      makeWorkerResult(),
+    );
 
     const adapter = new HeadlessLocalAgentAdapter(workerService);
     const context = makeContext();
@@ -87,7 +106,9 @@ describe('HeadlessLocalAgentAdapter', () => {
 
   it('preserves GovernedInvocationService authorization context', async () => {
     const workerService = makeMockWorkerService();
-    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(makeWorkerResult());
+    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(
+      makeWorkerResult(),
+    );
 
     const adapter = new HeadlessLocalAgentAdapter(workerService);
     const context = makeContext({
@@ -98,7 +119,8 @@ describe('HeadlessLocalAgentAdapter', () => {
 
     await adapter.execute({ governedInputPayload: {} }, context);
 
-    const callArgs = (workerService.executeSandboxed as jest.Mock).mock.calls[0][0];
+    const callArgs = (workerService.executeSandboxed as jest.Mock).mock
+      .calls[0][0];
     expect(callArgs.organizationId).toBe('org-456');
     expect(callArgs.workflowRunId).toBe('run-xyz');
     expect(callArgs.workflowStepRunId).toBe('step-99');
@@ -106,7 +128,9 @@ describe('HeadlessLocalAgentAdapter', () => {
 
   it('TrustedExecutableResolver authority: executable comes from context', async () => {
     const workerService = makeMockWorkerService();
-    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(makeWorkerResult());
+    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(
+      makeWorkerResult(),
+    );
 
     const adapter = new HeadlessLocalAgentAdapter(workerService);
     const trusted = makeTrustedExecutable({
@@ -118,7 +142,8 @@ describe('HeadlessLocalAgentAdapter', () => {
 
     await adapter.execute({ governedInputPayload: {} }, context);
 
-    const callArgs = (workerService.executeSandboxed as jest.Mock).mock.calls[0][0];
+    const callArgs = (workerService.executeSandboxed as jest.Mock).mock
+      .calls[0][0];
     expect(callArgs.executable).toBe(trusted);
   });
 
@@ -130,13 +155,17 @@ describe('HeadlessLocalAgentAdapter', () => {
     const result = await adapter.execute({ governedInputPayload: {} }, context);
 
     expect(result.status).toBe(AgentExecutionStatus.FAILED);
-    expect((result.error as { code: string }).code).toBe('TRUSTED_EXECUTABLE_REQUIRED');
+    expect((result.error as { code: string }).code).toBe(
+      'TRUSTED_EXECUTABLE_REQUIRED',
+    );
     expect(workerService.executeSandboxed).not.toHaveBeenCalled();
   });
 
   it('validates args limits', async () => {
     const workerService = makeMockWorkerService();
-    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(makeWorkerResult());
+    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(
+      makeWorkerResult(),
+    );
 
     const adapter = new HeadlessLocalAgentAdapter(workerService);
     const tooManyArgs = Array.from({ length: 65 }, (_, i) => `arg${i}`);
@@ -160,7 +189,9 @@ describe('HeadlessLocalAgentAdapter', () => {
     );
 
     expect(result.status).toBe(AgentExecutionStatus.FAILED);
-    expect((result.error as { code: string }).code).toBe('INVALID_AGENT_PROMPT');
+    expect((result.error as { code: string }).code).toBe(
+      'INVALID_AGENT_PROMPT',
+    );
     expect(workerService.executeSandboxed).not.toHaveBeenCalled();
   });
 
@@ -214,7 +245,9 @@ describe('HeadlessLocalAgentAdapter', () => {
 
     expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
     expect(result.outputReference).toBe('gov://execution/inv-001');
-    expect(result.providerExecutionMetadata.executableIntegrityHash).toBe('sha256:integrity');
+    expect(result.providerExecutionMetadata.executableIntegrityHash).toBe(
+      'sha256:integrity',
+    );
     expect(result.providerExecutionMetadata.exitCode).toBe(0);
     expect(result.providerExecutionMetadata.stdout).toBe('hello');
     expect(result.providerExecutionMetadata.stderr).toBe('warn');
@@ -255,7 +288,9 @@ describe('HeadlessLocalAgentAdapter', () => {
     );
 
     expect(result.status).toBe(AgentExecutionStatus.FAILED);
-    expect((result.error as { code: string }).code).toBe('LOCAL_AGENT_EXIT_NONZERO');
+    expect((result.error as { code: string }).code).toBe(
+      'LOCAL_AGENT_EXIT_NONZERO',
+    );
     expect(result.error!.retryable).toBe(false);
   });
 
@@ -272,15 +307,131 @@ describe('HeadlessLocalAgentAdapter', () => {
     );
 
     expect(result.status).toBe(AgentExecutionStatus.FAILED);
-    expect((result.error as { code: string }).code).toBe('LOCAL_AGENT_EXECUTION_ERROR');
+    expect((result.error as { code: string }).code).toBe(
+      'LOCAL_AGENT_EXECUTION_ERROR',
+    );
     expect((result.error as { message: string }).message).toBe('sandbox crash');
     expect(result.error!.retryable).toBe(true);
   });
 
   it('does NOT directly spawn (no child_process.spawn usage)', () => {
     const fs = require('fs');
-    const source = fs.readFileSync(__filename.replace(/\.spec\.ts$/, '.ts'), 'utf8');
+    const source = fs.readFileSync(
+      __filename.replace(/\.spec\.ts$/, '.ts'),
+      'utf8',
+    );
     expect(source).not.toMatch(/child_process/);
     expect(source).not.toMatch(/\bspawn\b/);
+  });
+
+  it('CRITICAL: Adapter passes non-zero memory/CPU defaults to worker', async () => {
+    const workerService = makeMockWorkerService();
+    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(
+      makeWorkerResult(),
+    );
+
+    const adapter = new HeadlessLocalAgentAdapter(workerService);
+    await adapter.execute({ governedInputPayload: {} }, makeContext());
+
+    const callArgs = (workerService.executeSandboxed as jest.Mock).mock
+      .calls[0][0];
+    expect(callArgs.sandboxConfig.maxMemoryBytes).toBe(512 * 1024 * 1024);
+    expect(callArgs.sandboxConfig.maxCpuTimeMs).toBe(600 * 1000);
+  });
+
+  it('result includes artifactReferences with changeset path', async () => {
+    const workerService = makeMockWorkerService();
+    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(
+      makeWorkerResult(),
+    );
+
+    const adapter = new HeadlessLocalAgentAdapter(workerService);
+    const result = await adapter.execute(
+      { governedInputPayload: {} },
+      makeContext({ invocationId: 'inv-abc' }),
+    );
+
+    expect(result.artifactReferences).toEqual([
+      'gov://execution/inv-abc/changeset',
+    ]);
+  });
+
+  it('sideEffects.filesModified populated from governedResultSettling.changedFiles', async () => {
+    const workerService = makeMockWorkerService();
+    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(
+      makeWorkerResult({
+        governedResultSettling: {
+          executionId: 'exec-001',
+          baseSha: 'a'.repeat(40),
+          changedFiles: ['src/foo.ts', 'src/bar.ts'],
+          patch: 'diff...',
+          patchTruncated: false,
+          empty: false,
+        },
+      }),
+    );
+
+    const adapter = new HeadlessLocalAgentAdapter(workerService);
+    const result = await adapter.execute(
+      { governedInputPayload: {} },
+      makeContext(),
+    );
+
+    const meta = result.providerExecutionMetadata as Record<string, unknown>;
+    const sideEffects = meta.sideEffects as Record<string, unknown>;
+    expect(sideEffects.filesModified).toEqual(['src/foo.ts', 'src/bar.ts']);
+  });
+
+  it('providerExecutionMetadata includes governedResultSettling', async () => {
+    const workerService = makeMockWorkerService();
+    const settling = {
+      executionId: 'exec-001',
+      baseSha: 'a'.repeat(40),
+      changedFiles: ['src/foo.ts'],
+      patch: 'diff...',
+      patchTruncated: false,
+      empty: false,
+    };
+    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(
+      makeWorkerResult({ governedResultSettling: settling }),
+    );
+
+    const adapter = new HeadlessLocalAgentAdapter(workerService);
+    const result = await adapter.execute(
+      { governedInputPayload: {} },
+      makeContext(),
+    );
+
+    const meta = result.providerExecutionMetadata as Record<string, unknown>;
+    expect(meta.governedResultSettling).toEqual(settling);
+  });
+
+  it('timedOut result also includes governedResultSettling', async () => {
+    const workerService = makeMockWorkerService();
+    const settling = {
+      executionId: 'exec-001',
+      baseSha: 'a'.repeat(40),
+      changedFiles: [],
+      patch: '',
+      patchTruncated: false,
+      empty: true,
+    };
+    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(
+      makeWorkerResult({
+        timedOut: true,
+        exitCode: null,
+        governedResultSettling: settling,
+      }),
+    );
+
+    const adapter = new HeadlessLocalAgentAdapter(workerService);
+    const result = await adapter.execute(
+      { governedInputPayload: {} },
+      makeContext(),
+    );
+
+    expect(result.status).toBe(AgentExecutionStatus.TIMED_OUT);
+    const meta = result.providerExecutionMetadata as Record<string, unknown>;
+    expect(meta.governedResultSettling).toEqual(settling);
   });
 });

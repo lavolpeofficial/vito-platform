@@ -668,54 +668,58 @@ The original implementation was committed to `eo-01-5-wip`, which branched from 
 | Workspace path confinement | `workspace-provisioner.spec.ts` — path traversal adversarial tests |
 | Environment allowlist enforced | `sandbox-executor.spec.ts` — env injection blocked |
 
-### Files Created (12 new)
+### Files Created (13 new)
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `remote-execution-worker/types.ts` | ~80 | Shared interfaces + `SANDBOX_ENV_ALLOWLIST` |
-| `remote-execution-worker/repository-registry.ts` | ~88 | `EnvRepositoryRegistry` — JSON config allowlist |
-| `remote-execution-worker/repository-registry.spec.ts` | ~170 | 14 tests including adversarial |
+| `remote-execution-worker/types.ts` | ~100 | Shared interfaces + `SANDBOX_SYSTEM_MANAGED_ENV` + `SANDBOX_CALLER_PERMITTED_ENV` |
+| `remote-execution-worker/repository-registry.ts` | ~115 | `EnvRepositoryRegistry` — v0.1 single-repo invariant |
+| `remote-execution-worker/repository-registry.spec.ts` | ~130 | 16 tests including v0.1 invariant adversarial |
 | `remote-execution-worker/workspace-provisioner.ts` | ~185 | `GitWorkspaceProvisioner` — shallow clone + path confinement |
-| `remote-execution-worker/workspace-provisioner.spec.ts` | ~90 | 7 tests including traversal adversarial |
-| `remote-execution-worker/sandbox-executor.ts` | ~290 | `BubblewrapSandboxExecutor` — sole production path |
-| `remote-execution-worker/sandbox-executor.spec.ts` | ~120 | 7 tests including production downgrade adversarial |
+| `remote-execution-worker/workspace-provisioner.spec.ts` | ~110 | 7 tests including traversal adversarial |
+| `remote-execution-worker/sandbox-executor.ts` | ~340 | `BubblewrapSandboxExecutor` — production path with env protection |
+| `remote-execution-worker/sandbox-executor.spec.ts` | ~280 | 22 tests including system-managed env adversarial |
 | `remote-execution-worker/output-capture.ts` | ~35 | `BoundedOutputCapture` — rolling 256KB window |
 | `remote-execution-worker/output-capture.spec.ts` | ~55 | 5 tests |
-| `remote-execution-worker/remote-execution-worker.service.ts` | ~120 | `RemoteExecutionWorkerService` — orchestration |
-| `remote-execution-worker/remote-execution-worker.service.spec.ts` | ~130 | 7 tests including cleanup lifecycle |
-| `remote-execution-worker/remote-execution-worker.module.ts` | ~55 | NestJS module with DI |
-| `governed-runtime/adapters/headless-local-agent.adapter.spec.ts` | ~160 | 12 adapter integration/regression tests (NEW) |
-| `remote-execution-worker/bubblewrap-e2e.spec.ts` | ~60 | 1 E2E test, environment-limited (NEW) |
+| `remote-execution-worker/change-set-capture.ts` | ~60 | `captureGovernedResultSettling` — bounded diff before cleanup |
+| `remote-execution-worker/change-set-capture.spec.ts` | ~100 | 8 tests including truncation |
+| `remote-execution-worker/remote-execution-worker.service.ts` | ~140 | `RemoteExecutionWorkerService` — orchestration + change-set |
+| `remote-execution-worker/remote-execution-worker.service.spec.ts` | ~200 | 9 tests including change-set lifecycle |
+| `remote-execution-worker/remote-execution-worker.module.ts` | ~47 | NestJS module with DI |
+| `governed-runtime/adapters/headless-local-agent.adapter.spec.ts` | ~280 | 17 adapter integration/regression tests |
+| `remote-execution-worker/bubblewrap-e2e.spec.ts` | ~250 | 4 E2E tests with real executor |
 
-### Files Modified (6, purely additive)
+### Files Modified (8, purely additive)
 
 | File | Change | Lines |
 |------|--------|-------|
-| `governed-runtime/governed-runtime.module.ts` | Import `RemoteExecutionWorkerModule`; inject `RemoteExecutionWorkerService` into `HeadlessLocalAgentAdapter` factory | +8 |
-| `governed-runtime/adapters/headless-local-agent.adapter.ts` | Rewrite: delegate to `RemoteExecutionWorkerService.executeSandboxed()` instead of direct `spawn()` | rewritten |
-| `remote-execution-worker/repository-registry.ts` | Add `enforceV01RepositoryInvariant()` — exactly `lavolpeofficial/vito-platform` only | +35 |
-| `remote-execution-worker/sandbox-executor.ts` | Sandbox-visible `HOME=/workspace/.vito-agent-home`, `TMPDIR=/workspace/.vito-agent-tmp`, `XDG_*` paths; NODE_ENV as string | +39 |
-| `remote-execution-worker/types.ts` | Add `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` to `SANDBOX_ENV_ALLOWLIST` | +2 |
+| `governed-runtime/governed-runtime.module.ts` | Import `RemoteExecutionWorkerModule`; inject `RemoteExecutionWorkerService` into adapter factory | +8 |
+| `governed-runtime/adapters/headless-local-agent.adapter.ts` | Delegate to worker; non-zero resource defaults; change-set artifact surface | rewritten |
+| `remote-execution-worker/repository-registry.ts` | `enforceV01RepositoryInvariant()` — exactly `lavolpeofficial/vito-platform` only | +35 |
+| `remote-execution-worker/sandbox-executor.ts` | Sandbox-visible env; reject system-managed overrides; NODE_ENV as string | +21 |
+| `remote-execution-worker/types.ts` | `SANDBOX_SYSTEM_MANAGED_ENV`, `SANDBOX_CALLER_PERMITTED_ENV` split; `GovernedResultSettling` | +31 |
+| `remote-execution-worker/remote-execution-worker.service.ts` | Change-set capture before cleanup; result includes `governedResultSettling` | +9 |
 | `contracts/src/engineering/invocation.ts` | Add `GovernedSandboxConfig`, `SandboxExecutionResult` | +38 |
 | `contracts/src/engineering/index.ts` | Export new types | +2 |
 | `contracts/src/index.ts` | Re-export new types | +2 |
 
-**Total: +6 modified, 14 new files. Zero EO-01.5 regressions.**
+**Total: +8 modified, 16 new files. Zero EO-01.5 regressions.**
 
 ### Test Results
 
 | Suite | Tests | Status |
 |-------|-------|--------|
+| `change-set-capture.spec.ts` | 8 | PASS |
 | `repository-registry.spec.ts` | 16 | PASS |
 | `workspace-provisioner.spec.ts` | 7 | PASS |
-| `sandbox-executor.spec.ts` | 12 | PASS |
+| `sandbox-executor.spec.ts` | 22 | PASS |
 | `output-capture.spec.ts` | 5 | PASS |
-| `remote-execution-worker.service.spec.ts` | 6 | PASS |
-| `headless-local-agent.adapter.spec.ts` | 12 | PASS |
-| `bubblewrap-e2e.spec.ts` | 1 | PASS |
-| **Worker + adapter total** | **59** | **ALL PASS** |
+| `remote-execution-worker.service.spec.ts` | 9 | PASS |
+| `headless-local-agent.adapter.spec.ts` | 17 | PASS |
+| `bubblewrap-e2e.spec.ts` | 4 | PASS |
+| **Worker + adapter total** | **88** | **ALL PASS** |
 | `@vito/contracts` (all) | 225 | ALL PASS |
-| **Grand total** | **284** | **ALL PASS** |
+| **Grand total** | **313** | **ALL PASS** |
 
 ### Adversarial Test Coverage
 
@@ -730,11 +734,20 @@ The original implementation was committed to `eo-01-5-wip`, which branched from 
 | Base-ref injection | `workspace-provisioner.spec.ts` disallowed ref | REJECTED |
 | Path traversal (workflowRunId) | `workspace-provisioner.spec.ts` traversal in run ID | REJECTED |
 | Path traversal (organizationId) | `workspace-provisioner.spec.ts` traversal in org ID | REJECTED |
-| Environment injection | `SANDBOX_ENV_ALLOWLIST` enforcement | REJECTED |
+| System-managed env: HOME override | `sandbox-executor.spec.ts` | ENV_OVERRIDE_DENIED |
+| System-managed env: TMPDIR override | `sandbox-executor.spec.ts` | ENV_OVERRIDE_DENIED |
+| System-managed env: XDG_CONFIG_HOME override | `sandbox-executor.spec.ts` | ENV_OVERRIDE_DENIED |
+| System-managed env: XDG_CACHE_HOME override | `sandbox-executor.spec.ts` | ENV_OVERRIDE_DENIED |
+| Non-allowlisted caller key | `sandbox-executor.spec.ts` | ENV_NOT_ALLOWED |
 | HOME/TMPDIR/XDG sandbox visibility | `sandbox-executor.spec.ts` — no host path in --setenv | Verified |
 | Host path leak in bubblewrap args | `bubblewrap-e2e.spec.ts` — real bwrap | PASS |
 | Adapter delegates (no direct spawn) | `headless-local-agent.adapter.spec.ts` — mock worker service | VERIFIED |
 | Adapter preserves auth context | `headless-local-agent.adapter.spec.ts` | VERIFIED |
+| Non-zero production resource defaults | `headless-local-agent.adapter.spec.ts` | VERIFIED |
+| Change-set captured before cleanup | `remote-execution-worker.service.spec.ts` | VERIFIED |
+| Patch truncation at MAX_PATCH_BYTES | `change-set-capture.spec.ts` | VERIFIED |
+| Empty workspace → empty change-set | `change-set-capture.spec.ts` | VERIFIED |
+| Artifact capture failure → graceful fallback | `change-set-capture.spec.ts` | VERIFIED |
 | Cleanup confinement | `isConfined()` check in cleanup | ENFORCED |
 | Cleanup idempotency | Repeated cleanup on same handle | Idempotent |
 | Cleanup failure observable | Failure throws WorkspaceProvisionError | Observable |
@@ -744,16 +757,48 @@ The original implementation was committed to `eo-01-5-wip`, which branched from 
 | Design Section | Deviation | Rationale |
 |----------------|-----------|-----------|
 | File list — `sandbox.config.ts` | Not implemented | Config inline via `GovernedSandboxConfig` at invocation time |
-| File list — `sandbox-executor.e2e.spec.ts` | Not implemented | Real Bubblewrap E2E deferred (see Environment Limitation) |
 | `maxWorktreeBytes` enforcement | Documented as NOT enforced | Reserved for future cgroup-based enforcement |
 | Workspace provisioning | Shallow clone (git init + depth=1) instead of `git worktree add` | Avoids worktree pool dependency; cleanup uses rmSync to match |
-| `GovernedSandboxConfig.extraEnvAllowlist` | Removed from contract | Not supported in v0.1; env is governed by `SANDBOX_ENV_ALLOWLIST` |
+| `GovernedSandboxConfig.extraEnvAllowlist` | Removed from contract | Not supported in v0.1; env is governed by `SANDBOX_SYSTEM_MANAGED_ENV` + `SANDBOX_CALLER_PERMITTED_ENV` |
 | `GovernedSandboxConfig.readOnlyMounts` | Removed from contract | Not supported in v0.1; only `/usr`, `/bin`, `/lib`, `/lib64`, `/dev`, `/proc` mounted |
 | `HeadlessLocalAgentAdapter` delegation | **IMPLEMENTED** — adapter delegates to `RemoteExecutionWorkerService.executeSandboxed()` | Wired in `governed-runtime.module.ts` DI factory |
+| Push/merge | **NOT IMPLEMENTED** — auto-push and auto-merge deferred | v0.1 captures changeset only; push/merge remain governed operations outside worker scope |
+
+### Governed Change-Set / Artifact Handoff
+
+Before workspace cleanup, the worker captures a **governed change-set**:
+
+- `git status --porcelain` → changed file list
+- `git diff --binary` → bounded patch (max 2 MiB, truncated with `patchTruncated=true`)
+- Base SHA, execution ID
+
+The change-set is returned in `ExecuteSandboxedResult.governedResultSettling` and surfaced in `GovernedAdapterResult.artifactReferences` as `gov://execution/{id}/changeset`.
+
+**Properties:**
+- No auto-push, no auto-merge
+- No network access (bwrap `--unshare-net`)
+- Artifact paths do not escape the governed workspace
+- Oversized patch fails explicitly (`patchTruncated=true`) rather than silently truncating code changes
+- Unchanged workspace produces `empty=true` with empty file list and patch
+- Artifact capture failure returns gracefully (empty change-set), not false success
+- Workspace is deterministically cleaned up AFTER the change-set is safely captured
 
 ### Environment Limitation
 
-Real Bubblewrap E2E test (`bubblewrap-e2e.spec.ts`) is implemented and **PASSES** on the development host. On CI environments without Bubblewrap or without unprivileged user namespaces, the test gracefully skips with `ENVIRONMENT LIMITATION`. This is expected behavior — the adversarial unit test suite covers all security properties in isolation.
+Real Bubblewrap E2E tests (`bubblewrap-e2e.spec.ts`) exercise the actual `BubblewrapSandboxExecutor`. When bwrap and unprivileged user namespaces are available, tests verify execution success, network isolation, sandbox-visible env values, and resource-limit arguments. On CI environments without bwrap or without user namespace support, tests gracefully skip with `ENVIRONMENT LIMITATION`.
+
+### Protected Environment Keys
+
+System-managed sandbox keys (`HOME`, `TMPDIR`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`) are set to sandbox-visible paths (`/workspace/.vito-agent-home`, etc.) and **cannot be overridden** by callers. Any attempt to supply these keys through `request.env` is rejected with `ENV_OVERRIDE_DENIED`. Caller-permitted keys (`PATH`, `USER`, `LANG`, `LC_ALL`) may be supplied.
+
+### Production Resource Defaults
+
+| Parameter | Default | Enforcement |
+|-----------|---------|-------------|
+| `maxMemoryBytes` | 512 MiB (536,870,912) | `bwrap --rlimit-as` |
+| `maxCpuTimeMs` | 600 s (600,000) | `bwrap --rlimit-cpu` |
+| `maxWorktreeBytes` | 0 (deferred) | NOT enforced in v0.1 |
+| `timeoutMs` | From governed context | Worker process SIGTERM → SIGKILL |
 
 ### Audit / Idempotency Ownership
 

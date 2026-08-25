@@ -7,7 +7,11 @@ import { promisify } from 'node:util';
 import { execFile } from 'node:child_process';
 
 import { BoundedOutputCapture } from './output-capture';
-import { SANDBOX_ENV_ALLOWLIST } from './types';
+import {
+  SANDBOX_SYSTEM_MANAGED_ENV,
+  SANDBOX_CALLER_PERMITTED_ENV,
+  SANDBOX_ENV_ALLOWLIST,
+} from './types';
 import type {
   SandboxExecutor,
   SandboxExecutionRequest,
@@ -100,7 +104,9 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
 
   /**
    * Build the sandbox environment.
-   * HOME, TMPDIR, XDG_* are sandbox-visible paths (/workspace/...), never host paths.
+   * System-managed keys (HOME, TMPDIR, XDG_*) are set to sandbox-visible paths
+   * and cannot be overridden by callers. Callers may only supply caller-permitted
+   * keys (PATH, USER, LANG, LC_ALL).
    */
   private buildSandboxEnv(
     request: SandboxExecutionRequest,
@@ -114,10 +120,17 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
 
     if (request.env) {
       for (const [key, value] of request.env.entries()) {
-        if (!SANDBOX_ENV_ALLOWLIST.has(key)) {
+        if (SANDBOX_SYSTEM_MANAGED_ENV.has(key)) {
+          throw new SandboxStartupError(
+            'ENV_OVERRIDE_DENIED',
+            `Environment variable '${key}' is system-managed and cannot be overridden by callers. ` +
+              `System-managed keys: HOME, TMPDIR, XDG_CONFIG_HOME, XDG_CACHE_HOME.`,
+          );
+        }
+        if (!SANDBOX_CALLER_PERMITTED_ENV.has(key)) {
           throw new SandboxStartupError(
             'ENV_NOT_ALLOWED',
-            `Environment variable '${key}' is not in the sandbox allowlist`,
+            `Environment variable '${key}' is not in the caller-permitted sandbox allowlist`,
           );
         }
         env.set(key, value);

@@ -10,6 +10,8 @@ import type {
   SandboxExecutor,
 } from './types';
 import type { GovernedSandboxConfig, TrustedExecutable } from '@vito/contracts';
+import { captureGovernedResultSettling } from './change-set-capture';
+import type { GovernedResultSettling } from './change-set-capture';
 
 /**
  * Audit ownership note:
@@ -43,6 +45,7 @@ export interface ExecuteSandboxedResult {
   readonly baseSha: string;
   readonly repositoryId: string;
   readonly workspacePath: string;
+  readonly governedResultSettling: GovernedResultSettling;
 }
 
 @Injectable()
@@ -104,6 +107,11 @@ export class RemoteExecutionWorkerService {
 
       const sandboxResult = await this.sandboxExecutor.execute(sandboxRequest);
 
+      const governedResultSettling = await captureGovernedResultSettling(
+        workspace,
+        executionId,
+      );
+
       return Object.freeze({
         executionId,
         exitCode: sandboxResult.exitCode,
@@ -115,6 +123,7 @@ export class RemoteExecutionWorkerService {
         baseSha: workspace.baseSha,
         repositoryId: workspace.repositoryId,
         workspacePath: workspace.worktreePath,
+        governedResultSettling,
       });
     } finally {
       await this.workspaceProvisioner.cleanup(workspace);

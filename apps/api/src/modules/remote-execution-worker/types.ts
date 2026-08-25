@@ -70,19 +70,42 @@ export interface OutputCapture {
 }
 
 /**
- * Explicit allowlist of environment variables permitted inside the sandbox.
- * All other variables are REJECTED fail-closed.
- * The agent process receives only these keys plus HOME and TMPDIR.
+ * System-managed sandbox environment keys.
+ * These are set by the executor to sandbox-visible paths.
+ * Callers MUST NOT override them — attempts are rejected fail-closed.
  */
-export const SANDBOX_ENV_ALLOWLIST: ReadonlySet<string> = Object.freeze(
+export const SANDBOX_SYSTEM_MANAGED_ENV: ReadonlySet<string> = Object.freeze(
   new Set([
     'HOME',
     'TMPDIR',
     'XDG_CONFIG_HOME',
     'XDG_CACHE_HOME',
+  ]),
+);
+
+/**
+ * Caller-permitted environment keys.
+ * Callers may supply values for these keys in request.env.
+ * All other keys (including system-managed keys) are REJECTED.
+ */
+export const SANDBOX_CALLER_PERMITTED_ENV: ReadonlySet<string> = Object.freeze(
+  new Set([
     'PATH',
     'USER',
     'LANG',
     'LC_ALL',
   ]),
 );
+
+/**
+ * Combined allowlist: system-managed + caller-permitted.
+ * Used for backward-compatible validation in buildSandboxEnv.
+ */
+export const SANDBOX_ENV_ALLOWLIST: ReadonlySet<string> = Object.freeze(
+  new Set([
+    ...SANDBOX_SYSTEM_MANAGED_ENV,
+    ...SANDBOX_CALLER_PERMITTED_ENV,
+  ]),
+);
+
+export const MAX_PATCH_BYTES = 2 * 1024 * 1024;

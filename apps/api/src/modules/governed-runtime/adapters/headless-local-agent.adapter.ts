@@ -14,6 +14,14 @@ const MAX_ARGS = 64;
 const MAX_ARG_LENGTH = 4096;
 const MAX_PROMPT_BYTES = 512 * 1024;
 
+/**
+ * v0.1 production resource defaults.
+ * These are explicit safe defaults for Bubblewrap --rlimit-as and --rlimit-cpu.
+ * maxWorktreeBytes is NOT enforced in v0.1 (reserved for cgroup enforcement).
+ */
+const DEFAULT_MAX_MEMORY_BYTES = 512 * 1024 * 1024;
+const DEFAULT_MAX_CPU_TIME_MS = 600 * 1000;
+
 interface LocalAgentPayload {
   readonly args?: readonly string[];
   readonly prompt?: string;
@@ -56,8 +64,8 @@ export class HeadlessLocalAgentAdapter implements GovernedProviderAdapter {
     const sandboxConfig: GovernedSandboxConfig = {
       technology: 'bubblewrap',
       timeoutMs: context.timeoutMs,
-      maxMemoryBytes: 0,
-      maxCpuTimeMs: 0,
+      maxMemoryBytes: DEFAULT_MAX_MEMORY_BYTES,
+      maxCpuTimeMs: DEFAULT_MAX_CPU_TIME_MS,
       maxWorktreeBytes: 0,
     };
 
@@ -93,6 +101,9 @@ function mapWorkerResult(
   args: readonly string[],
 ): GovernedAdapterResult {
   const commandSummary = `${trustedExecutable.commandName}${args.length ? ' ' + args.join(' ') : ''}`;
+  const artifactRefs: string[] = [
+    `gov://execution/${invocationId}/changeset`,
+  ];
 
   if (result.timedOut) {
     return {
@@ -102,6 +113,7 @@ function mapWorkerResult(
         exitCode: null,
         stdout: result.stdout,
         stderr: result.stderr,
+        governedResultSettling: result.governedResultSettling,
         sideEffects: {
           filesCreated: [],
           filesModified: [],
@@ -123,14 +135,16 @@ function mapWorkerResult(
   return {
     status: succeeded ? AgentExecutionStatus.SUCCEEDED : AgentExecutionStatus.FAILED,
     outputReference: `gov://execution/${invocationId}`,
+    artifactReferences: artifactRefs,
     providerExecutionMetadata: {
       executableIntegrityHash: trustedExecutable.integrityHash ?? null,
       exitCode: result.exitCode,
       stdout: result.stdout,
       stderr: result.stderr,
+      governedResultSettling: result.governedResultSettling,
       sideEffects: {
         filesCreated: [],
-        filesModified: [],
+        filesModified: result.governedResultSettling?.changedFiles ?? [],
         filesDeleted: [],
         commandsExecuted: [commandSummary],
       },
