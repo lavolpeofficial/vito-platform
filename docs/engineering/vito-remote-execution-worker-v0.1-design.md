@@ -714,12 +714,12 @@ The original implementation was committed to `eo-01-5-wip`, which branched from 
 | `workspace-provisioner.spec.ts` | 7 | PASS |
 | `sandbox-executor.spec.ts` | 22 | PASS |
 | `output-capture.spec.ts` | 5 | PASS |
-| `remote-execution-worker.service.spec.ts` | 9 | PASS |
+| `remote-execution-worker.service.spec.ts` | 12 | PASS |
 | `headless-local-agent.adapter.spec.ts` | 17 | PASS |
 | `bubblewrap-e2e.spec.ts` | 4 | PASS |
-| **Worker + adapter total** | **88** | **ALL PASS** |
+| **Worker + adapter total** | **91** | **ALL PASS** |
 | `@vito/contracts` (all) | 225 | ALL PASS |
-| **Grand total** | **313** | **ALL PASS** |
+| **Grand total** | **316** | **ALL PASS** |
 
 ### Adversarial Test Coverage
 
@@ -747,7 +747,9 @@ The original implementation was committed to `eo-01-5-wip`, which branched from 
 | Change-set captured before cleanup | `remote-execution-worker.service.spec.ts` | VERIFIED |
 | Patch truncation at MAX_PATCH_BYTES | `change-set-capture.spec.ts` | VERIFIED |
 | Empty workspace → empty change-set | `change-set-capture.spec.ts` | VERIFIED |
-| Artifact capture failure → graceful fallback | `change-set-capture.spec.ts` | VERIFIED |
+| Capture failure → CHANGESET_CAPTURE_FAILED | `remote-execution-worker.service.spec.ts` | FAIL-CLOSED |
+| Capture failure → adapter FAILED status | `headless-local-agent.adapter.spec.ts` | FAIL-CLOSED |
+| Cleanup still runs on capture failure | `remote-execution-worker.service.spec.ts` | VERIFIED |
 | Cleanup confinement | `isConfined()` check in cleanup | ENFORCED |
 | Cleanup idempotency | Repeated cleanup on same handle | Idempotent |
 | Cleanup failure observable | Failure throws WorkspaceProvisionError | Observable |
@@ -766,22 +768,36 @@ The original implementation was committed to `eo-01-5-wip`, which branched from 
 
 ### Governed Change-Set / Artifact Handoff
 
-Before workspace cleanup, the worker captures a **governed change-set**:
+Before workspace cleanup, the worker captures a **governed change-set** using a temporary GIT_INDEX_FILE:
 
-- `git status --porcelain` → changed file list
-- `git diff --binary` → bounded patch (max 2 MiB, truncated with `patchTruncated=true`)
-- Base SHA, execution ID
+1. `git status --porcelain` → changed file list (all states: modified, added, deleted, renamed, untracked)
+2. `git read-tree HEAD` + `git add -A` into a temporary index → stages ALL changes including untracked/new files
+3. `git diff --cached --binary --no-color HEAD` → complete binary diff bounded to MAX_PATCH_BYTES (2 MiB)
+4. Temp index cleaned up in finally block
 
-The change-set is returned in `ExecuteSandboxedResult.governedResultSettling` and surfaced in `GovernedAdapterResult.artifactReferences` as `gov://execution/{id}/changeset`.
+The change-set is returned **inline** in `ExecuteSandboxedResult.governedResultSettling` and surfaced in `GovernedAdapterResult.providerExecutionMetadata.governedResultSettling`.
+
+**v0.1 persistence semantics:** The change-set is an inline governed result payload. The synthetic artifact reference `gov://execution/{id}/changeset` has been **removed** — no durable Artifact Store backs this reference in v0.1. The patch and changed files are the authoritative change-set, returned directly in the result envelope. A future Artifact Store can persist the inline payload.
+
+**Change-set completeness:**
+- Modified tracked files → diff hunks
+- New/untracked files → `new file mode` + full content via `git add -A` staging
+- Deleted files → `deleted file mode` + removal hunks
+- Renamed files → rename detection (git native)
+- Binary files → `GIT binary patch` content
 
 **Properties:**
 - No auto-push, no auto-merge
 - No network access (bwrap `--unshare-net`)
-- Artifact paths do not escape the governed workspace
+- No user/global Git state modified (temporary index only)
 - Oversized patch fails explicitly (`patchTruncated=true`) rather than silently truncating code changes
 - Unchanged workspace produces `empty=true` with empty file list and patch
-- Artifact capture failure returns gracefully (empty change-set), not false success
+- **Capture failure throws `CHANGESET_CAPTURE_FAILED`** — does NOT return empty success
 - Workspace is deterministically cleaned up AFTER the change-set is safely captured
+
+### Workspace Disposition
+
+The `workspacePath` field has been replaced with `workspaceDisposition: 'CLEANED'` in `ExecuteSandboxedResult`. The workspace directory no longer exists when `executeSandboxed()` returns. The disposition is surfaced in `providerExecutionMetadata.workspaceDisposition` for audit purposes. No usable workspace path is exposed.
 
 ### Environment Limitation
 

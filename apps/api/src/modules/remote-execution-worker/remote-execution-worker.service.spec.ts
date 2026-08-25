@@ -357,4 +357,96 @@ describe('RemoteExecutionWorkerService', () => {
     expect(executor.validateStartup).toHaveBeenCalled();
     expect(provisioner.provision).not.toHaveBeenCalled();
   });
+
+  it('result contains workspaceDisposition CLEANED', async () => {
+    const registry = makeMockRegistry();
+    const provisioner = makeMockProvisioner();
+    const executor = makeMockExecutor();
+    const workspace = makeWorkspaceHandle();
+
+    (registry.resolve as jest.Mock).mockReturnValue({
+      repositoryId: 'lavolpeofficial/vito-platform',
+      enabled: true,
+    });
+    (registry.isBaseRefAllowed as jest.Mock).mockReturnValue(true);
+    (provisioner.provision as jest.Mock).mockResolvedValue(workspace);
+    (executor.validateStartup as jest.Mock).mockResolvedValue(undefined);
+    (executor.execute as jest.Mock).mockResolvedValue(makeSandboxResult());
+
+    const service = new RemoteExecutionWorkerService(
+      registry,
+      provisioner,
+      executor,
+    );
+    const result = await service.executeSandboxed(baseInput());
+
+    expect(result.workspaceDisposition).toBe('CLEANED');
+  });
+
+  it('capture failure propagates as CHANGESET_CAPTURE_FAILED', async () => {
+    const registry = makeMockRegistry();
+    const provisioner = makeMockProvisioner();
+    const executor = makeMockExecutor();
+    const workspace = makeWorkspaceHandle();
+
+    (registry.resolve as jest.Mock).mockReturnValue({
+      repositoryId: 'lavolpeofficial/vito-platform',
+      enabled: true,
+    });
+    (registry.isBaseRefAllowed as jest.Mock).mockReturnValue(true);
+    (provisioner.provision as jest.Mock).mockResolvedValue(workspace);
+    (executor.validateStartup as jest.Mock).mockResolvedValue(undefined);
+    (executor.execute as jest.Mock).mockResolvedValue(makeSandboxResult());
+    (captureGovernedResultSettling as jest.Mock).mockRejectedValue(
+      new Error('simulated failure'),
+    );
+
+    const service = new RemoteExecutionWorkerService(
+      registry,
+      provisioner,
+      executor,
+    );
+
+    await expect(service.executeSandboxed(baseInput())).rejects.toThrow(
+      expect.objectContaining({
+        name: 'WorkerExecutionError',
+        code: 'CHANGESET_CAPTURE_FAILED',
+      }),
+    );
+    expect(provisioner.cleanup).toHaveBeenCalledWith(workspace);
+  });
+
+  it('capture failure does not report empty success', async () => {
+    const registry = makeMockRegistry();
+    const provisioner = makeMockProvisioner();
+    const executor = makeMockExecutor();
+    const workspace = makeWorkspaceHandle();
+
+    (registry.resolve as jest.Mock).mockReturnValue({
+      repositoryId: 'lavolpeofficial/vito-platform',
+      enabled: true,
+    });
+    (registry.isBaseRefAllowed as jest.Mock).mockReturnValue(true);
+    (provisioner.provision as jest.Mock).mockResolvedValue(workspace);
+    (executor.validateStartup as jest.Mock).mockResolvedValue(undefined);
+    (executor.execute as jest.Mock).mockResolvedValue(makeSandboxResult());
+    (captureGovernedResultSettling as jest.Mock).mockRejectedValue(
+      new Error('capture broke'),
+    );
+
+    const service = new RemoteExecutionWorkerService(
+      registry,
+      provisioner,
+      executor,
+    );
+
+    try {
+      await service.executeSandboxed(baseInput());
+      fail('Expected WorkerExecutionError to be thrown');
+    } catch (error: any) {
+      expect(error.name).toBe('WorkerExecutionError');
+      expect(error.code).toBe('CHANGESET_CAPTURE_FAILED');
+      expect(error.message).toContain('capture broke');
+    }
+  });
 });

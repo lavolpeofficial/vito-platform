@@ -44,7 +44,8 @@ export interface ExecuteSandboxedResult {
   readonly oomKilled: boolean;
   readonly baseSha: string;
   readonly repositoryId: string;
-  readonly workspacePath: string;
+  /** Audit-only path — workspace is cleaned before this result is returned. */
+  readonly workspaceDisposition: 'CLEANED';
   readonly governedResultSettling: GovernedResultSettling;
 }
 
@@ -107,10 +108,21 @@ export class RemoteExecutionWorkerService {
 
       const sandboxResult = await this.sandboxExecutor.execute(sandboxRequest);
 
-      const governedResultSettling = await captureGovernedResultSettling(
-        workspace,
-        executionId,
-      );
+      let governedResultSettling: GovernedResultSettling;
+      try {
+        governedResultSettling = await captureGovernedResultSettling(
+          workspace,
+          executionId,
+        );
+      } catch (error) {
+        this.logger.error(
+          `Change-set capture failed for execution ${executionId}: ${error instanceof Error ? error.message : 'unknown'}`,
+        );
+        throw new WorkerExecutionError(
+          'CHANGESET_CAPTURE_FAILED',
+          `Failed to capture governed change-set: ${error instanceof Error ? error.message : 'unknown'}`,
+        );
+      }
 
       return Object.freeze({
         executionId,
@@ -122,7 +134,7 @@ export class RemoteExecutionWorkerService {
         oomKilled: sandboxResult.oomKilled,
         baseSha: workspace.baseSha,
         repositoryId: workspace.repositoryId,
-        workspacePath: workspace.worktreePath,
+        workspaceDisposition: 'CLEANED' as const,
         governedResultSettling,
       });
     } finally {

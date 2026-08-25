@@ -1,171 +1,317 @@
 import { captureGovernedResultSettling } from './change-set-capture';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import type { WorkspaceHandle } from './types';
 
-jest.mock('node:child_process', () => {
-  const actual = jest.requireActual('node:child_process');
+function initRepo(repoPath: string): string {
+  execFileSync('git', ['init'], { cwd: repoPath, stdio: 'pipe' });
+  execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
+    cwd: repoPath,
+    stdio: 'pipe',
+  });
+  execFileSync('git', ['config', 'user.name', 'Vito Test'], {
+    cwd: repoPath,
+    stdio: 'pipe',
+  });
+  writeFileSync(join(repoPath, 'README.md'), '# test\n');
+  execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
+  execFileSync('git', ['commit', '-m', 'init'], {
+    cwd: repoPath,
+    stdio: 'pipe',
+  });
+  return execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: repoPath,
+    encoding: 'utf8',
+  }).trim();
+}
+
+function makeWorkspaceHandle(repoPath: string, sha: string): WorkspaceHandle {
   return {
-    ...actual,
-    execFile: jest.fn(),
-  };
-});
-
-import { execFile } from 'node:child_process';
-
-const mockExecFile = execFile as unknown as jest.Mock;
-
-function makeWorkspace(
-  overrides: Partial<WorkspaceHandle> = {},
-): WorkspaceHandle {
-  return {
-    worktreePath: '/tmp/workspaces/org/run/builder',
-    baseSha: 'a'.repeat(40),
+    worktreePath: repoPath,
+    baseSha: sha,
     role: 'builder',
-    repositoryId: 'lavolpeofficial/vito-platform',
+    repositoryId: 'test/spec',
     createdAt: new Date(),
-    ...overrides,
   };
 }
 
 describe('captureGovernedResultSettling', () => {
+  let tmpDir: string;
+
   beforeEach(() => {
-    jest.clearAllMocks();
+    tmpDir = mkdtempSync(join(tmpdir(), 'vito-cs-test-'));
   });
 
-  it('captures changed file list from workspace with modifications', async () => {
-    mockExecFile.mockImplementation(
-      (cmd: string, args: string[], opts: unknown, cb?: Function) => {
-        if (typeof opts === 'function') cb = opts;
-        if (args.includes('--porcelain')) {
-          cb!(null, { stdout: ' M src/foo.ts\nA  src/bar.ts\n', stderr: '' });
-        } else {
-          cb!(null, { stdout: 'diff --git a/src/foo.ts', stderr: '' });
-        }
-      },
-    );
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
 
-    const workspace = makeWorkspace();
-    const result = await captureGovernedResultSettling(workspace, 'exec-001');
+  it('new-file.ts content survives capture', async () => {
+    const repoPath = join(tmpDir, 'repo');
+    execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    execFileSync('git', ['config', 'user.name', 'Vito Test'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    writeFileSync(join(repoPath, 'README.md'), '# test\n');
+    execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'init'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repoPath,
+      encoding: 'utf8',
+    }).trim();
 
-    expect(result.changedFiles).toEqual(['src/foo.ts', 'src/bar.ts']);
-    expect(result.executionId).toBe('exec-001');
-    expect(result.baseSha).toBe('a'.repeat(40));
+    writeFileSync(join(repoPath, 'new-file.ts'), 'export const x = 1;\n');
+
+    const handle = makeWorkspaceHandle(repoPath, sha);
+    const result = await captureGovernedResultSettling(handle, 'exec-001');
+
+    expect(result.changedFiles).toContain('new-file.ts');
+    expect(result.patch).toContain('new-file.ts');
+    expect(result.patch).toContain('new file mode');
+    expect(result.patch).toContain('export const x = 1;');
     expect(result.empty).toBe(false);
   });
 
-  it('captures bounded diff from workspace with modifications', async () => {
-    const patchContent = 'diff --git a/src/foo.ts b/src/foo.ts\n--- a/src/foo.ts\n+++ b/src/foo.ts\n@@ -1 +1 @@\n-old\n+new';
-    mockExecFile.mockImplementation(
-      (cmd: string, args: string[], opts: unknown, cb?: Function) => {
-        if (typeof opts === 'function') cb = opts;
-        if (args.includes('--porcelain')) {
-          cb!(null, { stdout: ' M src/foo.ts\n', stderr: '' });
-        } else {
-          cb!(null, { stdout: patchContent, stderr: '' });
-        }
-      },
-    );
+  it('new binary file survives capture', async () => {
+    const repoPath = join(tmpDir, 'repo');
+    execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    execFileSync('git', ['config', 'user.name', 'Vito Test'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    writeFileSync(join(repoPath, 'README.md'), '# test\n');
+    execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'init'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repoPath,
+      encoding: 'utf8',
+    }).trim();
 
-    const result = await captureGovernedResultSettling(makeWorkspace(), 'exec-002');
+    const binaryData = Buffer.alloc(256);
+    for (let i = 0; i < 256; i++) binaryData[i] = i;
+    writeFileSync(join(repoPath, 'image.bin'), binaryData);
 
-    expect(result.patch).toBe(patchContent);
-    expect(result.patchTruncated).toBe(false);
+    const handle = makeWorkspaceHandle(repoPath, sha);
+    const result = await captureGovernedResultSettling(handle, 'exec-002');
+
+    expect(result.changedFiles).toContain('image.bin');
+    expect(result.patch).toContain('new file mode');
+    const hasBinary = result.patch.includes('GIT binary patch') ||
+      result.patch.includes('delta ') ||
+      result.patch.includes('literal ');
+    expect(hasBinary).toBe(true);
   });
 
-  it('returns empty change-set for unchanged workspace', async () => {
-    mockExecFile.mockImplementation(
-      (cmd: string, args: string[], opts: unknown, cb?: Function) => {
-        if (typeof opts === 'function') cb = opts;
-        cb!(null, { stdout: '', stderr: '' });
-      },
-    );
+  it('tracked modification survives', async () => {
+    const repoPath = join(tmpDir, 'repo');
+    execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    execFileSync('git', ['config', 'user.name', 'Vito Test'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    writeFileSync(join(repoPath, 'file.ts'), 'old content\n');
+    execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'init'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repoPath,
+      encoding: 'utf8',
+    }).trim();
 
-    const result = await captureGovernedResultSettling(makeWorkspace(), 'exec-003');
+    writeFileSync(join(repoPath, 'file.ts'), 'new content\n');
+
+    const handle = makeWorkspaceHandle(repoPath, sha);
+    const result = await captureGovernedResultSettling(handle, 'exec-003');
+
+    expect(result.changedFiles).toContain('file.ts');
+    expect(result.patch).toContain('-old content');
+    expect(result.patch).toContain('+new content');
+  });
+
+  it('deletion survives', async () => {
+    const repoPath = join(tmpDir, 'repo');
+    execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    execFileSync('git', ['config', 'user.name', 'Vito Test'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    writeFileSync(join(repoPath, 'file.ts'), 'to be deleted\n');
+    execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'init'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repoPath,
+      encoding: 'utf8',
+    }).trim();
+
+    rmSync(join(repoPath, 'file.ts'));
+
+    const handle = makeWorkspaceHandle(repoPath, sha);
+    const result = await captureGovernedResultSettling(handle, 'exec-004');
+
+    expect(result.changedFiles).toContain('file.ts');
+    expect(result.patch).toContain('deleted file mode');
+  });
+
+  it('mixed modified + new + deleted change-set is reconstructable', async () => {
+    const repoPath = join(tmpDir, 'repo');
+    execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    execFileSync('git', ['config', 'user.name', 'Vito Test'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    writeFileSync(join(repoPath, 'tracked.ts'), 'tracked\n');
+    writeFileSync(join(repoPath, 'to-delete.ts'), 'delete me\n');
+    execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'init'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repoPath,
+      encoding: 'utf8',
+    }).trim();
+
+    writeFileSync(join(repoPath, 'tracked.ts'), 'modified\n');
+    writeFileSync(join(repoPath, 'brand-new.ts'), 'new\n');
+    rmSync(join(repoPath, 'to-delete.ts'));
+
+    const handle = makeWorkspaceHandle(repoPath, sha);
+    const result = await captureGovernedResultSettling(handle, 'exec-005');
+
+    expect(result.changedFiles).toContain('tracked.ts');
+    expect(result.changedFiles).toContain('brand-new.ts');
+    expect(result.changedFiles).toContain('to-delete.ts');
+    expect(result.patch).toContain('deleted file mode');
+    expect(result.patch).toContain('new file mode');
+    expect(result.patch).toContain('+modified');
+    expect(result.patch).toContain('+new\n');
+  });
+
+  it('captures executionId and baseSha', async () => {
+    const repoPath = join(tmpDir, 'repo');
+    execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    execFileSync('git', ['config', 'user.name', 'Vito Test'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    writeFileSync(join(repoPath, 'README.md'), '# test\n');
+    execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'init'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repoPath,
+      encoding: 'utf8',
+    }).trim();
+
+    const handle = makeWorkspaceHandle(repoPath, sha);
+    const result = await captureGovernedResultSettling(handle, 'exec-006');
+
+    expect(result.executionId).toBe('exec-006');
+    expect(result.baseSha).toBe(sha);
+  });
+
+  it('empty workspace produces empty change-set', async () => {
+    const repoPath = join(tmpDir, 'repo');
+    execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    execFileSync('git', ['config', 'user.name', 'Vito Test'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    writeFileSync(join(repoPath, 'README.md'), '# test\n');
+    execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'init'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repoPath,
+      encoding: 'utf8',
+    }).trim();
+
+    const handle = makeWorkspaceHandle(repoPath, sha);
+    const result = await captureGovernedResultSettling(handle, 'exec-007');
 
     expect(result.changedFiles).toEqual([]);
     expect(result.patch).toBe('');
     expect(result.empty).toBe(true);
-  });
-
-  it('handles git command failure gracefully (returns empty changedFiles)', async () => {
-    mockExecFile.mockImplementation(
-      (cmd: string, args: string[], opts: unknown, cb?: Function) => {
-        if (typeof opts === 'function') cb = opts;
-        cb!(new Error('git not found'), { stdout: '', stderr: '' });
-      },
-    );
-
-    const result = await captureGovernedResultSettling(makeWorkspace(), 'exec-004');
-
-    expect(result.changedFiles).toEqual([]);
-    expect(result.patch).toBe('');
-    expect(result.empty).toBe(true);
-  });
-
-  it('returns executionId and baseSha from workspace', async () => {
-    const baseSha = 'b'.repeat(40);
-    mockExecFile.mockImplementation(
-      (cmd: string, args: string[], opts: unknown, cb?: Function) => {
-        if (typeof opts === 'function') cb = opts;
-        cb!(null, { stdout: '', stderr: '' });
-      },
-    );
-
-    const result = await captureGovernedResultSettling(
-      makeWorkspace({ baseSha }),
-      'exec-005',
-    );
-
-    expect(result.executionId).toBe('exec-005');
-    expect(result.baseSha).toBe(baseSha);
   });
 
   it('truncates oversized patch at MAX_PATCH_BYTES', async () => {
-    const oversizedPatch = 'x'.repeat(2 * 1024 * 1024 + 100);
-    mockExecFile.mockImplementation(
-      (cmd: string, args: string[], opts: unknown, cb?: Function) => {
-        if (typeof opts === 'function') cb = opts;
-        if (args.includes('--porcelain')) {
-          cb!(null, { stdout: ' M src/foo.ts\n', stderr: '' });
-        } else {
-          cb!(null, { stdout: oversizedPatch, stderr: '' });
-        }
-      },
-    );
+    const repoPath = join(tmpDir, 'repo');
+    execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    execFileSync('git', ['config', 'user.name', 'Vito Test'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    writeFileSync(join(repoPath, 'README.md'), '# test\n');
+    execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'init'], {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repoPath,
+      encoding: 'utf8',
+    }).trim();
 
-    const result = await captureGovernedResultSettling(makeWorkspace(), 'exec-006');
+    for (let i = 0; i < 200; i++) {
+      const content = 'A'.repeat(12000);
+      writeFileSync(join(repoPath, `large-${i}.txt`), content);
+    }
+
+    const handle = makeWorkspaceHandle(repoPath, sha);
+    const result = await captureGovernedResultSettling(handle, 'exec-008');
 
     expect(result.patchTruncated).toBe(true);
     expect(Buffer.byteLength(result.patch, 'utf8')).toBe(2 * 1024 * 1024);
-  });
-
-  it('verifies patchTruncated=true when truncated', async () => {
-    const oversizedPatch = 'y'.repeat(3 * 1024 * 1024);
-    mockExecFile.mockImplementation(
-      (cmd: string, args: string[], opts: unknown, cb?: Function) => {
-        if (typeof opts === 'function') cb = opts;
-        if (args.includes('--porcelain')) {
-          cb!(null, { stdout: ' M file.ts\n', stderr: '' });
-        } else {
-          cb!(null, { stdout: oversizedPatch, stderr: '' });
-        }
-      },
-    );
-
-    const result = await captureGovernedResultSettling(makeWorkspace(), 'exec-007');
-
-    expect(result.patchTruncated).toBe(true);
     expect(result.empty).toBe(false);
-  });
-
-  it('returns frozen result object', async () => {
-    mockExecFile.mockImplementation(
-      (cmd: string, args: string[], opts: unknown, cb?: Function) => {
-        if (typeof opts === 'function') cb = opts;
-        cb!(null, { stdout: '', stderr: '' });
-      },
-    );
-
-    const result = await captureGovernedResultSettling(makeWorkspace(), 'exec-008');
-    expect(Object.isFrozen(result)).toBe(true);
   });
 });

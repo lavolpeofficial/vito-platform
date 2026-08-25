@@ -85,10 +85,12 @@ export class HeadlessLocalAgentAdapter implements GovernedProviderAdapter {
 
       return mapWorkerResult(result, trustedExecutable, context.invocationId, payload.value.args);
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown local agent execution error';
+      const isChangesetFailure = message.includes('CHANGESET_CAPTURE_FAILED');
       return failed(
-        'LOCAL_AGENT_EXECUTION_ERROR',
-        error instanceof Error ? error.message : 'Unknown local agent execution error',
-        true,
+        isChangesetFailure ? 'CHANGESET_CAPTURE_FAILED' : 'LOCAL_AGENT_EXECUTION_ERROR',
+        message,
+        !isChangesetFailure,
       );
     }
   }
@@ -101,9 +103,6 @@ function mapWorkerResult(
   args: readonly string[],
 ): GovernedAdapterResult {
   const commandSummary = `${trustedExecutable.commandName}${args.length ? ' ' + args.join(' ') : ''}`;
-  const artifactRefs: string[] = [
-    `gov://execution/${invocationId}/changeset`,
-  ];
 
   if (result.timedOut) {
     return {
@@ -114,6 +113,7 @@ function mapWorkerResult(
         stdout: result.stdout,
         stderr: result.stderr,
         governedResultSettling: result.governedResultSettling,
+        workspaceDisposition: result.workspaceDisposition,
         sideEffects: {
           filesCreated: [],
           filesModified: [],
@@ -135,13 +135,13 @@ function mapWorkerResult(
   return {
     status: succeeded ? AgentExecutionStatus.SUCCEEDED : AgentExecutionStatus.FAILED,
     outputReference: `gov://execution/${invocationId}`,
-    artifactReferences: artifactRefs,
     providerExecutionMetadata: {
       executableIntegrityHash: trustedExecutable.integrityHash ?? null,
       exitCode: result.exitCode,
       stdout: result.stdout,
       stderr: result.stderr,
       governedResultSettling: result.governedResultSettling,
+      workspaceDisposition: result.workspaceDisposition,
       sideEffects: {
         filesCreated: [],
         filesModified: result.governedResultSettling?.changedFiles ?? [],

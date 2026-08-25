@@ -59,9 +59,7 @@ function makeContext(
   } as GovernedExecutionContext;
 }
 
-function makeWorkerResult(
-  overrides: Partial<ExecuteSandboxedResult> = {},
-): ExecuteSandboxedResult {
+function makeWorkerResult(overrides = {}): ExecuteSandboxedResult {
   return {
     executionId: 'exec-001',
     exitCode: 0,
@@ -72,7 +70,7 @@ function makeWorkerResult(
     oomKilled: false,
     baseSha: 'a'.repeat(40),
     repositoryId: 'lavolpeofficial/vito-platform',
-    workspacePath: '/tmp/workspaces/org/run/builder',
+    workspaceDisposition: 'CLEANED',
     governedResultSettling: {
       executionId: 'exec-001',
       baseSha: 'a'.repeat(40),
@@ -339,23 +337,6 @@ describe('HeadlessLocalAgentAdapter', () => {
     expect(callArgs.sandboxConfig.maxCpuTimeMs).toBe(600 * 1000);
   });
 
-  it('result includes artifactReferences with changeset path', async () => {
-    const workerService = makeMockWorkerService();
-    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(
-      makeWorkerResult(),
-    );
-
-    const adapter = new HeadlessLocalAgentAdapter(workerService);
-    const result = await adapter.execute(
-      { governedInputPayload: {} },
-      makeContext({ invocationId: 'inv-abc' }),
-    );
-
-    expect(result.artifactReferences).toEqual([
-      'gov://execution/inv-abc/changeset',
-    ]);
-  });
-
   it('sideEffects.filesModified populated from governedResultSettling.changedFiles', async () => {
     const workerService = makeMockWorkerService();
     (workerService.executeSandboxed as jest.Mock).mockResolvedValue(
@@ -433,5 +414,56 @@ describe('HeadlessLocalAgentAdapter', () => {
     expect(result.status).toBe(AgentExecutionStatus.TIMED_OUT);
     const meta = result.providerExecutionMetadata as Record<string, unknown>;
     expect(meta.governedResultSettling).toEqual(settling);
+  });
+
+  it('providerExecutionMetadata includes workspaceDisposition', async () => {
+    const workerService = makeMockWorkerService();
+    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(
+      makeWorkerResult(),
+    );
+
+    const adapter = new HeadlessLocalAgentAdapter(workerService);
+    const result = await adapter.execute(
+      { governedInputPayload: {} },
+      makeContext(),
+    );
+
+    const meta = result.providerExecutionMetadata as Record<string, unknown>;
+    expect(meta.workspaceDisposition).toBe('CLEANED');
+  });
+
+  it('CHANGESET_CAPTURE_FAILED results in FAILED status (not retryable)', async () => {
+    const workerService = makeMockWorkerService();
+    (workerService.executeSandboxed as jest.Mock).mockRejectedValue(
+      new Error('Failed to capture governed change-set: CHANGESET_CAPTURE_FAILED'),
+    );
+
+    const adapter = new HeadlessLocalAgentAdapter(workerService);
+    const result = await adapter.execute(
+      { governedInputPayload: {} },
+      makeContext(),
+    );
+
+    expect(result.status).toBe(AgentExecutionStatus.FAILED);
+    expect((result.error as { code: string }).code).toBe(
+      'CHANGESET_CAPTURE_FAILED',
+    );
+    expect(result.error!.retryable).toBe(false);
+  });
+
+  it('capture failure does not falsely report SUCCEEDED', async () => {
+    const workerService = makeMockWorkerService();
+    (workerService.executeSandboxed as jest.Mock).mockRejectedValue(
+      new Error('CHANGESET_CAPTURE_FAILED: snapshot failed'),
+    );
+
+    const adapter = new HeadlessLocalAgentAdapter(workerService);
+    const result = await adapter.execute(
+      { governedInputPayload: {} },
+      makeContext(),
+    );
+
+    expect(result.status).toBe(AgentExecutionStatus.FAILED);
+    expect(result.status).not.toBe(AgentExecutionStatus.SUCCEEDED);
   });
 });
