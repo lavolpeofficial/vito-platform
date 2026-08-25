@@ -10,12 +10,13 @@ updated: 2026-08-25
 author: VITO Engineering
 review_gate: ARCHITECTURE_REVIEW
 related_pr: null
-related_branch: null
+related_branch: design/vito-operator-bridge-v0.1
 supersedes: null
 superseded_by: null
 baseline:
   branch: main
   sha: "cc0250278b3265caa8ad4b789a1f9091255fdefe"
+revision: 2
 ---
 
 # VITO Operator Bridge v0.1 -- Engineering Record
@@ -42,10 +43,10 @@ AgentWorkforceController.dispatch()
                  -> ExecutionPolicyResolver  (trusted policy source)
                  -> evaluatePolicy()         (EO-01.4 mandatory gate)
                  -> IdempotencyStore.claim() (Phase 3H duplicate boundary)
-                 -> HeadlessLocalAgentAdapter / RemoteExecutionWorker
-                      -> Bubblewrap sandbox
-                      -> change-set capture
-                      -> workspace cleanup
+                 -> HeadlessLocalAgentAdapter -> RemoteExecutionWorker
+                      -> BubblewrapSandboxExecutor (--unshare-net, --unshare-pid, --unshare-user)
+                      -> change-set capture (git diff --cached --binary)
+                      -> workspace cleanup (rmSync worktree)
 ```
 
 Key architectural properties already present:
@@ -63,7 +64,23 @@ Key architectural properties already present:
 | Role-based access | **Implemented** | `@Roles(OWNER, ADMIN)` on dispatch endpoint |
 | JWT authentication | **Implemented** | `JwtAuthGuard` (global), `JwtStrategy` (DB-verified per request) |
 
-### 1.2 Critical Observation: Existing Endpoint Is Nearly Reusable
+### 1.2 Sandbox Execution Reality (VITO-REW-001)
+
+The Bubblewrap sandbox enforces (verified in `sandbox-executor.ts:155-167`):
+
+- `--unshare-user` -- user namespace isolation
+- `--unshare-pid` -- PID namespace isolation
+- **`--unshare-net`** -- **network namespace isolation (no network access)**
+- Read-only binds for `/usr`, `/bin`, `/lib`, `/lib64`
+- Bind mount of ephemeral workspace to `/workspace`
+- tmpfs at `/tmp`
+- `--die-with-parent` -- process dies with parent
+
+The workspace is **ephemeral**: `GitWorkspaceProvisioner.cleanup()` calls `rmSync(handle.worktreePath, { recursive: true, force: true })` after every execution. The only durable output is the `GovernedResultSettling` (changed files list + binary patch), captured before cleanup.
+
+**There is no git push, branch creation, or commit capability within the sandbox or RemoteExecutionWorker.** The worker returns a governed change-set (diff) for external application by a separate SCM control plane.
+
+### 1.3 Critical Observation: Existing Endpoint Is Nearly Reusable
 
 The existing `POST /agent-workforce/dispatch` endpoint already provides:
 
@@ -76,7 +93,7 @@ The existing `POST /agent-workforce/dispatch` endpoint already provides:
 
 **Decision: Create a thin Operator Bridge facade that:**
 1. Accepts operator-level intent (no workflow context required)
-2. Creates or references an `OperatorTask` record
+2. Creates an `OperatorTask` record
 3. Derives `workflowRunId`/`workflowStepRunId` server-side
 4. Delegates to the existing `AgentWorkforceService.dispatch()`
 5. Returns a bounded result contract suitable for external consumption
@@ -95,22 +112,29 @@ External Operator (ChatGPT / future clients)
   | HTTPS (authenticated)
   v
 +-------------------------------+
-| OPERATOR BRIDGE FACADE        |  <-- NEW: thin translation layer
-|  - Authenticate operator      |
-|  - Resolve operator identity  |
-|  - Validate operator policy   |
-|  - Create OperatorTask        |
-|  - Derive workflow context    |
-|  - Translate intent -> dispatch|
+| VITO Ingress Auth             |  <-- JwtAuthGuard (global APP_GUARD)
+|  - JWT verification           |
+|  - DB user/org/token-version  |
+|  - TenantContext resolution   |
 +-------------------------------+
   |
-  | Internal service call (same process)
+  v
++-------------------------------+
+| OPERATOR BRIDGE FACADE        |  <-- NEW: thin translation layer
+|  - Operator authorization     |     (same NestJS process, internal call)
+|  - OperatorTask creation      |
+|  - workflow context derivation|
+|  - Intent -> dispatch translate|
++-------------------------------+
+  |
+  | Internal service call (same process, no HTTP hop)
   v
 AgentWorkforceService.dispatch()  <-- EXISTING, UNCHANGED
   |
   v
 ProviderRouterService -> GovernedRuntimeService -> GovernedInvocation
-  -> Adapter -> Sandbox -> Result
+  -> RemoteExecutionWorker -> Bubblewrap Sandbox (no network)
+  -> governed change-set capture -> workspace cleanup
 ```
 
 ### 2.2 What the External Client MUST NOT Control
@@ -136,15 +160,14 @@ The following are **never** passed through from the external client to the execu
 
 The external client provides **intent-level fields only**:
 
-- Task request ID (for idempotency and correlation)
+- Request ID (for idempotency and correlation)
 - Capability code (what capability is needed)
 - Bounded instruction/prompt (the task description)
 - Optional governed budget hints (maxDurationMs, maxTokens, maxCostMinorUnits)
 - Optional assurance level
 
 All execution authority is derived server-side from:
-- Operator identity (JWT / service account)
-- Tenant context (organizationId from JWT)
+- Operator identity (JWT -> TenantContext)
 - Provider registry (deterministic routing)
 - Execution policy (EO-01.4)
 - Trusted resolvers (executable, workspace, profile)
@@ -153,46 +176,61 @@ All execution authority is derived server-side from:
 
 ## 3. Authentication Model
 
-### 3.1 Current Authentication Stack
+### 3.1 Actual Topology
+
+The Operator Bridge is **inside the same VITO NestJS application process**. There is no internal HTTP call, no second Bearer-token hop, and no self-call. The actual request flow is:
 
 ```
-JwtAuthGuard (global, APP_GUARD)
-  -> Passport JwtStrategy.validate()
-       -> DB-verified: user exists, org matches, status ACTIVE, token_version matches
-  -> TenantContext.set({ organizationId, userId, role, authenticationMethod: 'jwt' })
+External operator credential (JWT Bearer token)
+  -> JwtAuthGuard (global APP_GUARD, request-scoped)
+       -> Passport JwtStrategy.validate()
+            -> DB-verified: user exists, org matches, status ACTIVE, token_version matches
+       -> TenantContext.set({ organizationId, userId, role, authenticationMethod: 'jwt' })
+  -> RolesGuard (global APP_GUARD, request-scoped)
+       -> @Roles(OWNER, ADMIN) check
+  -> OperatorBridgeController.dispatch()
+       -> reads TenantContext.getOrThrow() for organizationId
+       -> OperatorBridgeService.submitTask()
+            -> internal call to AgentWorkforceService.dispatch()
 ```
 
-The dispatch endpoint additionally requires `@Roles(UserRole.OWNER, UserRole.ADMIN)`.
+The long-lived credential (JWT) exists **only at the external authentication boundary**. It never enters:
+- Task prompts or payloads
+- Audit or debug logs (only `actorType` and `userId` are logged)
+- Sandbox environment
+- Provider execution context
 
-### 3.2 Options Analysis
+### 3.2 v0.1 Decision: Existing User JWT via Service Account
 
-| Option | Description | v0.1 Suitability | Migration Path |
-|--------|-------------|-------------------|----------------|
-| **A. Service account** | Dedicated API credential for operator identity; maps to a VITO user with OWNER/ADMIN role; JWT issued by VITO auth | **Recommended** | Service account creates JWT via existing auth flow; bridge sees standard JWT; no code changes to auth |
-| **B. Short-lived signed token** | OAuth-style client credentials; separate token endpoint | Deferred | Requires new token issuance endpoint; more complex |
-| **C. Local-only development bridge** | Insecure header fallback, localhost only | Dev only | Cannot migrate to production; blocks design |
+**Option A (v0.1): Dedicated user with service-account semantics**
 
-### 3.3 Recommendation: Option A (Service Account)
+- Create a VITO `User` record with `role: ADMIN` (or `OWNER`) and a known `organizationId`
+- Operator authenticates via `POST /auth/login` to obtain a JWT
+- The JWT is stored in the bridge's server-side configuration (not in prompts, not in agent payloads)
+- The bridge includes the JWT in the `Authorization` header for external-facing requests if needed, but for internal dispatch the `TenantContext` is already populated by `JwtAuthGuard`
 
-**v0.1 approach:**
+This is the cleanest v0.1 approach because:
+- Zero changes to `JwtAuthGuard`, `JwtStrategy`, `RolesGuard`, or `TenantContext`
+- The JWT is a standard VITO user credential with existing revocation semantics (`tokenVersion`)
+- `JwtStrategy.validate()` performs per-request DB verification (user exists, org active, token_version matches)
 
-1. Operator (ChatGPT) is represented by a dedicated VITO user with `OWNER` or `ADMIN` role
-2. Service account authenticates via standard VITO login flow, obtaining a JWT
-3. The JWT is stored server-side (in the bridge configuration, not in agent prompts)
-4. The bridge uses the JWT for all subsequent dispatch calls
-5. `JwtAuthGuard` sees a standard Bearer token; no auth code changes needed
+**Option B (deferred to v0.2): Dedicated service-credential guard**
 
-**Security properties:**
-- JWT is never placed in prompts or agent payloads
-- JWT is bound to a specific organization (via `org_id` claim)
-- Token versioning allows immediate revocation
-- Per-request DB verification ensures user/org remain active
-- Role check (`OWNER`/`ADMIN`) enforced by existing `RolesGuard`
+A custom `ServiceCredentialGuard` that:
+- Accepts an API-key-style credential (hashed, stored per-organization)
+- Resolves to a synthetic `TenantContext` without requiring a full JWT
+- Bypasses the Passport JWT strategy entirely
 
-**Migration path to v0.2:**
-- Add OAuth2 client credentials flow for ChatGPT connector
-- Add short-lived token exchange endpoint
-- Bridge transparently upgrades from static JWT to token-exchanged JWT
+This is cleaner for machine-to-machine identity but requires a new credential issuance/storage system. **Deferred to v0.2.**
+
+### 3.3 Security Properties (v0.1)
+
+- JWT bound to a specific organization (`org_id` claim)
+- Per-request DB verification ensures user and org remain active
+- `tokenVersion` allows immediate revocation (increment `User.tokenVersion`)
+- `@Roles(OWNER, ADMIN)` enforced by `RolesGuard`
+- Bridge controller reads `organizationId` from `TenantContext` only -- never from request body
+- No credential ever enters prompts, payloads, logs, or sandbox environment
 
 ---
 
@@ -205,8 +243,8 @@ The bridge exposes a provider-neutral HTTP API. No ChatGPT-specific semantics.
 **Core operations:**
 
 ```
-POST   /v1/operator/tasks          -- Submit a new governed task
-GET    /v1/operator/tasks/:taskId  -- Get task status and result
+POST   /v1/operator/tasks          -- Submit a new governed task (synchronous)
+GET    /v1/operator/tasks/:taskId  -- Retrieve persisted task status/result
 ```
 
 ### 4.2 Request Contract: `SubmitOperatorTask`
@@ -227,8 +265,8 @@ interface SubmitOperatorTaskRequest {
 
   /** Optional governed execution budget. */
   readonly budget?: {
-    readonly maxDurationMs?: number;   // 1000-3600000
-    readonly maxTokens?: number;       // 1-10000000
+    readonly maxDurationMs?: number;     // 1000-3600000
+    readonly maxTokens?: number;         // 1-10000000
     readonly maxCostMinorUnits?: number; // 0-100000000
   };
 }
@@ -243,9 +281,10 @@ interface SubmitOperatorTaskRequest {
 - `environment` -- allowlisted by `buildGovernedExecutionEnvironment()`
 - `executionProfile` -- resolved by trusted `ExecutionProfileResolver`
 
-### 4.3 Response Contract: `OperatorTaskResult`
+### 4.3 Response Contract
 
 ```typescript
+/** Synchronous response from POST /v1/operator/tasks */
 interface SubmitOperatorTaskResponse {
   /** Server-assigned task ID (UUID). */
   readonly taskId: string;
@@ -256,21 +295,18 @@ interface SubmitOperatorTaskResponse {
   /** Correlation ID for audit trail. */
   readonly correlationId: string;
 
-  /** Task status. */
+  /** Task status (terminal on success/failure). */
   readonly status: OperatorTaskStatus;
 
   /** Routing decision ID. */
   readonly routingDecisionId: string;
 }
 
+/** Full result from GET /v1/operator/tasks/:taskId */
 interface OperatorTaskResult {
-  /** Task ID. */
   readonly taskId: string;
-
-  /** Current status. */
+  readonly requestId: string;
   readonly status: OperatorTaskStatus;
-
-  /** Correlation ID. */
   readonly correlationId: string;
 
   /** Execution IDs for audit trail. */
@@ -283,19 +319,18 @@ interface OperatorTaskResult {
     readonly displayName: string;
   };
 
-  /** Capability code used. */
   readonly capabilityCode: string;
 
-  /** Bounded stdout summary (truncated to MAX_SAFE_TEXT_LENGTH). */
+  /** Bounded stdout summary (truncated to MAX_SAFE_TEXT_LENGTH = 2000). */
   readonly stdout?: string;
 
-  /** Bounded stderr summary (truncated to MAX_SAFE_TEXT_LENGTH). */
+  /** Bounded stderr summary (truncated to MAX_SAFE_TEXT_LENGTH = 2000). */
   readonly stderr?: string;
 
   /** Changed files list. */
   readonly changedFiles?: readonly string[];
 
-  /** Governed patch/change-set (within policy size limits). */
+  /** Governed patch (sensitive engineering payload -- see Section 11). */
   readonly patch?: string;
 
   /** Typed error if failed. */
@@ -305,7 +340,7 @@ interface OperatorTaskResult {
     readonly retryable: boolean;
   };
 
-  /** Timing and usage metadata. */
+  /** Timing metadata. */
   readonly timing?: {
     readonly startedAt?: string;  // ISO 8601
     readonly completedAt?: string;
@@ -318,136 +353,155 @@ interface OperatorTaskResult {
   /** Whether human review is required. */
   readonly reviewRequired: boolean;
 
-  /** Timestamps. */
   readonly createdAt: string;
   readonly updatedAt: string;
 }
 ```
 
-### 4.4 Synchronous vs. Asynchronous
+### 4.4 Synchronous Semantics (Corrected)
 
-**v0.1: Synchronous dispatch is sufficient.**
+**v0.1: Fully synchronous execution with POST.**
 
-Rationale:
-- OpenCode execution via Bubblewrap sandbox is bounded by `maxDurationMs` (default 30s, max 3600s)
-- ChatGPT's function-calling interface expects a response within its timeout
-- No multi-worker scheduling needed in v0.1
-- The existing `GovernedInvocationServiceImpl.invoke()` is already synchronous (awaitable)
-- Streaming/WebSocket adds significant complexity with no v0.1 benefit
+The lifecycle of a single `POST /v1/operator/tasks` request:
 
-The `POST /v1/operator/tasks` endpoint awaits the full governed execution pipeline and returns the complete result. If execution exceeds the HTTP timeout, the task is still persisted with status `RUNNING` or a terminal status, and the client can poll via `GET /v1/operator/tasks/:taskId`.
+1. **Persist `OperatorTask`** in `RECEIVED` status (before dispatch, so retry is idempotent)
+2. **Invoke `AgentWorkforceService.dispatch()` synchronously** (await the full governed pipeline)
+3. **Persist terminal result** in `OperatorTask` (SUCCEEDED/FAILED/POLICY_BLOCKED)
+4. **Return `SubmitOperatorTaskResponse`** with terminal status
 
-### 4.5 Future v0.2 Asynchronous Extension
+The governed execution runs **within the HTTP request lifecycle**. There is no background job queue, no decoupled worker, and no durable async execution in v0.1.
 
-If v0.2 requires longer-running tasks:
-- Add `POST /v1/operator/tasks` returns immediately with `status: QUEUED`
-- Add `GET /v1/operator/tasks/:taskId` polls status
-- Add `WebSocket /v1/operator/tasks/:taskId/stream` for live updates
-- Bridge creates `WorkflowRun` + `WorkflowStepRun` and polls completion
+**Client disconnect during execution:**
+- If the client disconnects (HTTP timeout, network failure) while `AgentWorkforceService.dispatch()` is running, the NestJS request lifecycle may be aborted.
+- The governed invocation pipeline (`GovernedInvocationServiceImpl.invoke()`) will continue to completion within the Node.js event loop until the adapter returns or the governed timeout fires.
+- The `OperatorTask` may or may not be updated to terminal status depending on whether the `finally` block in the controller executes.
+- If the task remains in `DISPATCHING` or `RUNNING` status after client disconnect, it is a **stale in-flight task** -- not a durable background job.
+- The client can poll via `GET /v1/operator/tasks/:taskId` and will see either the terminal result or a non-terminal status.
+- **No automatic retry or resumption of stale tasks is provided in v0.1.** The client may resubmit with the same `requestId` (idempotent -- returns existing task if already terminal, or re-dispatches if still in RECEIVED).
+
+**Durable background execution is deferred to v0.2** (requires a job queue such as BullMQ or a Postgres-backed outbox pattern).
 
 ---
 
-## 5. Operator Task State Machine
+## 5. Operator Task State Machine (Simplified)
 
 ### 5.1 States
 
 ```
 RECEIVED
-  -> AUTHENTICATED
-       -> AUTHORIZED
-            -> DISPATCHED
-                 -> RUNNING
-                      -> RESULT_READY
-                           -> AUTO_CONTINUE
-                           -> HUMAN_GATE
-                           -> COMPLETED
-                           -> FAILED
+  -> DISPATCHING
+       -> RUNNING
+            -> RESULT_READY
+                 -> HUMAN_GATE | COMPLETED | FAILED
 ```
 
 ### 5.2 State Definitions
 
-| State | Description | Entry Condition |
-|-------|-------------|-----------------|
-| `RECEIVED` | Task received by bridge, awaiting auth | HTTP request arrives |
-| `AUTHENTICATED` | Operator identity verified (JWT valid) | `JwtAuthGuard` passes |
-| `AUTHORIZED` | Operator authorized for capability (role check + tenant) | `RolesGuard` passes |
-| `DISPATCHED` | Task submitted to `AgentWorkforceService.dispatch()` | Service call initiated |
-| `RUNNING` | Governing execution pipeline is active | `GovernedRuntimeService` invoked |
-| `RESULT_READY` | Execution completed, result available | Adapter returned terminal status |
-| `AUTO_CONTINUE` | Task completed; no human gate required; safe to continue | Result SUCCEEDED, no policy block |
-| `HUMAN_GATE` | Task requires human approval before continuation | Policy decision or risk class requires it |
-| `COMPLETED` | Task fully settled; result delivered to client | Client acknowledged or auto-continued |
-| `FAILED` | Task failed (terminal) | Any terminal error state |
+| State | Description | Entry Condition | Persistence |
+|-------|-------------|-----------------|-------------|
+| `RECEIVED` | Task received and persisted; awaiting dispatch | HTTP request arrives; OperatorTask created | Persisted before dispatch |
+| `DISPATCHING` | Submitted to `AgentWorkforceService.dispatch()`; awaiting governed pipeline | Service call initiated | Persisted before adapter.execute() |
+| `RUNNING` | Governing execution pipeline is active (adapter executing in sandbox) | Adapter started | Updated by pipeline |
+| `RESULT_READY` | Execution completed; terminal result available | Adapter returned terminal status | Persisted before HTTP response |
+| `HUMAN_GATE` | Task policy-blocked; requires human approval | `evaluatePolicy()` returned non-ALLOW | Persisted as terminal-adjacent |
+| `COMPLETED` | Task fully settled; result delivered to client | Client retrieved result | Terminal |
+| `FAILED` | Task failed (terminal) | Any terminal error | Terminal |
 
-### 5.3 Relationship to Existing State Machines
+### 5.3 What Is NOT a Persisted Task State
 
-This state machine describes **only the external operator interaction layer**. It does **not** duplicate:
-- `AgentExecutionStatus` (invocation lifecycle: QUEUED -> STARTING -> RUNNING -> SUCCEEDED/FAILED/TIMED_OUT)
-- `WorkflowRunStatus` (workflow orchestration: CREATED -> RUNNING -> BLOCKED/COMPLETED/FAILED)
-- `GovernedInvocationClaimState` (idempotency: IN_PROGRESS -> COMPLETED/TIMED_OUT_UNKNOWN/FAILED_UNKNOWN)
+**Authentication and authorization are guard-layer decisions, not task lifecycle states.** `JwtAuthGuard` and `RolesGuard` execute before the controller handler and before any `OperatorTask` record is created. If auth fails, the request is rejected with 401/403 -- no task record is created, no audit entry is written for a non-existent task.
 
-The bridge state machine is a **view** over these existing states, translated for external consumption.
+The states `AUTHENTICATED` and `AUTHORIZED` from v0.1 design revision 1 are removed. They are implicitly satisfied when a task record exists (task creation requires passing both guards).
+
+### 5.4 Mapping to Existing Governed Invocation States
+
+The bridge state machine is a **view** over existing internal states. It does **not** duplicate them:
+
+| Bridge State | Internal State(s) |
+|-------------|-------------------|
+| `RECEIVED` | `OperatorTask.status = RECEIVED` (no internal state yet) |
+| `DISPATCHING` | `GovernedOperationEnvelope.status = PENDING` |
+| `RUNNING` | `AgentExecutionStatus.RUNNING` (adapter executing) |
+| `RESULT_READY` | `AgentExecutionStatus.SUCCEEDED` or terminal error |
+| `HUMAN_GATE` | `AgentExecutionStatus.POLICY_BLOCKED` + `PolicyReasonCode.RELEASE_GATE_NOT_APPROVED` |
+| `COMPLETED` | `OperatorTask.status = COMPLETED` (result fully delivered) |
+| `FAILED` | `AgentExecutionStatus.FAILED` or `TIMED_OUT` or other terminal error |
+
+The bridge state machine exists solely to present a simplified external view. It is **not** a second execution engine.
 
 ---
 
-## 6. Autonomy Policy
+## 6. Autonomy Policy (Corrected)
 
 ### 6.1 Operating Principle
 
 **Default = autonomous continuation; human escalation = exception.**
 
-Tasks proceed automatically through reversible operations. Human intervention is required only at explicitly defined gates.
+### 6.2 Sandbox Reality Check
 
-### 6.2 Risk Classes and Human Gates
+The coding sandbox (Bubblewrap) provides:
+- **Network: DENIED** (`--unshare-net`)
+- **Workspace: EPHEMERAL** (cleaned after every execution)
+- **Output: GOVERNED CHANGE-SET** (diff/patch captured before cleanup)
 
-#### AUTO (Autonomous Continuation)
+There is **no durable SCM apply, commit, or push capability** within the sandbox or RemoteExecutionWorker. The worker returns a governed change-set (binary diff) for external application by a separate SCM control plane.
+
+### 6.3 v0.1 Autonomy Classification
+
+#### AUTO (Autonomous Continuation -- Implemented in v0.1)
+
+These operations execute within the governed sandbox and produce reversible results:
 
 | Operation | Justification |
 |-----------|---------------|
-| Read/analyze repository | Read-only, no side effects |
-| Create isolated workspace | Transient, cleaned after execution |
-| Run tests / build / typecheck | Read-only side effects (no mutation) |
-| Edit within authorized repo (feature branch) | Reversible via branch deletion |
-| Create feature branch | Reversible, no protected branch impact |
-| Commit to feature branch | Local, no remote side effect until push |
-| Push feature branch | Remote but non-protected, reversible |
-| Documentation / review / rework | Low-risk, reviewable |
+| Repository analysis (read/analyze) | Read-only, no side effects |
+| Isolated workspace creation | Transient, cleaned after execution |
+| Code edits inside governed sandbox | Ephemeral workspace; diff is the only output |
+| Tests / build / typecheck | Read-only side effects (no persistent mutation) |
+| Governed change-set capture | `git diff --cached --binary` -- no push, no commit |
+| Review / rework cycles | All within ephemeral workspace |
+
+On successful completion, the task reaches `RESULT_READY` and may `AUTO_CONTINUE` to `COMPLETED` -- meaning the result is available for client retrieval.
+
+#### DEFERRED SCM CONTROL-PLANE CAPABILITY (Not Implemented in v0.1)
+
+These operations require a **separate VITO SCM capability** that does not yet exist:
+
+| Operation | Why Deferred |
+|-----------|-------------|
+| Branch creation | Requires persistent git checkout; sandbox workspace is ephemeral |
+| Patch application into persistent checkout | No persistent checkout exists; worker returns diff only |
+| Git commit | Requires persistent git state |
+| Git push | Requires network access (sandbox denies `--unshare-net`) |
+
+**Future architecture:** `Coding Provider -> governed change-set -> VITO SCM capability -> branch/commit/push`
+
+This preserves the trust boundary: the coding sandbox never has network access, and SCM operations are performed by a dedicated, authorized VITO capability outside the sandbox.
+
+**Do not give the coding sandbox network access merely to enable push.** The `--unshare-net` policy is a fundamental security property of the sandbox design.
 
 #### HUMAN GATE (Requires Explicit Approval)
 
 | Operation | Justification |
 |-----------|---------------|
-| Merge to protected/main branch | Irreversible without force-push; affects production code |
-| Production deployment | Potentially irreversible external side effect |
-| Credential / secret changes | Security-critical; potential blast radius |
-| Destructive data operations | Data loss risk |
-| External communications | Reputational/legal risk |
-| Purchases / cost commitments | Financial commitment |
-| Material security-policy changes | Security posture impact |
+| Merge to protected/main branch | Irreversible without force-push; requires SCM capability (deferred) |
+| Production deployment | Potentially irreversible external side effect (deferred) |
+| Credential / secret changes | Security-critical; potential blast radius (deferred) |
+| Destructive data operations | Data loss risk (deferred) |
+| External communications | Reputational/legal risk (deferred) |
+| Purchases / cost commitments | Financial commitment (deferred) |
+| Material security-policy changes | Security posture impact (deferred) |
 
-### 6.3 State Mapping
+### 6.4 v0.1 Scope Limitation
 
-```
-AUTO_CONTINUE -> automatically proceed to next task or deliver result
-HUMAN_GATE    -> pause; notify operator; await explicit human approval
-COMPLETED     -> terminal; no further action
-FAILED        -> terminal; error delivered to operator
-```
+In v0.1, there is **no dedicated risk-class policy engine**. The `evaluatePolicy()` function (EO-01.4) governs execution at the adapter level (which actions are allowed for which execution profiles). The autonomy classification above is a **design-time document** that guides what capabilities are implemented.
 
-### 6.4 v0.1 Scope
+The bridge's AUTO_CONTINUE behavior in v0.1 is simple:
+- If `RESULT_READY` with `SUCCEEDED` status -> `COMPLETED` (result available for retrieval)
+- If `RESULT_READY` with `POLICY_BLOCKED` -> `HUMAN_GATE` (human intervention required)
+- If `FAILED` -> `FAILED` (terminal error)
 
-- Auto-continue is the default for all `RESULT_READY` states
-- Human gate is triggered by `evaluatePolicy()` returning policy-blocked states (existing EO-01.4)
-- No auto-merge in v0.1 (architecture supports it; not implemented)
-- No production deployment automation in v0.1
-
-### 6.5 Deferred v0.2+ Auto-Merge
-
-The architecture must support future policy-driven auto-merge for explicitly low-risk classes:
-- Feature branch -> main merge after all checks pass
-- Configurable risk thresholds per organization
-- Audit trail for auto-merge decisions
-- Rollback capability
+No automated downstream actions (auto-merge, auto-deploy, etc.) are triggered by AUTO_CONTINUE in v0.1.
 
 ---
 
@@ -456,18 +510,20 @@ The architecture must support future policy-driven auto-merge for explicitly low
 | # | Threat | Mitigation |
 |---|--------|------------|
 | T1 | **Forged external requests** | JWT authentication via `JwtAuthGuard`; per-request DB verification of user/org/token_version; signature verification |
-| T2 | **Replay attacks** | `requestId` idempotency at bridge layer; existing `GovernedInvocationIdempotencyStore` prevents duplicate execution at invocation layer |
-| T3 | **Cross-tenant request** | `organizationId` derived exclusively from JWT (`org_id` claim); `TenantContext.getOrThrow()` enforces; `ProviderRouterService` scoped to org |
+| T2 | **Replay attacks** | `requestId` idempotency at bridge layer (tenant-scoped); existing `GovernedInvocationIdempotencyStore` prevents duplicate execution at invocation layer |
+| T3 | **Cross-tenant request** | `organizationId` derived exclusively from JWT (`org_id` claim); `TenantContext.getOrThrow()` enforces; `ProviderRouterService` scoped to org; `requestId` uniqueness scoped to org |
 | T4 | **Prompt attempting authority escalation** | Bridge translates intent only; no execution fields pass through; `evaluatePolicy()` (EO-01.4) is mandatory gate; `ExecutionProfileResolver` is trusted |
 | T5 | **Provider/executable injection** | `ProviderRouterService` selects provider by capability; `TrustedLocalExecutableResolver` verifies binary; `RepositoryRegistry` validates repo; none controlled by operator |
 | T6 | **Repository/ref injection** | `RepositoryRegistry` is a trusted server-side registry; `isBaseRefAllowed()` validates ref; operator never specifies repo URL or ref |
 | T7 | **Oversized request/result** | Request: `MAX_PROMPT_BYTES` (512KB), `MAX_ARG_LENGTH` (4096), `MAX_DEFAULT_ARGS` (64); Result: `MAX_PATCH_BYTES` (2MB), `MAX_SAFE_TEXT_LENGTH` (2000) |
 | T8 | **Result/patch exfiltration** | `redactSecretMaterial()` applied to all output; `sanitizeGovernedReferenceList()` filters non-gov:// refs; patch logged only as size; `workspaceDisposition: 'CLEANED'` |
 | T9 | **Secret leakage** | `CredentialBroker` provides reference-only at adapter boundary; secrets never enter prompts, audit, or result; `redactTrustedSecretsDeep()` applied recursively |
-| T10 | **Task-result enumeration** | taskId is UUID (unpredictable); `OperatorTask` queries scoped to authenticated `organizationId`; no bulk enumeration endpoint in v0.1 |
-| T11 | **Duplicate dispatch** | `requestId` idempotency at bridge; `GovernedInvocationIdempotencyStore` at invocation level; `buildGovernedLogicalOperationKey()` prevents duplicate consequential actions |
-| T12 | **Client disconnect/retry** | Task persists with terminal status regardless of client connectivity; `GET /v1/operator/tasks/:taskId` returns cached result; no re-execution on retry with same `requestId` |
-| T13 | **Compromised bridge credential** | Service account JWT has short expiry; `tokenVersion` revocation; org-scoped; role-limited; bridge monitors for anomalous patterns (deferred v0.2) |
+| T10 | **Task-result enumeration** | taskId is UUID (unpredictable); queries scoped to authenticated `organizationId`; no bulk enumeration endpoint in v0.1 |
+| T11 | **Duplicate dispatch** | `requestId` idempotency at bridge (tenant-scoped); `GovernedInvocationIdempotencyStore` at invocation level; `buildGovernedLogicalOperationKey()` prevents duplicate consequential actions |
+| T12 | **Client disconnect/retry** | Task persists with terminal status if pipeline completes; `GET /v1/operator/tasks/:taskId` returns cached result; re-submission with same `requestId` returns existing task |
+| T13 | **Compromised bridge credential** | Service account JWT has short expiry (default 15m); `tokenVersion` revocation; org-scoped; role-limited; credential never enters prompts/payloads/logs |
+| T14 | **Patch body in audit logs** | Patch is classified as sensitive engineering payload (Section 11); audit records store only changed-file count and patch byte size, never the patch body |
+| T15 | **Stale task confusion** | Tasks that remain in non-terminal status after client disconnect are explicitly documented as stale; no automatic retry/resumption; client must re-submit or poll |
 
 ---
 
@@ -522,7 +578,7 @@ ChatGPT's function-calling and plugin systems require a publicly reachable HTTPS
 | **New: `OperatorBridgeController`** | **New controller** | `/v1/operator/tasks` endpoints |
 | **New: `OperatorBridgeService`** | **New service** | Intent -> dispatch translation, result normalization |
 | **New: `OperatorTask` model** | **New Prisma model** | Persistent task state for external consumption |
-| **New: `operator-bridge.guard.ts`** | **New guard** | Operator-specific policy checks (beyond JWT + roles) |
+| **New: `OperatorBridgeGuard`** | **New guard** | Operator-specific authorization checks (beyond JWT + roles) |
 
 ### 9.2 Why Not Reuse `/agent-workforce/dispatch` Directly
 
@@ -551,30 +607,48 @@ apps/api/src/modules/operator-bridge/
   operator-bridge.controller.spec.ts     -- Controller tests
 
 packages/contracts/src/engineering/
-  operator-bridge.ts                     -- Shared types (OperatorTaskStatus, request/result contracts)
+  operator-bridge.ts                     -- Shared types (OperatorTaskStatus)
 
 prisma/
   migrations/
     <timestamp>_add_operator_task/       -- OperatorTask table migration
 ```
 
-### 10.2 Modified Files
+### 10.2 Expected Modifications to Existing Files
 
-None in v0.1. The bridge is additive-only.
+The design goal is **minimal additive integration**. The following existing files require modification:
+
+| File | Modification | Reason |
+|------|-------------|--------|
+| `prisma/schema.prisma` | Add `OperatorTask` model + relation to `Organization` | New persistence model for external task state |
+| `apps/api/src/app.module.ts` | Add `OperatorBridgeModule` to `imports` array | Register new module in application composition |
+| `packages/contracts/src/index.ts` | Add export for `OperatorTaskStatus` enum (if shared types are added to contracts package) | Shared type visibility across packages |
+
+**No modifications to any existing service, controller, guard, or adapter.** The integration is purely additive: one new module, one new Prisma model, one new import in `AppModule`.
 
 ### 10.3 Prisma Schema Addition
 
 ```prisma
+enum OperatorTaskStatus {
+  RECEIVED
+  DISPATCHING
+  RUNNING
+  RESULT_READY
+  HUMAN_GATE
+  COMPLETED
+  FAILED
+}
+
 model OperatorTask {
   id                String   @id @default(uuid())
   organizationId    String
   userId            String
-  requestId         String   @unique  // Client-generated idempotency key
+  requestId         String
   correlationId     String
   capabilityCode    String
   prompt            String   @db.Text
   assuranceLevel    String?
-  status            String   @default("RECEIVED") // RECEIVED/AUTHENTICATED/AUTHORIZED/DISPATCHED/RUNNING/RESULT_READY/AUTO_CONTINUE/HUMAN_GATE/COMPLETED/FAILED
+  status            OperatorTaskStatus @default(RECEIVED)
 
   // Execution budget
   maxDurationMs     Int?
@@ -590,7 +664,7 @@ model OperatorTask {
   stdout            String?  @db.Text
   stderr            String?  @db.Text
   changedFiles      Json?    // string[]
-  patch             String?  @db.Text  // governed change-set
+  patch             String?  @db.Text  // SENSITIVE: governed change-set
   errorReason       String?
   errorMessage      String?
   errorRetryable    Boolean?
@@ -608,13 +682,36 @@ model OperatorTask {
   // Relations
   organization      Organization @relation(fields: [organizationId], references: [id])
 
+  // Tenant-scoped idempotency: same requestId + same org = idempotent
+  // same requestId + different org = independent valid tasks
+  @@unique([organizationId, requestId])
   @@index([organizationId, status])
-  @@index([organizationId, requestId])
-  @@index([correlationId])
+  @@index([organizationId, correlationId])
+  @@map("operator_tasks")
 }
 ```
 
-### 10.4 Tests Required
+Additionally, the `Organization` model in `schema.prisma` must add:
+
+```prisma
+model Organization {
+  // ... existing fields ...
+  operatorTasks OperatorTask[]
+  // ... existing relations ...
+}
+```
+
+### 10.4 Idempotency Semantics (Corrected)
+
+The `requestId` uniqueness constraint is **tenant-scoped**: `@@unique([organizationId, requestId])`.
+
+| Scenario | Behavior |
+|----------|----------|
+| Same `requestId`, same `organization` | **Idempotent**: returns existing task/result. If task is in `RECEIVED` status (not yet dispatched), re-dispatches. If terminal, returns cached result. |
+| Same `requestId`, different `organization` | **Independent**: two completely separate tasks in separate tenants. No collision. |
+| Cross-tenant task lookup | **Rejected**: all queries filter by `organizationId` from JWT. No information leakage. A task from org A cannot be queried by a user from org B. |
+
+### 10.5 Tests Required
 
 | Test Type | Scope | Count (est.) |
 |-----------|-------|--------------|
@@ -622,115 +719,144 @@ model OperatorTask {
 | Unit: `OperatorBridgeGuard` | Operator authorization policy | 4-6 |
 | Unit: DTO validation | Request schema validation | 6-8 |
 | Integration: Submit task E2E | Full flow: submit -> dispatch -> result | 3-4 |
-| Integration: Idempotency E2E | Duplicate requestId returns same result | 2-3 |
+| Integration: Idempotency E2E | Same requestId + same org = same result | 2-3 |
+| Integration: Cross-tenant idempotency | Same requestId + different org = independent tasks | 2 |
 | Integration: Cross-tenant rejection | Different org cannot access tasks | 2 |
 | Integration: Budget enforcement | Budget limits enforced end-to-end | 2-3 |
+| Integration: Patch not in audit logs | Audit records store size, not body | 1-2 |
 
 ---
 
-## 11. Engineering Workflow Improvement
+## 11. Result Security
 
-### 11.1 BASELINE_GATE
+### 11.1 Patch Classification
+
+**Patch (`OperatorTask.patch`) is classified as sensitive engineering payload.**
+
+The governed change-set (`git diff --cached --binary`) may contain:
+- Full source code of modified files
+- New file contents (binary diffs)
+- Structural information about the codebase
+
+This is high-value information that must not be exposed broadly.
+
+### 11.2 Security Controls
+
+| Control | Implementation |
+|---------|---------------|
+| **Tenant-scoped authorization** | All `OperatorTask` queries filter by `organizationId` from JWT. No cross-tenant access. |
+| **No patch body in audit/debug logs** | Audit records store `changedFiles.length` and `Buffer.byteLength(patch, 'utf8')` only. Never the patch body itself. The existing `AuditService.record()` stores metadata as JSON; the bridge service must not include `patch` in metadata. |
+| **Bounded result size** | `MAX_PATCH_BYTES` (2MB) enforced by `change-set-capture.ts`. Oversized patches throw `CHANGESET_TOO_LARGE` before the result is persisted. |
+| **Bounded stdout/stderr** | `MAX_OUTPUT_BYTES` (256KB) per stream; `MAX_SAFE_TEXT_LENGTH` (2000) for persisted summary. |
+| **Workspace cleanup** | `workspaceDisposition: 'CLEANED'` -- ephemeral workspace is removed after every execution. No persistent code artifacts. |
+| **Retention policy** | Deferred to v0.2. In v0.1, `OperatorTask` records persist indefinitely. A future deletion policy should purge completed/failed tasks after a configurable retention period. |
+
+### 11.3 What the Operator Can See
+
+The operator (via `GET /v1/operator/tasks/:taskId`) receives:
+- Task status and metadata
+- Changed files list (file paths only)
+- Patch body (the governed change-set)
+- Bounded stdout/stderr summaries
+- Provider metadata (sanitized)
+- Error information (sanitized)
+- Timing information
+
+The operator **cannot** see:
+- Internal workflow run IDs
+- Internal step run IDs
+- Provider internal routing scores
+- Execution policy details
+- Credential references
+- Other tenants' tasks
+- Sandbox internal paths
+
+---
+
+## 12. Engineering Workflow Improvement
+
+### 12.1 BASELINE_GATE
 
 Reusable VITO engineering policy: **verify authoritative baseline before code changes.**
 
-```typescript
-/**
- * BASELINE_GATE: Before any code change, verify the authoritative baseline.
- *
- * Steps:
- * 1. Checkout authoritative baseline branch/SHA
- * 2. Run full test suite (pass = gate satisfied)
- * 3. Run typecheck (pass = gate satisfied)
- * 4. Run lint (pass = gate satisfied)
- * 5. Record baseline SHA in engineering record
- * 6. Only then: create feature branch and implement
- *
- * Gate failure: STOP. Do not proceed with implementation.
- * Record: baseline SHA, gate result, timestamp.
- */
+```
+1. Checkout authoritative baseline branch/SHA
+2. Run full test suite (pass = gate satisfied)
+3. Run typecheck (pass = gate satisfied)
+4. Run lint (pass = gate satisfied)
+5. Record baseline SHA in engineering record
+6. Only then: create feature branch and implement
+
+Gate failure: STOP. Do not proceed with implementation.
 ```
 
-**Current implementation:** The `main` branch tip (`cc02502`) is the authoritative baseline. All feature branches derive from it. The CI pipeline (`ci.yml`) enforces test + typecheck on every push.
+**Current implementation:** The `main` branch tip (`cc02502`) is the authoritative baseline. The CI pipeline (`ci.yml`) enforces test + typecheck on every push.
 
-### 11.2 AUTONOMY_GATE
+### 12.2 AUTONOMY_GATE
 
 Reusable VITO engineering policy: **autonomous continuation through reversible operations; stop only at explicit human-gate conditions or blocker.**
 
-```typescript
-/**
- * AUTONOMY_GATE: After each code change, evaluate continuation.
- *
- * Steps:
- * 1. Run tests (pass = AUTO_CONTINUE; fail = STOP, fix)
- * 2. Run typecheck (pass = AUTO_CONTINUE; fail = STOP, fix)
- * 3. Run lint (pass = AUTO_CONTINUE; fail = STOP, fix)
- * 4. Evaluate risk class:
- *    - AUTO operations: continue autonomously
- *    - HUMAN_GATE operations: STOP, notify operator
- * 5. If AUTO: commit, push, proceed to next step
- * 6. If HUMAN_GATE: pause, present decision to operator
- *
- * Default: CONTINUE. Escalation: EXCEPTION.
- */
 ```
+1. Run tests (pass = AUTO_CONTINUE; fail = STOP, fix)
+2. Run typecheck (pass = AUTO_CONTINUE; fail = STOP, fix)
+3. Run lint (pass = AUTO_CONTINUE; fail = STOP, fix)
+4. Evaluate risk class:
+   - AUTO operations: continue autonomously
+   - HUMAN_GATE operations: STOP, notify operator
+   - DEFERRED operations: STOP, document gap
+5. If AUTO: commit, push, proceed to next step
+6. If HUMAN_GATE: pause, present decision to operator
+7. If DEFERRED: document the capability gap, do not implement
 
-### 11.3 Monthly Engineering Housekeeping (Deferred)
-
-Scheduled capability for recurring maintenance:
-- Dependency updates (patch versions)
-- Security audit log review
-- Provider health check validation
-- Test coverage report
-- Documentation currency check
-
-**Deferred to v0.2+** -- tracked as a separate engineering record.
+Default: CONTINUE. Escalation: EXCEPTION.
+```
 
 ---
 
-## 12. v0.1 Scope
+## 13. v0.1 Scope
 
-### 12.1 In Scope
+### 13.1 In Scope
 
 | Item | Status |
 |------|--------|
 | Secure operator API/facade (`/v1/operator/tasks`) | Design complete |
-| Service account authentication | Uses existing JWT stack |
-| Submit task (intent-level only) | Design complete |
-| Get task status/result | Design complete |
+| Service account authentication (existing JWT stack) | Design complete |
+| Submit task (intent-level only, synchronous) | Design complete |
+| Get task status/result (tenant-scoped) | Design complete |
 | Reuse `AgentWorkforceService.dispatch()` | Existing, unchanged |
 | OpenCode as first configured provider | Existing `LOCAL_TOOL` adapter |
 | Audit/correlation (full trail) | Existing `AuditService` |
-| `OperatorTask` persistence | New Prisma model |
-| Idempotency (request-level) | New, plus existing invocation-level |
-| Bounded result contract | Design complete |
+| `OperatorTask` persistence (tenant-scoped idempotency) | Design complete |
+| Bounded result contract (patch as sensitive payload) | Design complete |
 | BASELINE_GATE / AUTONOMY_GATE policies | Design complete |
 | Unit + integration tests | Design complete |
 
-### 12.2 Explicitly Deferred (v0.2+)
+### 13.2 Explicitly Deferred (v0.2+)
 
 | Item | Rationale |
 |------|-----------|
+| Branch creation / commit / push (SCM control plane) | Requires persistent git state + network; sandbox denies both; separate VITO capability needed |
+| Patch application into persistent checkout | No persistent checkout exists in v0.1 |
 | Streaming / WebSocket | Adds complexity; synchronous sufficient for v0.1 |
-| Multi-worker scheduler | Single-worker execution sufficient for v0.1 |
+| Multi-worker scheduler / durable background execution | Requires job queue; synchronous sufficient for v0.1 budget limits |
 | Artifact store (beyond inline patch) | Inline patch within 2MB limit sufficient for v0.1 |
-| Auto-merge | Architecture supports it; not implemented in v0.1 |
+| Auto-merge | Requires SCM capability (deferred) |
 | Production deployment automation | Separate concern; not in bridge scope |
-| OAuth2 client credentials flow | Service account sufficient for v0.1 |
+| OAuth2 client credentials flow | Service account JWT sufficient for v0.1 |
+| Dedicated service-credential guard | Existing JWT sufficient for v0.1 |
 | MCP server integration | Deferred to v0.2 |
 | ChatGPT connector/plugin | API contract compatible; specific integration deferred |
-| Long-running task async support | Synchronous sufficient for v0.1 budget limits |
 | Operator audit dashboard | Existing audit events queryable via API |
 | Risk-class-based auto-continue policy engine | Manual human gate sufficient for v0.1 |
 | Monthly engineering housekeeping scheduler | Deferred |
+| Patch retention / deletion policy | Deferred to v0.2 |
 | Cross-organization operator federation | Not in scope |
-| Result caching / pagination | Single-task response sufficient for v0.1 |
 
 ---
 
-## 13. Migration Path Toward Provider-Neutral Coding Agents
+## 14. Migration Path Toward Provider-Neutral Coding Agents
 
-### 13.1 Current State
+### 14.1 Current State
 
 The existing architecture is already provider-neutral:
 - `ProviderRouterService` selects providers by capability, not by vendor
@@ -738,35 +864,29 @@ The existing architecture is already provider-neutral:
 - `HeadlessLocalAgentAdapter` / `RemoteExecutionWorker` are one implementation
 - OpenCode is one configured provider (via `commandAlias` in provider metadata)
 
-### 13.2 Operator Bridge Enables Provider Neutrality for External Clients
+### 14.2 Operator Bridge Enables Provider Neutrality for External Clients
 
 The bridge does **not** introduce a new provider model. It translates operator intent into the existing capability-based dispatch. This means:
 
-1. **Adding a new provider** (e.g., Cursor, Windsurf, Aider) requires only:
-   - Register in `ProviderRegistryService`
-   - Assign capabilities
-   - Implement/configure adapter
-   - Bridge automatically routes to it via `ProviderRouterService`
+1. **Adding a new provider** requires only: register in `ProviderRegistryService`, assign capabilities, configure adapter. Bridge automatically routes to it.
+2. **External clients are provider-agnostic** -- they specify `capabilityCode`, not provider.
+3. **Provider selection remains server-side** -- operators never see or control which provider executes.
 
-2. **External clients are provider-agnostic** -- they specify `capabilityCode`, not provider
+### 14.3 Future: SCM Control Plane
 
-3. **Provider selection remains server-side** -- operators never see or control which provider executes
+When the SCM control plane is implemented (v0.2+):
 
-### 13.3 Future: Multi-Agent Operator Sessions
+```
+Coding Provider -> governed change-set -> VITO SCM capability -> branch/commit/push
+```
 
-v0.2+ could support:
-- Operator submits a series of tasks (multi-turn session)
-- Bridge manages session state
-- Different providers handle different capability needs within the same session
-- Results are aggregated and presented to the operator
-
-This follows the existing `WorkflowRuntime` pattern but is driven by external operator intent rather than internal orchestration.
+The coding sandbox retains `--unshare-net`. SCM operations are performed outside the sandbox by an authorized VITO capability that has network access and persistent git state. This preserves the security invariant: the coding provider never has direct SCM access.
 
 ---
 
-## 14. Architecture Conflicts
+## 15. Architecture Conflicts
 
-### 14.1 Conflict Assessment
+### 15.1 Conflict Assessment
 
 | Area | Conflict? | Resolution |
 |------|-----------|------------|
@@ -774,20 +894,21 @@ This follows the existing `WorkflowRuntime` pattern but is driven by external op
 | `AgentWorkforceService` | **None** | Bridge delegates to existing service; no internal changes |
 | `TenantContext` | **None** | Bridge uses existing JWT-derived tenant context |
 | `JwtAuthGuard` / `RolesGuard` | **None** | Bridge uses existing auth stack; adds operator-specific guard as additional layer |
-| `ProviderRouterService` | **None** | Bridge does not bypass routing; routing remains authority |
+| `ProviderRouterService` | **None** | Bridge does not bypass routing |
 | `GovernedRuntimeService` | **None** | Bridge does not bypass governed runtime |
 | `GovernedInvocationServiceImpl` | **None** | Bridge does not bypass invocation pipeline |
 | `RemoteExecutionWorker` | **None** | Bridge does not bypass sandbox |
-| `WorkflowRuntimeService` | **None** | Bridge does not use workflow runtime (v0.1); may use it in v0.2 |
-| Prisma schema | **Additive** | New `OperatorTask` model; no modifications to existing models |
-| Audit | **Additive** | New audit events with `actorType: 'DIGITAL_EMPLOYEE'` for operator-initiated tasks |
+| `WorkflowRuntimeService` | **None** | Bridge does not use workflow runtime (v0.1) |
+| Prisma schema | **Additive** | New `OperatorTask` model; relation added to `Organization` |
+| AppModule | **Additive** | New import only |
+| Contracts barrel | **Additive** | New export only (if shared types used) |
 
-### 14.2 Architectural Invariant Preserved
+### 15.2 Architectural Invariant Preserved
 
 > **Operator/ChatGPT requests work. VITO authorizes work. Provider executes work.**
 > **The external bridge must never become a second control plane.**
 
-The bridge is a thin translation layer, not a control plane:
+The bridge is a thin translation layer:
 - It does not decide which provider executes
 - It does not decide the execution profile
 - It does not decide the execution policy
@@ -795,29 +916,32 @@ The bridge is a thin translation layer, not a control plane:
 - It does not inject credentials
 - It does not manage sandboxes
 - It does not evaluate idempotency (it adds its own layer, but does not replace the existing one)
+- It does not perform SCM operations (deferred to separate capability)
 
 All authorization and execution authority remains in the existing governed runtime stack.
 
 ---
 
-## 15. Summary of Major Architecture Decisions
+## 16. Summary of Major Architecture Decisions
 
 | # | Decision | Rationale |
 |---|----------|-----------|
 | D1 | Thin facade over existing pipeline | Reuse over duplication; existing pipeline is battle-tested |
-| D2 | Service account with JWT auth | Minimal auth changes; leverages existing stack; migration path to OAuth2 |
-| D3 | Synchronous dispatch | Bounded execution times; ChatGPT function-calling compatibility |
+| D2 | Service account via existing JWT auth | Zero auth stack changes; leverages existing revocation semantics |
+| D3 | Synchronous dispatch with explicit disconnect semantics | Bounded execution times; honest about v0.1 durability guarantees |
 | D4 | Intent-level request only | External clients never control execution parameters |
 | D5 | `OperatorTask` as external state view | Decouples external interface from internal workflow state machine |
 | D6 | No streaming in v0.1 | Complexity reduction; synchronous sufficient |
-| D7 | No auto-merge in v0.1 | Architecture supports it; not implemented |
-| D8 | `requestId` idempotency at bridge level | Client-friendly retry; separate from invocation-level idempotency |
-| D9 | Provider-neutral capability codes | Bridge does not encode provider knowledge |
-| D10 | Full audit trail for operator tasks | Accountability; leverages existing `AuditService` |
+| D7 | No SCM operations in v0.1 (deferred control plane) | Sandbox denies network; workspace ephemeral; separate capability needed |
+| D8 | Tenant-scoped `requestId` idempotency | `@@unique([organizationId, requestId])` for multi-tenant safety |
+| D9 | Patch classified as sensitive engineering payload | Not in audit logs; tenant-scoped reads; bounded size |
+| D10 | No durable background execution in v0.1 | Honest about Node.js request lifecycle guarantees |
+| D11 | Provider-neutral capability codes | Bridge does not encode provider knowledge |
+| D12 | Full audit trail for operator tasks | Accountability; leverages existing `AuditService` |
 
 ---
 
-## 16. Deliverable Checklist
+## 17. Deliverable Checklist
 
 | Item | Status |
 |------|--------|
@@ -831,12 +955,13 @@ All authorization and execution authority remains in the existing governed runti
 | Threat model | Complete (Section 7) |
 | Network/connectivity model | Complete (Section 8) |
 | Files/modules proposed | Complete (Section 10) |
-| Tests required | Complete (Section 10.4) |
-| v0.1 scope | Complete (Section 12.1) |
-| Deferred items | Complete (Section 12.2) |
-| Migration path toward provider-neutral coding agents | Complete (Section 13) |
-| Architecture conflicts | Complete (Section 14) |
+| Tests required | Complete (Section 10.5) |
+| v0.1 scope | Complete (Section 13.1) |
+| Deferred items | Complete (Section 13.2) |
+| Migration path toward provider-neutral coding agents | Complete (Section 14) |
+| Architecture conflicts | Complete (Section 15) |
+| Result security | Complete (Section 11) |
 
 ---
 
-**READY FOR OPERATOR BRIDGE ARCHITECTURE REVIEW: YES**
+**READY FOR SECOND OPERATOR BRIDGE ARCHITECTURE REVIEW: YES**
