@@ -299,6 +299,56 @@ describe('RemoteExecutionWorkerService', () => {
     expect(provisioner.provision).not.toHaveBeenCalled();
   });
 
+  it('captures changeset before cleanup', async () => {
+    const registry = makeMockRegistry();
+    const provisioner = makeMockProvisioner();
+    const executor = makeMockExecutor();
+    const workspace = makeWorkspaceHandle();
+
+    const callOrder: string[] = [];
+    setupSuccessfulMocks(registry, provisioner, executor, workspace);
+    (captureGovernedResultSettling as jest.Mock).mockImplementation(async () => {
+      callOrder.push('capture');
+      return {
+        executionId: 'exec-001',
+        baseSha: 'a'.repeat(40),
+        changedFiles: [],
+        patch: '',
+        empty: true,
+      };
+    });
+    (provisioner.cleanup as jest.Mock).mockImplementation(async () => {
+      callOrder.push('cleanup');
+    });
+
+    const service = new RemoteExecutionWorkerService(
+      registry,
+      provisioner,
+      executor,
+    );
+    await service.executeSandboxed(baseInput());
+
+    expect(callOrder).toEqual(['capture', 'cleanup']);
+  });
+
+  it('result contains workspaceDisposition CLEANED', async () => {
+    const registry = makeMockRegistry();
+    const provisioner = makeMockProvisioner();
+    const executor = makeMockExecutor();
+    const workspace = makeWorkspaceHandle();
+
+    setupSuccessfulMocks(registry, provisioner, executor, workspace);
+
+    const service = new RemoteExecutionWorkerService(
+      registry,
+      provisioner,
+      executor,
+    );
+    const result = await service.executeSandboxed(baseInput());
+
+    expect(result.workspaceDisposition).toBe('CLEANED');
+  });
+
   it('CHANGESET_CAPTURE_FAILED propagates typed code', async () => {
     const registry = makeMockRegistry();
     const provisioner = makeMockProvisioner();
