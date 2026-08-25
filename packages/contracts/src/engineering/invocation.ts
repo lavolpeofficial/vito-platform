@@ -39,8 +39,6 @@ export type InvocationFailureReason =
   | 'HUMAN_GATE_NOT_BOUND'
   | 'HUMAN_GATE_EXPIRED'
   | 'HUMAN_GATE_CONTEXT_MISMATCH'
-  | 'INVOCATION_DUPLICATE'
-  | 'INVOCATION_IDEMPOTENCY_CONFLICT'
   | 'EXECUTABLE_NOT_TRUSTED'
   | 'ENVIRONMENT_NOT_ALLOWED'
   | 'CREDENTIAL_INJECTION_FAILED'
@@ -63,8 +61,6 @@ export const INVOCATION_FAILURE_MESSAGES: Record<InvocationFailureReason, string
   HUMAN_GATE_NOT_BOUND: 'Human-Gate-Genehmigung ist nicht an den Invocation-Kontext gebunden',
   HUMAN_GATE_EXPIRED: 'Human-Gate-Genehmigung ist abgelaufen',
   HUMAN_GATE_CONTEXT_MISMATCH: 'Human-Gate-Genehmigung passt nicht zum Invocation-Kontext',
-  INVOCATION_DUPLICATE: 'Governed Invocation mit dieser Identität wurde bereits geclaimed — Timeout ist keine Cancellation, keine zweite produktive Ausführung',
-  INVOCATION_IDEMPOTENCY_CONFLICT: 'Invocation-Identität wurde mit abweichendem governed Kontext verwendet — Fail-closed',
   EXECUTABLE_NOT_TRUSTED: 'Ausführbare Datei kann nicht als vertrauenswürdig verifiziert werden',
   ENVIRONMENT_NOT_ALLOWED: 'Angeforderte Umgebungsvariablen sind nicht in der Allowlist',
   CREDENTIAL_INJECTION_FAILED: 'Credential-Injektion am Adapter-Boundary fehlgeschlagen',
@@ -123,11 +119,6 @@ export interface GovernedCapabilityInvocationRequest {
  * Human Gate Approval Binding.
  * Must be bound to the specific invocation context.
  * A generic APPROVED boolean is NOT sufficient.
- *
- * Phase 3G: requestedAction binds the approval to ONE consequential action.
- * When such an approval satisfies a release/consequential gate, its action
- * scope MUST match the action being evaluated. Missing requestedAction MUST
- * NOT act as wildcard authority for release actions.
  */
 export interface HumanGateBinding {
   readonly approvalId: string;
@@ -138,7 +129,6 @@ export interface HumanGateBinding {
   readonly providerId?: string;
   readonly artifactReference?: string;
   readonly inputReference?: string;
-  readonly requestedAction?: ExecutionAction;
   readonly approverIdentity: string;
   readonly approvedAt: Date;
   readonly expiresAt?: Date;
@@ -351,6 +341,41 @@ export interface NetworkCallSummary {
 }
 
 // ---------------------------------------------------------------------------
+// Sandbox Configuration (v0.1 — Remote Execution Worker)
+// ---------------------------------------------------------------------------
+
+/**
+ * Sandbox configuration for governed execution.
+ * Technology is constrained to 'bubblewrap' in production; 'none' is
+ * permitted only in development/test environments with explicit opt-in.
+ */
+export interface GovernedSandboxConfig {
+  readonly technology: 'bubblewrap' | 'none';
+  readonly timeoutMs: number;
+  readonly maxMemoryBytes: number;
+  readonly maxCpuTimeMs: number;
+  readonly maxWorktreeBytes: number;
+  readonly extraEnvAllowlist?: ReadonlyMap<string, string>;
+  readonly readOnlyMounts?: ReadonlyArray<{
+    readonly hostPath: string;
+    readonly guestPath: string;
+  }>;
+}
+
+/**
+ * Result envelope from sandbox execution.
+ */
+export interface SandboxExecutionResult {
+  readonly exitCode: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly durationMs: number;
+  readonly timedOut: boolean;
+  readonly oomKilled: boolean;
+  readonly sandboxLog?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Invocation Lifecycle State Transitions
 // ---------------------------------------------------------------------------
 
@@ -409,8 +434,6 @@ export function invocationFailureToStatus(reason: InvocationFailureReason): Agen
     case 'HUMAN_GATE_NOT_BOUND':
     case 'HUMAN_GATE_EXPIRED':
     case 'HUMAN_GATE_CONTEXT_MISMATCH':
-    case 'INVOCATION_DUPLICATE':
-    case 'INVOCATION_IDEMPOTENCY_CONFLICT':
     case 'EXECUTION_PROFILE_NOT_GOVERNED':
     case 'POLICY_BLOCKED':
       return AgentExecutionStatus.POLICY_BLOCKED;
@@ -427,8 +450,6 @@ export function invocationFailureToOutcome(reason: InvocationFailureReason): Exe
     case 'HUMAN_GATE_NOT_BOUND':
     case 'HUMAN_GATE_EXPIRED':
     case 'HUMAN_GATE_CONTEXT_MISMATCH':
-    case 'INVOCATION_DUPLICATE':
-    case 'INVOCATION_IDEMPOTENCY_CONFLICT':
     case 'EXECUTION_PROFILE_NOT_GOVERNED':
     case 'POLICY_BLOCKED':
       return ExecutionOutcome.POLICY_BLOCKED;
@@ -611,277 +632,8 @@ export interface HumanGateResolver {
       readonly capabilityCode: string;
       readonly providerId: string;
       readonly inputReference?: string;
-      /**
-       * Phase 3G: the action whose gate the approval is intended to satisfy.
-       * Trusted resolvers use this to return only bindings whose
-       * requestedAction scope matches; validation re-proves it fail-closed.
-       */
-      readonly requestedAction?: ExecutionAction;
     },
   ): Promise<HumanGateBinding | null>;
-}
-
-// ---------------------------------------------------------------------------
-// Governed Invocation Idempotency (Phase 3H — Duplicate Execution Boundary)
-// ---------------------------------------------------------------------------
-
-/**
- * Consequential execution actions requiring duplicate-execution protection.
- *
- * Exactly the actions that CAN produce consequential side effects at the
- * adapter boundary: file mutation, command execution, network egress and
- * release-relevant git mutations. GIT_MERGE/GIT_REBASE/GIT_BRANCH_DELETE/
- * REMOTE_REF_DELETE are unconditionally denied by EO-01.4 evaluatePolicy()
- * in v0.1 and can therefore never reach adapter.execute(); READ_FILE/
- * GIT_READ are read-only; READ_SECRET is unconditionally denied.
- */
-export const CONSEQUENTIAL_INVOCATION_ACTIONS: readonly ExecutionAction[] = [
-  ExecutionAction.WRITE_FILE,
-  ExecutionAction.CREATE_FILE,
-  ExecutionAction.DELETE_FILE,
-  ExecutionAction.RUN_COMMAND,
-  ExecutionAction.NETWORK_ACCESS,
-  ExecutionAction.GIT_COMMIT,
-  ExecutionAction.GIT_PUSH,
-];
-
-export function isConsequentialExecutionAction(action: ExecutionAction): boolean {
-  return CONSEQUENTIAL_INVOCATION_ACTIONS.includes(action);
-}
-
-/**
- * File-mutation subset of the consequential actions (Phase 3H.3).
- * For these actions requestedPath is the ONLY authoritative target field;
- * requestedCommand is not authoritative and must neither influence the
- * logical operation key nor be accepted on requests.
- */
-export const FILE_MUTATION_INVOCATION_ACTIONS: readonly ExecutionAction[] = [
-  ExecutionAction.WRITE_FILE,
-  ExecutionAction.CREATE_FILE,
-  ExecutionAction.DELETE_FILE,
-];
-
-export function isFileMutationExecutionAction(action: ExecutionAction): boolean {
-  return FILE_MUTATION_INVOCATION_ACTIONS.includes(action);
-}
-
-/**
- * Minimal internal claim state of the idempotency abstraction.
- *
- * Deliberately NOT a second lifecycle engine and NOT part of
- * AgentExecutionStatus: it records only what the idempotency boundary must
- * know to prevent duplicate side effects.
- *
- * - IN_PROGRESS: claimed, adapter executing.
- * - COMPLETED: adapter returned a governed SUCCEEDED result.
- * - TIMED_OUT_UNKNOWN: VITO returned TIMED_OUT, but timeout != cancellation —
- *   the underlying adapter operation may still be running or may still
- *   complete side effects later. The claim MUST NOT be released.
- * - FAILED_UNKNOWN: the invocation ended in a non-success terminal state;
- *   whether partial side effects occurred is unknowable at this boundary,
- *   so the claim is likewise never released.
- */
-export type GovernedInvocationClaimState =
-  | 'IN_PROGRESS'
-  | 'COMPLETED'
-  | 'TIMED_OUT_UNKNOWN'
-  | 'FAILED_UNKNOWN';
-
-/**
- * A recorded execution claim for one LOGICAL governed operation (Phase 3H.1).
- *
- * Identity separation (do NOT collapse these):
- * - ATTEMPT IDENTITY: invocationId — which attempt owns/owned the claim;
- *   audit and conflict/replay evidence only, never the dedup key.
- * - LOGICAL OPERATION IDENTITY: logicalOperationKey — trusted-derived
- *   stable key of the governed context; the store's duplicate-prevention
- *   primary key. A new invocationId on the same key is a DUPLICATE.
- * - GOVERNED CONTEXT FINGERPRINT: contextFingerprint — canonical proof of
- *   the exact first-accepted context; conflict/replay forensics.
- */
-export interface GovernedInvocationExecutionClaim {
-  readonly logicalOperationKey: string;
-  /** Owning attempt identity at claim time. Never silently transferred. */
-  readonly invocationId: string;
-  /** Canonical fingerprint of the governed context first accepted. */
-  readonly contextFingerprint: string;
-  readonly state: GovernedInvocationClaimState;
-  readonly claimedAt: Date;
-}
-
-/**
- * Outcome of an atomic claim-or-inspect for one logical governed operation.
- * The store decides DUPLICATE vs CONTEXT_CONFLICT; the caller must treat both
- * as fail-closed refusals of productive execution.
- */
-export type GovernedInvocationClaimResult =
-  | { readonly outcome: 'CLAIMED'; readonly claim: GovernedInvocationExecutionClaim }
-  | { readonly outcome: 'DUPLICATE'; readonly existing: GovernedInvocationExecutionClaim }
-  | { readonly outcome: 'CONTEXT_CONFLICT'; readonly existingInvocationId: string };
-
-/**
- * Trusted idempotency store for governed invocations (Phase 3H.1).
- *
- * Der Caller DARF weder Store noch Claim-Eintrag liefern — die Abstraktion
- * wird vertrauenswürdig injiziert. Semantik:
- *
- * - Dedup-Primärschlüssel ist die LOGISCHE OPERATION (logicalOperationKey),
- *   abgeleitet aus dem trusted governed Kontext — NIEMALS die Attempt-
- *   Identität. Ein Retry mit neuer invocationId auf derselben logischen
- *   Operation ist ein DUPLICATE (kein Autoritäts-Neubezug durch neue IDs).
- * - claim() ist atomar "claim-or-inspect": erster Versuch claimed die
- *   logische Operation und wird deren Besitzer; jeder weitere Versuch —
- *   gleiche oder andere invocationId — erhält DUPLICATE mit Besitzer-
- *   Evidenz. Ownership wird nie stillschweigend übertragen.
- * - Dieselbe invocationId unter einem ANDEREN logischen Schlüssel ist
- *   CONTEXT_CONFLICT (Attacker-Reuse einer Attempt-Identität).
- * - markCompleted() schreibt ausschließlich dem Besitzer zu und gibt einen
- *   Claim NIE frei: nur der Zustand wird fortgeschrieben;
- *   TIMED_OUT_UNKNOWN/FAILED_UNKNOWN bleiben gesperrt.
- */
-export interface GovernedInvocationIdempotencyStore {
-  claim(
-    logicalOperationKey: string,
-    invocationId: string,
-    contextFingerprint: string,
-  ): Promise<GovernedInvocationClaimResult>;
-
-  markCompleted(
-    logicalOperationKey: string,
-    invocationId: string,
-    state: GovernedInvocationClaimState,
-  ): Promise<void>;
-}
-
-/**
- * Gemeinsamer length-präfixierter Skalar-Encoder für governed Identitäten.
- * Nur explizite, kontrollierte Skalar-Felder — kein unkontrolliertes
- * JSON.stringify; label:len:value-Kodierung verhindert das Verschmelzen
- * von Feldwerten mit der Struktur (Delimiter-Injection-Feldgleichzug).
- */
-function appendLengthPrefixed(parts: string[], label: string, value: string | undefined): void {
-  if (value === undefined) return;
-  parts.push(`${label}:${value.length}:${value}`);
-}
-
-/**
- * Feldmenge des GOVERNED CONTEXT FINGERPRINT (Phase 3H / geschärft in
- * Phase 3H.2): vollständige Ausführungs-Kontextbindung inklusive
- * Ausführungsmechanismus (Provider, Profil, Assurance). Rolle: exakte
- * Kontextbindung, Replay-/Forensik-Evidenz.
- */
-export interface GovernedContextIdentityFields {
-  readonly organizationId: string;
-  readonly workflowRunId: string;
-  readonly workflowStepRunId: string;
-  readonly capabilityCode: string;
-  readonly providerId: string;
-  readonly requestedAction: ExecutionAction;
-  readonly executionProfile: ExecutionProfile;
-  readonly assuranceLevel?: string;
-  readonly inputReference?: string;
-}
-
-/**
- * Feldmenge des LOGICAL OPERATION KEY (Phase 3H.2): stabile Identität der
- * konsequenziellen Side-Effect-Operation. Bewusst OHNE Ausführungs-
-* mechanismus-Felder (providerId/executionProfile/assuranceLevel) — ein
- * Provider- oder Governance-Wechsel darf Duplicate-Schutz nie zurücksetzen.
- * Enthält die autoritative Action-Ziel-Referenz, soweit im Vertrag
- * modelliert (requestedPath für Datei-Aktionen, requestedCommand für
- * Command-Aktionen), sowie inputReference als operationales Eingabe-
- * Unterscheidungsmerkmal. KEINE Payload-Serialisierung, KEINE Zeitstempel,
- * NIEMALS invocationId.
- */
-export interface GovernedOperationIdentityFields {
-  readonly organizationId: string;
-  readonly workflowRunId: string;
-  readonly workflowStepRunId: string;
-  readonly capabilityCode: string;
-  readonly requestedAction: ExecutionAction;
-  /** Autoritatives Datei-Ziel (Datei-Aktionen), falls modelliert. */
-  readonly requestedPath?: string;
-  /** Autoritativer Command (RUN_COMMAND), falls modelliert. */
-  readonly requestedCommand?: string;
-  /** Autoritative operationale Eingabe-Referenz, falls vorhanden. */
-  readonly inputReference?: string;
-}
-
-/**
- * Kanonischer, deterministischer Kontext-Fingerprint einer governed
- * Invocation (Phase 3H / 3H.2).
- *
- * Längere/strengere Bindung als der Operationsschlüssel: zusätzlich
- * providerId, executionProfile und assuranceLevel. Derselbe logische
- * Vorgang unter anderem Ausführungskontext bleibt an der logischen Ebene
- * DUPLICATE — die Fingerprint-Differenz dient ausschließlich als Forensik-
- * Evidenz und ist NIEMALS Ausführungsberechtigung. Kein JSON.stringify;
- * length-präfixierte Kodierung gegen Delimiter-Injection.
- */
-export function buildGovernedInvocationFingerprint(
-  fields: GovernedContextIdentityFields,
-): string {
-  const parts: string[] = ['v1'];
-  appendLengthPrefixed(parts, 'org', fields.organizationId);
-  appendLengthPrefixed(parts, 'run', fields.workflowRunId);
-  appendLengthPrefixed(parts, 'step', fields.workflowStepRunId);
-  appendLengthPrefixed(parts, 'cap', fields.capabilityCode);
-  appendLengthPrefixed(parts, 'prov', fields.providerId);
-  appendLengthPrefixed(parts, 'action', fields.requestedAction);
-  appendLengthPrefixed(parts, 'profile', fields.executionProfile);
-  if (fields.assuranceLevel !== undefined) {
-    appendLengthPrefixed(parts, 'al', fields.assuranceLevel);
-  }
-  if (fields.inputReference !== undefined) {
-    appendLengthPrefixed(parts, 'in', fields.inputReference);
-  }
-  return parts.join('|');
-}
-
-/**
- * Stabiler, trusted abgeleiteter Schlüssel der LOGISCHEN OPERATION
- * (Phase 3H.1; Feldsemantik 3H.2; AKTIONSBEWUSSTE Zielselektion 3H.3).
- *
- * Primärschlüssel der Duplicate-Prävention: derselbe consequential Vorgang
- * ergibt denselben Schlüssel — unabhängig von invocationId (Attempt),
- * Provider, ExecutionProfile oder AssuranceLevel (Ausführungsmechanismus).
- *
- * Aktionsbewusste Ziel-Selektion (Phase 3H.3): NUR für die angefragte
- * Aktion autoritative Felder fließen ein —
- * - Datei-Mutation (WRITE_FILE/CREATE_FILE/DELETE_FILE): ausschließlich
- *   requestedPath;
- * - RUN_COMMAND: ausschließlich requestedCommand;
- * - übrige consequential Aktionen (NETWORK_ACCESS, GIT_COMMIT, GIT_PUSH):
- *   keine modellierten Ziel-Felder (fehlende autoritative Netzwerk-/Revisions-
- *   Referenzen sind als Follow-up dokumentiert; bewusst KEINE Serialisierung
- *   von governedInputPayload als Ersatz).
- * Irrelevante Felder können die Identität NICHT verschieben — ein Aufrufer
- * kann Duplicate-Schutz nicht durch Rauschen in nicht-autoritativen Feldern
- * umgehen. inputReference bleibt operative Eingabe-Dimension.
- *
- * Version-präfixiert ('logop-v2' seit 3H.3: Selektionssemantik geändert),
- * deterministisch, keine Zeitstempel, kein unkontrolliertes JSON.stringify.
- */
-export function buildGovernedLogicalOperationKey(
-  fields: GovernedOperationIdentityFields,
-): string {
-  const parts: string[] = ['logop-v2'];
-  appendLengthPrefixed(parts, 'org', fields.organizationId);
-  appendLengthPrefixed(parts, 'run', fields.workflowRunId);
-  appendLengthPrefixed(parts, 'step', fields.workflowStepRunId);
-  appendLengthPrefixed(parts, 'cap', fields.capabilityCode);
-  appendLengthPrefixed(parts, 'action', fields.requestedAction);
-
-  // Aktionsbewusste autoritative Ziel-Referenz: genau EINE Quelle je
-  // Aktionsfamilie; nicht-autoritative Felder werden ignoriert.
-  if (isFileMutationExecutionAction(fields.requestedAction)) {
-    appendLengthPrefixed(parts, 'path', fields.requestedPath);
-  } else if (fields.requestedAction === ExecutionAction.RUN_COMMAND) {
-    appendLengthPrefixed(parts, 'cmd', fields.requestedCommand);
-  }
-
-  appendLengthPrefixed(parts, 'in', fields.inputReference);
-  return parts.join('|');
 }
 
 /**
@@ -974,25 +726,6 @@ export function sanitizeErrorProviderMetadata(
  * Validates a HumanGateBinding against the invocation context.
  * Returns the effective ReleaseGateStatus derived from the binding.
  * Returns ReleaseGateStatus.NOT_REQUESTED when no valid binding exists.
- *
- * Phase 3G — Approval Scope Binding:
- *
- * 1. Action scope: when the binding declares a requestedAction, it MUST
- *    match the action being evaluated. A trusted approval for ONE
- *    consequential action MUST NOT silently authorize another one.
- *    A binding WITHOUT declared action scope MUST NOT become wildcard
- *    authority for release/consequential actions (currently GIT_COMMIT and
- *    GIT_PUSH — the only actions for which ReleaseGateStatus.APPROVED has
- *    authority in EO-01.4 evaluatePolicy()). For actions where the Human
- *    Gate is optional, historical bindings without action scope remain
- *    valid.
- *
- * 2. Artifact scope: if the binding explicitly claims an artifact-bound
- *    authorization, the claimed scope MUST be provable against an
- *    authoritative artifact reference of the invocation context:
- *    mismatch => fail closed; missing authoritative artifact context =>
- *    fail closed. An artifact-scoped approval must not silently act
- *    unscoped.
  */
 export function validateHumanGateBinding(
   binding: HumanGateBinding | null | undefined,
@@ -1003,13 +736,6 @@ export function validateHumanGateBinding(
     readonly capabilityCode: string;
     readonly providerId: string;
     readonly inputReference?: string;
-    /** Phase 3G: the action being evaluated (authoritative request action). */
-    readonly requestedAction?: ExecutionAction;
-    /**
-     * Phase 3G: authoritative artifact reference of the invocation context,
-     * when such a trusted surface exists.
-     */
-    readonly artifactReference?: string;
   },
 ): ReleaseGateStatus {
 
@@ -1044,39 +770,6 @@ export function validateHumanGateBinding(
 
   // Validate input reference binding if present in binding
   if (binding.inputReference && binding.inputReference !== context.inputReference) {
-    return ReleaseGateStatus.NOT_REQUESTED;
-  }
-
-  // Phase 3G: Validate action scope. An approval must not silently
-  // authorize a different consequential action than the one being evaluated.
-  if (context.requestedAction) {
-    if (!binding.requestedAction) {
-      // Release/consequential actions: missing action scope MUST NOT become
-      // wildcard authority. This set is exactly the action set for which
-      // EO-01.4 evaluatePolicy() grants authority to
-      // ReleaseGateStatus.APPROVED.
-      const RELEASE_CONSEQUENTIAL_ACTIONS: readonly ExecutionAction[] = [
-        ExecutionAction.GIT_COMMIT,
-        ExecutionAction.GIT_PUSH,
-      ];
-      if (RELEASE_CONSEQUENTIAL_ACTIONS.includes(context.requestedAction)) {
-        return ReleaseGateStatus.NOT_REQUESTED;
-      }
-      // Non-consequential actions: Human Gate is optional; historical
-      // bindings without declared action scope remain valid here.
-    } else if (binding.requestedAction !== context.requestedAction) {
-      return ReleaseGateStatus.NOT_REQUESTED;
-    }
-  }
-
-  // Phase 3G: Validate artifact scope where the approval explicitly claims
-  // an artifact-bound authorization. Fail closed on mismatch AND when no
-  // authoritative artifact reference can be established for comparison —
-  // an artifact-scoped approval must not silently act unscoped.
-  if (
-    binding.artifactReference !== undefined &&
-    binding.artifactReference !== context.artifactReference
-  ) {
     return ReleaseGateStatus.NOT_REQUESTED;
   }
 

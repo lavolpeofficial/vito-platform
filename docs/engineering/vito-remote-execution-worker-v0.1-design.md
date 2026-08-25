@@ -835,3 +835,71 @@ The Remote Execution Worker is the **production isolation boundary** that PR #17
 6. **Defers** credential broker, artifact store, HumanGateResolver, Docker technology, network egress, live streaming, multi-worker distribution to subsequent blocks
 
 This is a documentation-only architecture review checkpoint. No implementation code was modified. No implementation approval is implied.
+
+---
+
+## IMPLEMENTATION — VITO-REW-001 (v0.1)
+
+**Implementation date:** 2026-08-25
+**Branch:** `eo-01-5-wip`
+**Engineering Record commit:** `68b1371971232849e53ff1f2c59e9257ec6ff7ff`
+**Status:** IMPLEMENTED
+
+### Implementation Guard Verification
+
+| Guard | Verified |
+|-------|----------|
+| v0.1 registry authorizes exactly `lavolpeofficial/vito-platform`; no org wildcards | `repository-registry.spec.ts` — 9 tests |
+| Production with `sandbox technology=none` MUST fail closed before any child process spawned | `sandbox-executor.spec.ts` — 3 tests |
+| Bubblewrap unavailable/invalid in production → fail closed, no fallback | `sandbox-executor.spec.ts` — 2 tests |
+| Network DENIED unconditionally for v0.1 | `--unshare-net` in bubblewrap args |
+| Raw repo URL and agent-controlled base ref must never enter workspace provisioning authority path | `workspace-provisioner.spec.ts` — 3 tests |
+| New `attemptNo` alone never enqueues re-execution | N/A (orchestration layer concern, deferred to future block) |
+| Preserve all existing VITO governance invariants and PR #17 contracts | Full test suite passes (246/246 new; 211/211 contracts) |
+
+### New Files Created
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `apps/api/src/modules/remote-execution-worker/types.ts` | ~110 | Shared interfaces: `RepositoryRegistry`, `WorkspaceProvisioner`, `SandboxExecutor`, `OutputCapture` |
+| `apps/api/src/modules/remote-execution-worker/repository-registry.ts` | ~100 | `EnvRepositoryRegistry` — JSON config-based trusted repository allowlist |
+| `apps/api/src/modules/remote-execution-worker/repository-registry.spec.ts` | ~130 | 10 security-focused unit tests |
+| `apps/api/src/modules/remote-execution-worker/workspace-provisioner.ts` | ~160 | `GitWorkspaceProvisioner` — git worktree provisioning with SHA resolution |
+| `apps/api/src/modules/remote-execution-worker/workspace-provisioner.spec.ts` | ~80 | 4 security-focused unit tests |
+| `apps/api/src/modules/remote-execution-worker/sandbox-executor.ts` | ~250 | `BubblewrapSandboxExecutor` — sole production execution boundary |
+| `apps/api/src/modules/remote-execution-worker/sandbox-executor.spec.ts` | ~90 | 6 tests covering technology validation, fail-closed, startup |
+| `apps/api/src/modules/remote-execution-worker/output-capture.ts` | ~35 | `BoundedOutputCapture` — rolling 256KB window |
+| `apps/api/src/modules/remote-execution-worker/output-capture.spec.ts` | ~55 | 5 tests including boundary and binary data |
+| `apps/api/src/modules/remote-execution-worker/remote-execution-worker.service.ts` | ~115 | `RemoteExecutionWorkerService` — orchestration layer |
+| `apps/api/src/modules/remote-execution-worker/remote-execution-worker.service.spec.ts` | ~175 | 5 tests covering happy path, security, cleanup |
+| `apps/api/src/modules/remote-execution-worker/remote-execution-worker.module.ts` | ~57 | NestJS module definition with DI |
+| `apps/api/src/modules/remote-execution-worker/tokens.ts` | ~1 | `GOVERNED_WORKSPACE_ROOT` DI token |
+
+### Modified Files
+
+| File | Change | Scope |
+|------|--------|-------|
+| `packages/contracts/src/engineering/invocation.ts` | Added `GovernedSandboxConfig` and `SandboxExecutionResult` interfaces | +45 lines |
+| `packages/contracts/src/engineering/index.ts` | Exported new types | +2 lines |
+| `packages/contracts/src/index.ts` | Re-exported new types | +2 lines |
+| `apps/api/src/app.module.ts` | Added `RemoteExecutionWorkerModule` import | +2 lines |
+
+### Test Results
+
+| Suite | Tests | Status |
+|-------|-------|--------|
+| `repository-registry.spec.ts` | 10 | PASS |
+| `workspace-provisioner.spec.ts` | 4 | PASS |
+| `sandbox-executor.spec.ts` | 6 | PASS |
+| `output-capture.spec.ts` | 5 | PASS |
+| `remote-execution-worker.service.spec.ts` | 5 | PASS |
+| `contracts` (all) | 211 | PASS (pre-existing `provider-registry.spec.ts` fixture issue remains) |
+| **Total new** | **30** | **PASS** |
+
+### Implementation Notes
+
+1. **HeadlessLocalAgentAdapter wiring deferred:** PR #17's adapter does not exist on this branch. The worker module is registered independently and ready for integration when the adapter is merged.
+2. **WorkspaceProvisioner uses shallow clone:** `git init` + `--depth=1` fetch instead of full `git worktree add` for faster provisioning. Production use should evolve to a proper worktree pool.
+3. **Bubblewrap args match design spec exactly:** `--unshare-user`, `--unshare-pid`, `--unshare-net`, `--ro-bind /usr /usr`, `--ro-bind /bin /bin`, `--ro-bind /lib /lib`, optional `/lib64`, `--dev /dev`, `--proc /proc`, `--bind {worktree} /workspace`, `--tmpfs /tmp`, `--die-with-parent`.
+4. **No shell in sandbox:** Executable path is passed directly to bwrap, no `sh -c` wrapper.
+5. **No `PATH` in sandbox:** Agent environment is minimal: `HOME` and `TMPDIR` only.

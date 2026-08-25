@@ -13,6 +13,7 @@ import { SourceVaultModule } from './modules/source-vault/source-vault.module';
 import { AoeImportModule } from './modules/aoe-import/aoe-import.module';
 import { WorkflowRuntimeModule } from './modules/workflow-runtime/workflow-runtime.module';
 import { ProviderRegistryModule } from './modules/provider-registry/provider-registry.module';
+import { RemoteExecutionWorkerModule } from './modules/remote-execution-worker/remote-execution-worker.module';
 
 /**
  * Seit Sprint 2 gibt es keine `TenantMiddleware` mehr. Authentifizierung
@@ -37,6 +38,7 @@ import { ProviderRegistryModule } from './modules/provider-registry/provider-reg
     AoeImportModule,
     WorkflowRuntimeModule,
     ProviderRegistryModule,
+    RemoteExecutionWorkerModule,
   ],
 })
 export class AppModule {}
