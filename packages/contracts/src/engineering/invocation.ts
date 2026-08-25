@@ -351,6 +351,44 @@ export interface NetworkCallSummary {
 }
 
 // ---------------------------------------------------------------------------
+// Sandbox Configuration (v0.1 — Remote Execution Worker)
+// ---------------------------------------------------------------------------
+
+/**
+ * Sandbox configuration for governed execution.
+ * Technology is constrained to 'bubblewrap' in production; 'none' is
+ * permitted only in non-production environments.
+ *
+ * Resource limits (maxMemoryBytes, maxCpuTimeMs, maxWorktreeBytes) are
+ * declared here for contract clarity. In v0.1, maxMemoryBytes and
+ * maxCpuTimeMs are enforced via Bubblewrap --rlimit-as and --rlimit-cpu.
+ * maxWorktreeBytes is NOT enforced at the OS level in v0.1 and MUST NOT
+ * be relied upon as a security boundary. It is reserved for future
+ * cgroup-based enforcement.
+ */
+export interface GovernedSandboxConfig {
+  readonly technology: 'bubblewrap' | 'none';
+  readonly timeoutMs: number;
+  readonly maxMemoryBytes: number;
+  readonly maxCpuTimeMs: number;
+  /** NOT enforced in v0.1 — reserved for future cgroup-based enforcement */
+  readonly maxWorktreeBytes: number;
+}
+
+/**
+ * Result envelope from sandbox execution.
+ */
+export interface SandboxExecutionResult {
+  readonly exitCode: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly durationMs: number;
+  readonly timedOut: boolean;
+  readonly oomKilled: boolean;
+  readonly sandboxLog?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Invocation Lifecycle State Transitions
 // ---------------------------------------------------------------------------
 

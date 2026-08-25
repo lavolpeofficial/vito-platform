@@ -120,6 +120,8 @@ export {
   validateHumanGateBinding,
   sanitizeProviderExecutionMetadata,
   sanitizeErrorProviderMetadata,
+  GovernedSandboxConfig,
+  SandboxExecutionResult,
   type GovernedContextIdentityFields,
   type GovernedOperationIdentityFields,
   type GovernedInvocationClaimState,

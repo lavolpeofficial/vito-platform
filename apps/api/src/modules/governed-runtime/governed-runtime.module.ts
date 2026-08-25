@@ -19,11 +19,12 @@ import { TrustedExecutionProfileResolver } from './resolvers/trusted-execution-p
 import { TrustedLocalExecutableResolver } from './resolvers/trusted-local-executable.resolver';
 import { GovernedRuntimeService } from './governed-runtime.service';
 import { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-runtime.tokens';
+import { RemoteExecutionWorkerModule } from '../remote-execution-worker/remote-execution-worker.module';
 
 export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-runtime.tokens';
 
 @Module({
-  imports: [AuditModule],
+  imports: [AuditModule, RemoteExecutionWorkerModule],
   providers: [
     {
       provide: GOVERNED_WORKSPACE_ROOT,
