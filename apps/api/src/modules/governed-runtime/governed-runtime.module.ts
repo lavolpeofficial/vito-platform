@@ -20,6 +20,7 @@ import { TrustedLocalExecutableResolver } from './resolvers/trusted-local-execut
 import { GovernedRuntimeService } from './governed-runtime.service';
 import { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-runtime.tokens';
 import { RemoteExecutionWorkerModule } from '../remote-execution-worker/remote-execution-worker.module';
+import { RemoteExecutionWorkerService } from '../remote-execution-worker/remote-execution-worker.service';
 
 export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-runtime.tokens';
 
@@ -48,7 +49,12 @@ export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-r
       inject: [GOVERNED_WORKSPACE_ROOT],
     },
     WorkspaceFileToolAdapter,
-    HeadlessLocalAgentAdapter,
+    {
+      provide: HeadlessLocalAgentAdapter,
+      inject: [RemoteExecutionWorkerService],
+      useFactory: (workerService: RemoteExecutionWorkerService) =>
+        new HeadlessLocalAgentAdapter(workerService),
+    },
     {
       provide: GOVERNED_ADAPTER_REGISTRY,
       useFactory: (

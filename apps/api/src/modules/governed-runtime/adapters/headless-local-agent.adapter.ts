@@ -1,7 +1,3 @@
-import { spawn } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
-
 import {
   AgentExecutionStatus,
   ExecutionAction,
@@ -10,12 +6,13 @@ import {
   type GovernedAdapterResult,
   type GovernedExecutionContext,
   type GovernedProviderAdapter,
+  type GovernedSandboxConfig,
 } from '@vito/contracts';
+import type { RemoteExecutionWorkerService, ExecuteSandboxedResult } from '../../remote-execution-worker/remote-execution-worker.service';
 
 const MAX_ARGS = 64;
 const MAX_ARG_LENGTH = 4096;
 const MAX_PROMPT_BYTES = 512 * 1024;
-const MAX_CAPTURE_BYTES = 256 * 1024;
 
 interface LocalAgentPayload {
   readonly args?: readonly string[];
@@ -26,14 +23,19 @@ interface LocalAgentPayload {
  * HeadlessLocalAgentAdapter
  *
  * Executes an already-authorized LOCAL_TOOL provider through a verified
- * executable. It never performs routing or policy decisions and never uses a
- * shell. The executable path must originate from TrustedExecutableResolver.
+ * executable via RemoteExecutionWorkerService (Bubblewrap sandbox).
+ * It never performs routing or policy decisions and never uses a shell.
+ * The executable path must originate from TrustedExecutableResolver.
  *
- * Typical provider aliases are `opencode` / `codex`; the adapter itself is
- * intentionally vendor-neutral.
+ * Execution path:
+ *   GovernedInvocationService → HeadlessLocalAgentAdapter → RemoteExecutionWorkerService → BubblewrapSandboxExecutor
  */
 export class HeadlessLocalAgentAdapter implements GovernedProviderAdapter {
   readonly providerType = ProviderType.LOCAL_TOOL;
+
+  constructor(
+    private readonly workerService: RemoteExecutionWorkerService,
+  ) {}
 
   async execute(
     request: GovernedAdapterRequest,
@@ -51,87 +53,29 @@ export class HeadlessLocalAgentAdapter implements GovernedProviderAdapter {
     const payload = parsePayload(request.governedInputPayload);
     if (!payload.ok) return failed(payload.code, payload.message);
 
-    const workspace = context.environment.workingDirectory;
-    const agentHome = join(workspace, '.vito-agent-home');
-    const tmpDir = join(workspace, '.vito-agent-tmp');
-    await mkdir(agentHome, { recursive: true });
-    await mkdir(tmpDir, { recursive: true });
-
-    const env: Record<string, string> = {};
-    for (const [key, value] of context.environment.allowlist.entries()) env[key] = value;
-    env.HOME = agentHome;
-    env.XDG_CONFIG_HOME = join(agentHome, '.config');
-    env.XDG_CACHE_HOME = join(agentHome, '.cache');
-    env.TMPDIR = tmpDir;
-
-    const startedAt = Date.now();
+    const sandboxConfig: GovernedSandboxConfig = {
+      technology: 'bubblewrap',
+      timeoutMs: context.timeoutMs,
+      maxMemoryBytes: 0,
+      maxCpuTimeMs: 0,
+      maxWorktreeBytes: 0,
+    };
 
     try {
-      const result = await runProcess({
-        executable: trustedExecutable.resolvedPath,
+      const result = await this.workerService.executeSandboxed({
+        organizationId: context.organizationId,
+        workflowRunId: context.workflowRunId,
+        workflowStepRunId: context.workflowStepRunId,
+        repositoryId: 'lavolpeofficial/vito-platform',
+        baseRef: 'main',
+        executable: trustedExecutable,
         args: payload.value.args,
         prompt: payload.value.prompt,
-        cwd: workspace,
-        env,
-        timeoutMs: context.timeoutMs,
+        sandboxConfig,
+        env: context.environment.allowlist.size > 0 ? context.environment.allowlist : undefined,
       });
 
-      const durationMs = Date.now() - startedAt;
-      const commandSummary = `${trustedExecutable.commandName}${payload.value.args.length ? ' ' + payload.value.args.join(' ') : ''}`;
-
-      if (result.timedOut) {
-        return {
-          status: AgentExecutionStatus.TIMED_OUT,
-          providerExecutionMetadata: {
-            executableIntegrityHash: trustedExecutable.integrityHash ?? null,
-            exitCode: null,
-            stdout: result.stdout,
-            stderr: result.stderr,
-            sideEffects: {
-              filesCreated: [],
-              filesModified: [],
-              filesDeleted: [],
-              commandsExecuted: [commandSummary],
-            },
-          },
-          usageMetadata: { durationMs },
-          error: {
-            code: 'LOCAL_AGENT_TIMEOUT',
-            message: 'Headless local agent exceeded the governed execution timeout',
-            retryable: true,
-          },
-          completedAt: new Date(),
-        };
-      }
-
-      const succeeded = result.exitCode === 0;
-      return {
-        status: succeeded ? AgentExecutionStatus.SUCCEEDED : AgentExecutionStatus.FAILED,
-        outputReference: `gov://execution/${context.invocationId}`,
-        providerExecutionMetadata: {
-          executableIntegrityHash: trustedExecutable.integrityHash ?? null,
-          exitCode: result.exitCode,
-          stdout: result.stdout,
-          stderr: result.stderr,
-          sideEffects: {
-            filesCreated: [],
-            filesModified: [],
-            filesDeleted: [],
-            commandsExecuted: [commandSummary],
-          },
-        },
-        usageMetadata: { durationMs },
-        ...(succeeded
-          ? {}
-          : {
-              error: {
-                code: 'LOCAL_AGENT_EXIT_NONZERO',
-                message: `Headless local agent exited with code ${String(result.exitCode)}`,
-                retryable: false,
-              },
-            }),
-        completedAt: new Date(),
-      };
+      return mapWorkerResult(result, trustedExecutable, context.invocationId, payload.value.args);
     } catch (error) {
       return failed(
         'LOCAL_AGENT_EXECUTION_ERROR',
@@ -140,6 +84,69 @@ export class HeadlessLocalAgentAdapter implements GovernedProviderAdapter {
       );
     }
   }
+}
+
+function mapWorkerResult(
+  result: ExecuteSandboxedResult,
+  trustedExecutable: { commandName: string; integrityHash?: string },
+  invocationId: string,
+  args: readonly string[],
+): GovernedAdapterResult {
+  const commandSummary = `${trustedExecutable.commandName}${args.length ? ' ' + args.join(' ') : ''}`;
+
+  if (result.timedOut) {
+    return {
+      status: AgentExecutionStatus.TIMED_OUT,
+      providerExecutionMetadata: {
+        executableIntegrityHash: trustedExecutable.integrityHash ?? null,
+        exitCode: null,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        sideEffects: {
+          filesCreated: [],
+          filesModified: [],
+          filesDeleted: [],
+          commandsExecuted: [commandSummary],
+        },
+      },
+      usageMetadata: { durationMs: result.durationMs },
+      error: {
+        code: 'LOCAL_AGENT_TIMEOUT',
+        message: 'Headless local agent exceeded the governed execution timeout',
+        retryable: true,
+      },
+      completedAt: new Date(),
+    };
+  }
+
+  const succeeded = result.exitCode === 0;
+  return {
+    status: succeeded ? AgentExecutionStatus.SUCCEEDED : AgentExecutionStatus.FAILED,
+    outputReference: `gov://execution/${invocationId}`,
+    providerExecutionMetadata: {
+      executableIntegrityHash: trustedExecutable.integrityHash ?? null,
+      exitCode: result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      sideEffects: {
+        filesCreated: [],
+        filesModified: [],
+        filesDeleted: [],
+        commandsExecuted: [commandSummary],
+      },
+    },
+    usageMetadata: { durationMs: result.durationMs },
+    ...(succeeded
+      ? {}
+      : {
+          error: {
+            code: 'LOCAL_AGENT_EXIT_NONZERO',
+            message: `Headless local agent exited with code ${String(result.exitCode)}`,
+            retryable: false,
+          },
+        }),
+    completedAt: new Date(),
+  };
 }
 
 function parsePayload(
@@ -170,58 +177,6 @@ function parsePayload(
   }
 
   return { ok: true, value: { args: normalizedArgs } };
-}
-
-async function runProcess(input: {
-  executable: string;
-  args: readonly string[];
-  prompt?: string;
-  cwd: string;
-  env: Record<string, string>;
-  timeoutMs: number;
-}): Promise<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(input.executable, [...input.args], {
-      cwd: input.cwd,
-      env: input.env,
-      shell: false,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-
-    const appendBounded = (current: string, chunk: Buffer): string => {
-      const combined = current + chunk.toString('utf8');
-      const bytes = Buffer.from(combined, 'utf8');
-      if (bytes.byteLength <= MAX_CAPTURE_BYTES) return combined;
-      return bytes.subarray(bytes.byteLength - MAX_CAPTURE_BYTES).toString('utf8');
-    };
-
-    child.stdout.on('data', (chunk: Buffer) => {
-      stdout = appendBounded(stdout, chunk);
-    });
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr = appendBounded(stderr, chunk);
-    });
-    child.on('error', reject);
-
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGTERM');
-      setTimeout(() => child.kill('SIGKILL'), 2_000).unref();
-    }, Math.max(1, input.timeoutMs));
-    timer.unref();
-
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      resolve({ exitCode: code, stdout, stderr, timedOut });
-    });
-
-    if (input.prompt !== undefined) child.stdin.end(input.prompt, 'utf8');
-    else child.stdin.end();
-  });
 }
 
 function failed(

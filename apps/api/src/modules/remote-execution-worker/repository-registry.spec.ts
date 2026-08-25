@@ -21,7 +21,7 @@ describe('EnvRepositoryRegistry', () => {
   });
 
   it('returns null for empty config', () => {
-    const registry = new EnvRepositoryRegistry('[]');
+    const registry = new EnvRepositoryRegistry(undefined);
     expect(registry.resolve('lavolpeofficial/vito-platform')).toBeNull();
   });
 
@@ -89,32 +89,44 @@ describe('EnvRepositoryRegistry', () => {
     );
   });
 
-  it('fails closed on wildcard base ref for org repos', () => {
+  it('CRITICAL: throws when config has VITO + attacker repository', () => {
     const config = [
+      VALID_REPO,
       {
-        repositoryId: 'lavolpeofficial/vito-platform',
-        cloneUrl: 'https://github.com/lavolpeofficial/vito-platform.git',
-        allowedBaseRefs: ['*'],
+        repositoryId: 'attacker/malicious-repo',
+        cloneUrl: 'https://github.com/attacker/malicious-repo.git',
+        allowedBaseRefs: ['refs/heads/main'],
         enabled: true,
       },
     ];
-    const registry = new EnvRepositoryRegistry(JSON.stringify(config));
-    expect(
-      registry.isBaseRefAllowed('lavolpeofficial/vito-platform', 'refs/heads/main'),
-    ).toBe(false);
-    expect(
-      registry.isBaseRefAllowed('lavolpeofficial/vito-platform', 'refs/heads/develop'),
-    ).toBe(false);
+    expect(() => new EnvRepositoryRegistry(JSON.stringify(config))).toThrow(
+      /VITO-REW-001 v0.1 repository invariant/,
+    );
+    expect(() => new EnvRepositoryRegistry(JSON.stringify(config))).toThrow(
+      /Found 2 repository entries/,
+    );
   });
 
-  it('does NOT authorize a different organization repository', () => {
-    const registry = new EnvRepositoryRegistry(JSON.stringify([VALID_REPO]));
-    expect(registry.resolve('other-org/vito-platform')).toBeNull();
+  it('CRITICAL: throws when config has attacker-only repository', () => {
+    const config = [
+      {
+        repositoryId: 'attacker/evil',
+        cloneUrl: 'https://github.com/attacker/evil.git',
+        allowedBaseRefs: ['refs/heads/main'],
+        enabled: true,
+      },
+    ];
+    expect(() => new EnvRepositoryRegistry(JSON.stringify(config))).toThrow(
+      /VITO-REW-001 v0.1 repository invariant/,
+    );
+    expect(() => new EnvRepositoryRegistry(JSON.stringify(config))).toThrow(
+      /unauthorized repository 'attacker\/evil'/,
+    );
   });
 
-  it('v0.1 does NOT accept arbitrary additional repos', () => {
-    const registry = new EnvRepositoryRegistry(JSON.stringify([VALID_REPO]));
-    expect(registry.resolve('arbitrary/org')).toBeNull();
-    expect(registry.resolve('lavolpeofficial/other')).toBeNull();
+  it('CRITICAL: throws when config has 0 repositories', () => {
+    expect(() => new EnvRepositoryRegistry('[]')).toThrow(
+      /VITO-REW-001 v0.1 repository invariant/,
+    );
   });
 });

@@ -78,6 +78,8 @@ export const SANDBOX_ENV_ALLOWLIST: ReadonlySet<string> = Object.freeze(
   new Set([
     'HOME',
     'TMPDIR',
+    'XDG_CONFIG_HOME',
+    'XDG_CACHE_HOME',
     'PATH',
     'USER',
     'LANG',

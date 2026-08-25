@@ -19,6 +19,10 @@ const execFileAsync = promisify(execFile);
 const MAX_OUTPUT_BYTES = 256 * 1024;
 const SIGTERM_GRACE_MS = 2_000;
 
+const SANDBOX_WORKSPACE = '/workspace';
+const SANDBOX_AGENT_HOME = '/workspace/.vito-agent-home';
+const SANDBOX_AGENT_TMP = '/workspace/.vito-agent-tmp';
+
 @Injectable()
 export class BubblewrapSandboxExecutor implements SandboxExecutor {
   private readonly logger = new Logger(BubblewrapSandboxExecutor.name);
@@ -94,14 +98,19 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
     return this.executeBubblewrap(request);
   }
 
+  /**
+   * Build the sandbox environment.
+   * HOME, TMPDIR, XDG_* are sandbox-visible paths (/workspace/...), never host paths.
+   */
   private buildSandboxEnv(
     request: SandboxExecutionRequest,
-    sandboxHome: string,
-    sandboxTmp: string,
   ): ReadonlyMap<string, string> {
     const env = new Map<string, string>();
-    env.set('HOME', sandboxHome);
-    env.set('TMPDIR', sandboxTmp);
+
+    env.set('HOME', SANDBOX_AGENT_HOME);
+    env.set('TMPDIR', SANDBOX_AGENT_TMP);
+    env.set('XDG_CONFIG_HOME', `${SANDBOX_AGENT_HOME}/.config`);
+    env.set('XDG_CACHE_HOME', `${SANDBOX_AGENT_HOME}/.cache`);
 
     if (request.env) {
       for (const [key, value] of request.env.entries()) {
@@ -123,12 +132,12 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
   ): Promise<SandboxExecutionResult> {
     const { workspace, executable, args, sandboxConfig } = request;
 
-    const agentHome = join(workspace.worktreePath, '.vito-agent-home');
-    const agentTmp = join(workspace.worktreePath, '.vito-agent-tmp');
-    mkdirSafe(agentHome);
-    mkdirSafe(agentTmp);
+    const hostAgentHome = join(workspace.worktreePath, '.vito-agent-home');
+    const hostAgentTmp = join(workspace.worktreePath, '.vito-agent-tmp');
+    mkdirSafe(hostAgentHome);
+    mkdirSafe(hostAgentTmp);
 
-    const env = this.buildSandboxEnv(request, agentHome, agentTmp);
+    const env = this.buildSandboxEnv(request);
 
     const bwrapArgs: string[] = [
       '--unshare-user',
@@ -140,7 +149,7 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
       '--die-with-parent',
       '--dev', '/dev',
       '--proc', '/proc',
-      '--bind', workspace.worktreePath, '/workspace',
+      '--bind', workspace.worktreePath, SANDBOX_WORKSPACE,
       '--tmpfs', '/tmp',
     ];
 
@@ -173,12 +182,12 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
   ): Promise<SandboxExecutionResult> {
     const { workspace, executable, args, sandboxConfig } = request;
 
-    const agentHome = join(workspace.worktreePath, '.vito-agent-home');
-    const agentTmp = join(workspace.worktreePath, '.vito-agent-tmp');
-    mkdirSafe(agentHome);
-    mkdirSafe(agentTmp);
+    const hostAgentHome = join(workspace.worktreePath, '.vito-agent-home');
+    const hostAgentTmp = join(workspace.worktreePath, '.vito-agent-tmp');
+    mkdirSafe(hostAgentHome);
+    mkdirSafe(hostAgentTmp);
 
-    const env = this.buildSandboxEnv(request, agentHome, agentTmp);
+    const env = this.buildSandboxEnv(request);
     const processEnv: Record<string, string> = Object.fromEntries(env.entries());
 
     return this.spawnDirect(executable.resolvedPath, args, request, processEnv, sandboxConfig.timeoutMs);

@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { RegisteredRepository, RepositoryRegistry } from './types';
 
+const VITO_01_ALLOWED_REPO = 'lavolpeofficial/vito-platform';
+
 @Injectable()
 export class EnvRepositoryRegistry implements RepositoryRegistry {
   private readonly logger = new Logger(EnvRepositoryRegistry.name);
@@ -78,5 +80,38 @@ function parseRepositoryRegistry(
     ]);
   }
 
+  enforceV01RepositoryInvariant(entries);
+
   return new Map(entries);
+}
+
+/**
+ * v0.1 invariant: production code authorizes exactly one repository:
+ * lavolpeofficial/vito-platform. Any configuration containing additional
+ * repositories must fail closed.
+ */
+function enforceV01RepositoryInvariant(
+  entries: Array<[string, RegisteredRepository]>,
+): void {
+  if (entries.length === 0) {
+    throw new Error(
+      `VITO-REW-001 v0.1 repository invariant: exactly one repository (${VITO_01_ALLOWED_REPO}) is authorized. ` +
+        `Found 0 repository entries. At least one repository must be configured.`,
+    );
+  }
+
+  if (entries.length !== 1) {
+    throw new Error(
+      `VITO-REW-001 v0.1 repository invariant: exactly one repository (${VITO_01_ALLOWED_REPO}) is authorized. ` +
+        `Found ${entries.length} repository entries. Additional repositories are not permitted.`,
+    );
+  }
+
+  const [repoId] = entries[0];
+  if (repoId !== VITO_01_ALLOWED_REPO) {
+    throw new Error(
+      `VITO-REW-001 v0.1 repository invariant: only '${VITO_01_ALLOWED_REPO}' is authorized. ` +
+        `Found unauthorized repository '${repoId}'.`,
+    );
+  }
 }
