@@ -9,6 +9,7 @@ import {
   type GovernedSandboxConfig,
 } from '@vito/contracts';
 import type { RemoteExecutionWorkerService, ExecuteSandboxedResult } from '../../remote-execution-worker/remote-execution-worker.service';
+import { WorkerExecutionError } from '../../remote-execution-worker/remote-execution-worker.service';
 
 const MAX_ARGS = 64;
 const MAX_ARG_LENGTH = 4096;
@@ -85,12 +86,20 @@ export class HeadlessLocalAgentAdapter implements GovernedProviderAdapter {
 
       return mapWorkerResult(result, trustedExecutable, context.invocationId, payload.value.args);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown local agent execution error';
-      const isChangesetFailure = message.includes('CHANGESET_CAPTURE_FAILED');
+      if (error instanceof WorkerExecutionError) {
+        const isChangesetError =
+          error.code === 'CHANGESET_CAPTURE_FAILED' ||
+          error.code === 'CHANGESET_TOO_LARGE';
+        return failed(
+          error.code,
+          error.message,
+          !isChangesetError,
+        );
+      }
       return failed(
-        isChangesetFailure ? 'CHANGESET_CAPTURE_FAILED' : 'LOCAL_AGENT_EXECUTION_ERROR',
-        message,
-        !isChangesetFailure,
+        'LOCAL_AGENT_EXECUTION_ERROR',
+        error instanceof Error ? error.message : 'Unknown local agent execution error',
+        true,
       );
     }
   }

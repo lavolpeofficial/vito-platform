@@ -12,6 +12,7 @@ import type {
 import type { GovernedSandboxConfig, TrustedExecutable } from '@vito/contracts';
 import { captureGovernedResultSettling } from './change-set-capture';
 import type { GovernedResultSettling } from './change-set-capture';
+import { ChangeSetCaptureError } from './change-set-capture';
 
 /**
  * Audit ownership note:
@@ -20,6 +21,12 @@ import type { GovernedResultSettling } from './change-set-capture';
  * - This worker does NOT create a second idempotency or lifecycle engine.
  * - Worker emits lifecycle debug logs; authoritative audit records are produced
  *   by the governed invocation pipeline before and after adapter.execute().
+ *
+ * Sensitive payload logging policy:
+ * - governedResultSettling.patch MUST NOT be logged verbatim.
+ * - Lifecycle/debug logs may log only: executionId, baseSha, changed-file
+ *   count, patch byte size, and status (empty/not-empty).
+ * - No environment values or patch body appear in logs.
  */
 export interface ExecuteSandboxedInput {
   readonly organizationId: string;
@@ -44,7 +51,7 @@ export interface ExecuteSandboxedResult {
   readonly oomKilled: boolean;
   readonly baseSha: string;
   readonly repositoryId: string;
-  /** Audit-only path — workspace is cleaned before this result is returned. */
+  /** Audit-only — workspace is cleaned before this result is returned. */
   readonly workspaceDisposition: 'CLEANED';
   readonly governedResultSettling: GovernedResultSettling;
 }
@@ -115,14 +122,23 @@ export class RemoteExecutionWorkerService {
           executionId,
         );
       } catch (error) {
+        const code = error instanceof ChangeSetCaptureError
+          ? error.code
+          : 'CHANGESET_CAPTURE_FAILED';
+
         this.logger.error(
-          `Change-set capture failed for execution ${executionId}: ${error instanceof Error ? error.message : 'unknown'}`,
+          `Change-set capture failed: execution=${executionId} code=${code}`,
         );
+
         throw new WorkerExecutionError(
-          'CHANGESET_CAPTURE_FAILED',
-          `Failed to capture governed change-set: ${error instanceof Error ? error.message : 'unknown'}`,
+          code,
+          error instanceof Error ? error.message : 'Failed to capture governed change-set',
         );
       }
+
+      this.logger.debug(
+        `Change-set captured: execution=${executionId} files=${governedResultSettling.changedFiles.length} patchBytes=${Buffer.byteLength(governedResultSettling.patch, 'utf8')} empty=${governedResultSettling.empty}`,
+      );
 
       return Object.freeze({
         executionId,

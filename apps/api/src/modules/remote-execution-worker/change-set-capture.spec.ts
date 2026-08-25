@@ -1,12 +1,12 @@
-import { captureGovernedResultSettling } from './change-set-capture';
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { captureGovernedResultSettling, ChangeSetCaptureError, MAX_PATCH_BYTES } from './change-set-capture';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { WorkspaceHandle } from './types';
 
 function initRepo(repoPath: string): string {
-  execFileSync('git', ['init'], { cwd: repoPath, stdio: 'pipe' });
+  execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
   execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
     cwd: repoPath,
     stdio: 'pipe',
@@ -27,7 +27,7 @@ function initRepo(repoPath: string): string {
   }).trim();
 }
 
-function makeWorkspaceHandle(repoPath: string, sha: string): WorkspaceHandle {
+function makeWorkspace(repoPath: string, sha: string): WorkspaceHandle {
   return {
     worktreePath: repoPath,
     baseSha: sha,
@@ -48,35 +48,18 @@ describe('captureGovernedResultSettling', () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('new-file.ts content survives capture', async () => {
+  it('untracked new file content survives capture', async () => {
     const repoPath = join(tmpDir, 'repo');
-    execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
-    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    execFileSync('git', ['config', 'user.name', 'Vito Test'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    writeFileSync(join(repoPath, 'README.md'), '# test\n');
-    execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
-    execFileSync('git', ['commit', '-m', 'init'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: repoPath,
-      encoding: 'utf8',
-    }).trim();
+    const sha = initRepo(repoPath);
 
     writeFileSync(join(repoPath, 'new-file.ts'), 'export const x = 1;\n');
 
-    const handle = makeWorkspaceHandle(repoPath, sha);
-    const result = await captureGovernedResultSettling(handle, 'exec-001');
+    const result = await captureGovernedResultSettling(
+      makeWorkspace(repoPath, sha),
+      'exec-001',
+    );
 
     expect(result.changedFiles).toContain('new-file.ts');
-    expect(result.patch).toContain('new-file.ts');
     expect(result.patch).toContain('new file mode');
     expect(result.patch).toContain('export const x = 1;');
     expect(result.empty).toBe(false);
@@ -84,36 +67,21 @@ describe('captureGovernedResultSettling', () => {
 
   it('new binary file survives capture', async () => {
     const repoPath = join(tmpDir, 'repo');
-    execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
-    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    execFileSync('git', ['config', 'user.name', 'Vito Test'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    writeFileSync(join(repoPath, 'README.md'), '# test\n');
-    execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
-    execFileSync('git', ['commit', '-m', 'init'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: repoPath,
-      encoding: 'utf8',
-    }).trim();
+    const sha = initRepo(repoPath);
 
     const binaryData = Buffer.alloc(256);
     for (let i = 0; i < 256; i++) binaryData[i] = i;
     writeFileSync(join(repoPath, 'image.bin'), binaryData);
 
-    const handle = makeWorkspaceHandle(repoPath, sha);
-    const result = await captureGovernedResultSettling(handle, 'exec-002');
+    const result = await captureGovernedResultSettling(
+      makeWorkspace(repoPath, sha),
+      'exec-002',
+    );
 
     expect(result.changedFiles).toContain('image.bin');
     expect(result.patch).toContain('new file mode');
-    const hasBinary = result.patch.includes('GIT binary patch') ||
+    const hasBinary =
+      result.patch.includes('GIT binary patch') ||
       result.patch.includes('delta ') ||
       result.patch.includes('literal ');
     expect(hasBinary).toBe(true);
@@ -122,29 +90,19 @@ describe('captureGovernedResultSettling', () => {
   it('tracked modification survives', async () => {
     const repoPath = join(tmpDir, 'repo');
     execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
-    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    execFileSync('git', ['config', 'user.name', 'Vito Test'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
+    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], { cwd: repoPath, stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.name', 'Vito Test'], { cwd: repoPath, stdio: 'pipe' });
     writeFileSync(join(repoPath, 'file.ts'), 'old content\n');
     execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
-    execFileSync('git', ['commit', '-m', 'init'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: repoPath,
-      encoding: 'utf8',
-    }).trim();
+    execFileSync('git', ['commit', '-m', 'init'], { cwd: repoPath, stdio: 'pipe' });
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoPath, encoding: 'utf8' }).trim();
 
     writeFileSync(join(repoPath, 'file.ts'), 'new content\n');
 
-    const handle = makeWorkspaceHandle(repoPath, sha);
-    const result = await captureGovernedResultSettling(handle, 'exec-003');
+    const result = await captureGovernedResultSettling(
+      makeWorkspace(repoPath, sha),
+      'exec-003',
+    );
 
     expect(result.changedFiles).toContain('file.ts');
     expect(result.patch).toContain('-old content');
@@ -153,64 +111,39 @@ describe('captureGovernedResultSettling', () => {
 
   it('deletion survives', async () => {
     const repoPath = join(tmpDir, 'repo');
-    execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
-    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    execFileSync('git', ['config', 'user.name', 'Vito Test'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    writeFileSync(join(repoPath, 'file.ts'), 'to be deleted\n');
-    execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
-    execFileSync('git', ['commit', '-m', 'init'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: repoPath,
-      encoding: 'utf8',
-    }).trim();
+    const sha = initRepo(repoPath);
 
-    rmSync(join(repoPath, 'file.ts'));
+    rmSync(join(repoPath, 'README.md'));
 
-    const handle = makeWorkspaceHandle(repoPath, sha);
-    const result = await captureGovernedResultSettling(handle, 'exec-004');
+    const result = await captureGovernedResultSettling(
+      makeWorkspace(repoPath, sha),
+      'exec-004',
+    );
 
-    expect(result.changedFiles).toContain('file.ts');
+    expect(result.changedFiles).toContain('README.md');
     expect(result.patch).toContain('deleted file mode');
   });
 
-  it('mixed modified + new + deleted change-set is reconstructable', async () => {
+  it('mixed change-set is reconstructable', async () => {
     const repoPath = join(tmpDir, 'repo');
-    execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
-    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    execFileSync('git', ['config', 'user.name', 'Vito Test'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
+    const sha = initRepo(repoPath);
+
     writeFileSync(join(repoPath, 'tracked.ts'), 'tracked\n');
     writeFileSync(join(repoPath, 'to-delete.ts'), 'delete me\n');
     execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
-    execFileSync('git', ['commit', '-m', 'init'], {
+    execFileSync('git', ['commit', '-m', 'add two files'], {
       cwd: repoPath,
       stdio: 'pipe',
     });
-    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: repoPath,
-      encoding: 'utf8',
-    }).trim();
 
     writeFileSync(join(repoPath, 'tracked.ts'), 'modified\n');
     writeFileSync(join(repoPath, 'brand-new.ts'), 'new\n');
     rmSync(join(repoPath, 'to-delete.ts'));
 
-    const handle = makeWorkspaceHandle(repoPath, sha);
-    const result = await captureGovernedResultSettling(handle, 'exec-005');
+    const result = await captureGovernedResultSettling(
+      makeWorkspace(repoPath, sha),
+      'exec-005',
+    );
 
     expect(result.changedFiles).toContain('tracked.ts');
     expect(result.changedFiles).toContain('brand-new.ts');
@@ -221,30 +154,14 @@ describe('captureGovernedResultSettling', () => {
     expect(result.patch).toContain('+new\n');
   });
 
-  it('captures executionId and baseSha', async () => {
+  it('returns executionId and baseSha', async () => {
     const repoPath = join(tmpDir, 'repo');
-    execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
-    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    execFileSync('git', ['config', 'user.name', 'Vito Test'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    writeFileSync(join(repoPath, 'README.md'), '# test\n');
-    execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
-    execFileSync('git', ['commit', '-m', 'init'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: repoPath,
-      encoding: 'utf8',
-    }).trim();
+    const sha = initRepo(repoPath);
 
-    const handle = makeWorkspaceHandle(repoPath, sha);
-    const result = await captureGovernedResultSettling(handle, 'exec-006');
+    const result = await captureGovernedResultSettling(
+      makeWorkspace(repoPath, sha),
+      'exec-006',
+    );
 
     expect(result.executionId).toBe('exec-006');
     expect(result.baseSha).toBe(sha);
@@ -252,66 +169,44 @@ describe('captureGovernedResultSettling', () => {
 
   it('empty workspace produces empty change-set', async () => {
     const repoPath = join(tmpDir, 'repo');
-    execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
-    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    execFileSync('git', ['config', 'user.name', 'Vito Test'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    writeFileSync(join(repoPath, 'README.md'), '# test\n');
-    execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
-    execFileSync('git', ['commit', '-m', 'init'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: repoPath,
-      encoding: 'utf8',
-    }).trim();
+    const sha = initRepo(repoPath);
 
-    const handle = makeWorkspaceHandle(repoPath, sha);
-    const result = await captureGovernedResultSettling(handle, 'exec-007');
+    const result = await captureGovernedResultSettling(
+      makeWorkspace(repoPath, sha),
+      'exec-007',
+    );
 
     expect(result.changedFiles).toEqual([]);
     expect(result.patch).toBe('');
     expect(result.empty).toBe(true);
   });
 
-  it('truncates oversized patch at MAX_PATCH_BYTES', async () => {
+  it('CHANGESET_TOO_LARGE when patch exceeds MAX_PATCH_BYTES', async () => {
     const repoPath = join(tmpDir, 'repo');
-    execFileSync('git', ['init', repoPath], { stdio: 'pipe' });
-    execFileSync('git', ['config', 'user.email', 'test@vito.dev'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    execFileSync('git', ['config', 'user.name', 'Vito Test'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    writeFileSync(join(repoPath, 'README.md'), '# test\n');
-    execFileSync('git', ['add', '.'], { cwd: repoPath, stdio: 'pipe' });
-    execFileSync('git', ['commit', '-m', 'init'], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: repoPath,
-      encoding: 'utf8',
-    }).trim();
+    const sha = initRepo(repoPath);
 
     for (let i = 0; i < 200; i++) {
-      const content = 'A'.repeat(12000);
-      writeFileSync(join(repoPath, `large-${i}.txt`), content);
+      writeFileSync(join(repoPath, `large-${i}.txt`), 'A'.repeat(12000));
     }
 
-    const handle = makeWorkspaceHandle(repoPath, sha);
-    const result = await captureGovernedResultSettling(handle, 'exec-008');
+    await expect(
+      captureGovernedResultSettling(
+        makeWorkspace(repoPath, sha),
+        'exec-008',
+      ),
+    ).rejects.toThrow(ChangeSetCaptureError);
 
-    expect(result.patchTruncated).toBe(true);
-    expect(Buffer.byteLength(result.patch, 'utf8')).toBe(2 * 1024 * 1024);
-    expect(result.empty).toBe(false);
+    try {
+      await captureGovernedResultSettling(
+        makeWorkspace(repoPath, sha),
+        'exec-008',
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(ChangeSetCaptureError);
+      expect((error as ChangeSetCaptureError).code).toBe('CHANGESET_TOO_LARGE');
+      expect((error as ChangeSetCaptureError).message).toContain(
+        String(MAX_PATCH_BYTES),
+      );
+    }
   });
 });

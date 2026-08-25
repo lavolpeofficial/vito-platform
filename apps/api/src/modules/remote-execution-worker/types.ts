@@ -108,4 +108,3 @@ export const SANDBOX_ENV_ALLOWLIST: ReadonlySet<string> = Object.freeze(
   ]),
 );
 
-export const MAX_PATCH_BYTES = 2 * 1024 * 1024;

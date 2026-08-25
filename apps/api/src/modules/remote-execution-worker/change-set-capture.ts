@@ -11,12 +11,15 @@ const GIT_MAX_BUFFER = 4 * 1024 * 1024;
 
 export const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 
+export type ChangeSetCaptureErrorCode =
+  | 'CHANGESET_CAPTURE_FAILED'
+  | 'CHANGESET_TOO_LARGE';
+
 export interface GovernedResultSettling {
   readonly executionId: string;
   readonly baseSha: string;
   readonly changedFiles: readonly string[];
   readonly patch: string;
-  readonly patchTruncated: boolean;
   readonly empty: boolean;
 }
 
@@ -36,11 +39,18 @@ export interface GovernedResultSettling {
  * The temporary index is created and destroyed within this function.
  * No user/global Git state is modified. No push occurs.
  *
- * Git failures throw ChangeSetCaptureError — they are NOT swallowed
- * into empty results. Cleanup may still run in the caller's finally block.
+ * Git failures throw ChangeSetCaptureError with typed code — they are NOT
+ * swallowed into empty results. Cleanup may still run in the caller's
+ * finally block.
+ *
+ * If the complete patch exceeds MAX_PATCH_BYTES, throws
+ * ChangeSetCaptureError('CHANGESET_TOO_LARGE'). A partial patch is NOT
+ * returned — it is not reconstructable and must not be treated as a
+ * successful governed result.
  *
  * On success, returns a frozen GovernedResultSettling with the complete
- * patch bounded to MAX_PATCH_BYTES.
+ * patch. patchTruncated is removed — successful capture always has the
+ * full patch.
  */
 export async function captureGovernedResultSettling(
   workspace: WorkspaceHandle,
@@ -50,16 +60,15 @@ export async function captureGovernedResultSettling(
   const tempIndexPath = join(worktreePath, '.git', 'vito-changeset-index');
 
   try {
-    const statusOutput = await getChangedFiles(worktreePath);
-    const patchResult = await getCompletePatch(worktreePath, tempIndexPath);
+    const changedFiles = await getChangedFiles(worktreePath);
+    const patch = await getCompletePatch(worktreePath, tempIndexPath);
 
     return Object.freeze({
       executionId,
       baseSha: workspace.baseSha,
-      changedFiles: statusOutput,
-      patch: patchResult.patch,
-      patchTruncated: patchResult.truncated,
-      empty: statusOutput.length === 0 && patchResult.patch.length === 0,
+      changedFiles,
+      patch,
+      empty: changedFiles.length === 0 && patch.length === 0,
     });
   } finally {
     cleanupTempIndex(tempIndexPath);
@@ -68,33 +77,42 @@ export async function captureGovernedResultSettling(
 
 /**
  * Get changed files via `git status --porcelain`.
- * Throws on git failure (fail-closed).
+ * Throws ChangeSetCaptureError('CHANGESET_CAPTURE_FAILED') on git failure.
  */
 async function getChangedFiles(worktreePath: string): Promise<string[]> {
-  const { stdout } = await execFileAsync(
-    'git',
-    ['-C', worktreePath, 'status', '--porcelain'],
-    { timeout: 10_000, maxBuffer: GIT_MAX_BUFFER },
-  );
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', worktreePath, 'status', '--porcelain'],
+      { timeout: 10_000, maxBuffer: GIT_MAX_BUFFER },
+    );
 
-  return stdout
-    .split('\n')
-    .filter((line) => line.length > 0)
-    .map((line) => line.substring(3));
+    return stdout
+      .split('\n')
+      .filter((line) => line.length > 0)
+      .map((line) => line.substring(3));
+  } catch (error) {
+    throw new ChangeSetCaptureError(
+      'CHANGESET_CAPTURE_FAILED',
+      `git status failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      error instanceof Error ? error : undefined,
+    );
+  }
 }
 
 /**
  * Generate a complete binary diff using a temporary index to capture
- * untracked/new files. Throws on git failure (fail-closed).
+ * untracked/new files. Throws ChangeSetCaptureError on git failure
+ * or when the patch exceeds MAX_PATCH_BYTES.
  */
 async function getCompletePatch(
   worktreePath: string,
   tempIndexPath: string,
-): Promise<{ patch: string; truncated: boolean }> {
+): Promise<string> {
   const hasHead = await repoHasHead(worktreePath);
 
   if (!hasHead) {
-    return generateUntrackedOnlyPatch(worktreePath);
+    return getUntrackedOnlyPatch(worktreePath);
   }
 
   try {
@@ -107,48 +125,86 @@ async function getCompletePatch(
     // Already initialized
   }
 
-  await execFileAsync(
-    'git',
-    ['-C', worktreePath, 'read-tree', 'HEAD'],
-    { timeout: 5_000, maxBuffer: GIT_MAX_BUFFER, env: { ...process.env, GIT_INDEX_FILE: tempIndexPath } },
-  );
-
-  await execFileAsync(
-    'git',
-    ['-C', worktreePath, 'add', '-A'],
-    { timeout: 10_000, maxBuffer: GIT_MAX_BUFFER, env: { ...process.env, GIT_INDEX_FILE: tempIndexPath } },
-  );
-
-  const { stdout } = await execFileAsync(
-    'git',
-    ['-C', worktreePath, 'diff', '--cached', '--binary', '--no-color', 'HEAD'],
-    { timeout: 30_000, maxBuffer: GIT_MAX_BUFFER, env: { ...process.env, GIT_INDEX_FILE: tempIndexPath } },
-  );
-
-  if (Buffer.byteLength(stdout, 'utf8') <= MAX_PATCH_BYTES) {
-    return { patch: stdout, truncated: false };
+  try {
+    await execFileAsync(
+      'git',
+      ['-C', worktreePath, 'read-tree', 'HEAD'],
+      { timeout: 5_000, maxBuffer: GIT_MAX_BUFFER, env: { ...process.env, GIT_INDEX_FILE: tempIndexPath } },
+    );
+  } catch (error) {
+    throw new ChangeSetCaptureError(
+      'CHANGESET_CAPTURE_FAILED',
+      `git read-tree HEAD failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      error instanceof Error ? error : undefined,
+    );
   }
 
-  const truncated = stdout.substring(0, MAX_PATCH_BYTES);
-  return { patch: truncated, truncated: true };
+  try {
+    await execFileAsync(
+      'git',
+      ['-C', worktreePath, 'add', '-A'],
+      { timeout: 10_000, maxBuffer: GIT_MAX_BUFFER, env: { ...process.env, GIT_INDEX_FILE: tempIndexPath } },
+    );
+  } catch (error) {
+    throw new ChangeSetCaptureError(
+      'CHANGESET_CAPTURE_FAILED',
+      `git add -A failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      error instanceof Error ? error : undefined,
+    );
+  }
+
+  let fullPatch: string;
+  try {
+    ({ stdout: fullPatch } = await execFileAsync(
+      'git',
+      ['-C', worktreePath, 'diff', '--cached', '--binary', '--no-color', 'HEAD'],
+      { timeout: 30_000, maxBuffer: GIT_MAX_BUFFER, env: { ...process.env, GIT_INDEX_FILE: tempIndexPath } },
+    ));
+  } catch (error) {
+    throw new ChangeSetCaptureError(
+      'CHANGESET_CAPTURE_FAILED',
+      `git diff --cached failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      error instanceof Error ? error : undefined,
+    );
+  }
+
+  const patchSize = Buffer.byteLength(fullPatch, 'utf8');
+  if (patchSize > MAX_PATCH_BYTES) {
+    throw new ChangeSetCaptureError(
+      'CHANGESET_TOO_LARGE',
+      `Generated patch is ${patchSize} bytes, exceeding MAX_PATCH_BYTES limit of ${MAX_PATCH_BYTES} bytes. ` +
+        `The change-set is too large for v0.1 inline delivery. Retry with smaller scope.`,
+    );
+  }
+
+  return fullPatch;
 }
 
 /**
  * When HEAD does not exist (no commits), generate a patch representing
  * all tracked/untracked files as additions.
  */
-async function generateUntrackedOnlyPatch(
+async function getUntrackedOnlyPatch(
   worktreePath: string,
-): Promise<{ patch: string; truncated: boolean }> {
-  const { stdout: lsFiles } = await execFileAsync(
-    'git',
-    ['-C', worktreePath, 'ls-files', '--cached', '--others', '--exclude-standard'],
-    { timeout: 10_000, maxBuffer: GIT_MAX_BUFFER },
-  );
+): Promise<string> {
+  let lsFiles: string;
+  try {
+    ({ stdout: lsFiles } = await execFileAsync(
+      'git',
+      ['-C', worktreePath, 'ls-files', '--cached', '--others', '--exclude-standard'],
+      { timeout: 10_000, maxBuffer: GIT_MAX_BUFFER },
+    ));
+  } catch (error) {
+    throw new ChangeSetCaptureError(
+      'CHANGESET_CAPTURE_FAILED',
+      `git ls-files failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      error instanceof Error ? error : undefined,
+    );
+  }
 
   const files = lsFiles.split('\n').filter((f) => f.length > 0);
   if (files.length === 0) {
-    return { patch: '', truncated: false };
+    return '';
   }
 
   const parts: string[] = [];
@@ -160,11 +216,16 @@ async function generateUntrackedOnlyPatch(
   }
 
   const patch = parts.join('\n');
-  if (Buffer.byteLength(patch, 'utf8') <= MAX_PATCH_BYTES) {
-    return { patch, truncated: false };
+  const patchSize = Buffer.byteLength(patch, 'utf8');
+  if (patchSize > MAX_PATCH_BYTES) {
+    throw new ChangeSetCaptureError(
+      'CHANGESET_TOO_LARGE',
+      `Generated patch for untracked files is ${patchSize} bytes, exceeding MAX_PATCH_BYTES limit of ${MAX_PATCH_BYTES} bytes. ` +
+        `The change-set is too large for v0.1 inline delivery. Retry with smaller scope.`,
+    );
   }
 
-  return { patch: patch.substring(0, MAX_PATCH_BYTES), truncated: true };
+  return patch;
 }
 
 async function repoHasHead(worktreePath: string): Promise<boolean> {
@@ -192,7 +253,7 @@ function cleanupTempIndex(tempIndexPath: string): void {
 
 export class ChangeSetCaptureError extends Error {
   constructor(
-    readonly code: string,
+    readonly code: ChangeSetCaptureErrorCode,
     message: string,
     readonly cause?: Error,
   ) {
