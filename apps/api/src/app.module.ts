@@ -14,6 +14,7 @@ import { AoeImportModule } from './modules/aoe-import/aoe-import.module';
 import { WorkflowRuntimeModule } from './modules/workflow-runtime/workflow-runtime.module';
 import { ProviderRegistryModule } from './modules/provider-registry/provider-registry.module';
 import { GovernedRuntimeModule } from './modules/governed-runtime/governed-runtime.module';
+import { AgentWorkforceModule } from './modules/agent-workforce/agent-workforce.module';
 
 /**
  * Seit Sprint 2 gibt es keine `TenantMiddleware` mehr. Authentifizierung
@@ -39,6 +40,7 @@ import { GovernedRuntimeModule } from './modules/governed-runtime/governed-runti
     WorkflowRuntimeModule,
     ProviderRegistryModule,
     GovernedRuntimeModule,
+    AgentWorkforceModule,
   ],
 })
 export class AppModule {}

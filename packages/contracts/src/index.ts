@@ -174,4 +174,6 @@ export {
   type InvocationError,
   type ExecutionPolicyResolutionContext,
   type ExecutionProfileResolutionContext,
+  GovernedSandboxConfig,
+  SandboxExecutionResult,
 } from './engineering/index.js';
