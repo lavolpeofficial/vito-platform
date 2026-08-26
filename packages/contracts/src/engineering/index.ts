@@ -54,6 +54,10 @@ export {
   type ProviderCapabilityAssignment,
 } from './provider-registry.js';
 export {
+  OperatorTaskStatus,
+  type OperatorTaskError,
+} from './operator-bridge.js';
+export {
   RoutingRejectionReason,
   ROUTING_REJECTION_MESSAGES,
   EligibilityPhase,

@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -87,7 +88,8 @@ function buildCorsOptions() {
 export async function createApp() {
   assertSecureProductionConfig();
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
+  configureBodyParsers(app);
 
   // Sprint 2.1: Security-Header per Helmet (u. a. Content-Security-Policy-
   // Basisschutz, X-Frame-Options, X-Content-Type-Options, HSTS in
@@ -127,6 +129,12 @@ export async function createApp() {
   }
 
   return app;
+}
+
+export function configureBodyParsers(app: NestExpressApplication): void {
+  // JSON escaping can expand a valid 512 KiB decoded prompt to roughly 3 MiB.
+  app.useBodyParser('json', { limit: 4 * 1024 * 1024 });
+  app.useBodyParser('urlencoded', { limit: 4 * 1024 * 1024, extended: true });
 }
 
 async function bootstrap() {

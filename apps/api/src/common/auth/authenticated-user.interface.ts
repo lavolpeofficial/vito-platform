@@ -14,4 +14,6 @@ export interface AuthenticatedUser {
   organizationId: string;
   role: UserRole;
   email: string;
+  isMachineIdentity: boolean;
+  machineScope: string | null;
 }
