@@ -6,7 +6,7 @@ system: vito-platform
 subsystem: operator-bridge
 status: PROPOSED
 created: 2026-08-25
-updated: 2026-08-25
+updated: 2026-08-26
 author: VITO Engineering
 review_gate: ARCHITECTURE_REVIEW
 related_pr: null
@@ -16,7 +16,7 @@ superseded_by: null
 baseline:
   branch: main
   sha: "cc0250278b3265caa8ad4b789a1f9091255fdefe"
-revision: 3
+revision: 4
 ---
 
 # VITO Operator Bridge v0.1 -- Engineering Record
@@ -120,10 +120,10 @@ External Operator (ChatGPT / future clients)
   |
   v
 +-------------------------------+
-| OPERATOR BRIDGE GUARD         |  <-- OperatorBridgeGuard (scoped permissions)
-|  - @OperatorScope('vito-bridge') |
-|  - role >= MEMBER             |
-|  - operator_scope validation  |
+| GLOBAL MACHINE-SCOPE GUARD    |  <-- ScopedMachineIdentityGuard (APP_GUARD)
+|  - deny scoped identities by default |
+|  - @MachineScope('vito-bridge') opt-in |
+|  - exact DB-derived scope match |
 +-------------------------------+
   |
   v
@@ -192,17 +192,19 @@ The Operator Bridge is **inside the same VITO NestJS application process**. Ther
 External operator credential (JWT Bearer token)
   -> JwtAuthGuard (global APP_GUARD, request-scoped)
        -> Passport JwtStrategy.validate()
-            -> DB-verified: user exists, org matches, status ACTIVE, token_version matches
-       -> TenantContext.set({ organizationId, userId, role, authenticationMethod: 'jwt' })
+             -> DB-verified: user exists, org matches, status ACTIVE, token_version matches
+             -> DB-derived User.isMachineIdentity/machineScope copied to request.user
+        -> TenantContext.set({ organizationId, userId, role, authenticationMethod: 'jwt' })
+  -> ScopedMachineIdentityGuard (global APP_GUARD)
+       -> unscoped human identity: pass through unchanged
+       -> scoped identity: require exact @MachineScope(...) metadata; otherwise 403
   -> RolesGuard (global APP_GUARD, request-scoped)
        -> @Roles(MEMBER, ADMIN, OWNER) check
-  -> OperatorBridgeGuard (method-scoped)
-       -> @OperatorScope('vito-bridge') check
-       -> operator_scope claim validation
+  -> @MachineScope('vito-bridge') on both bridge routes
   -> OperatorBridgeController.dispatch()
        -> reads TenantContext.getOrThrow() for organizationId
        -> OperatorBridgeService.submitTask()
-            -> internal call to AgentWorkforceService.dispatch()
+             -> internal call to AgentWorkforceService.dispatch()
 ```
 
 The long-lived credential (JWT) exists **only at the external authentication boundary**. It never enters:
@@ -211,30 +213,54 @@ The long-lived credential (JWT) exists **only at the external authentication bou
 - Sandbox environment
 - Provider execution context
 
-### 3.2 v0.1 Decision: Scoped Service Credential via Existing Auth Stack
+### 3.2 v0.1 Decision: Globally Restricted Machine Identity via Existing Auth Stack
 
 **A compromised operator credential must not automatically become general VITO ADMIN authority.**
 
 The existing auth system has four roles: `OWNER > ADMIN > MEMBER > VIEWER`. The operator service account must not receive `OWNER` or `ADMIN` roles, as those grant access to unrelated administrative surfaces (user management, source vault, audit query, digital employee management).
 
-#### Chosen approach: Scoped service user + dedicated bridge guard
+#### Chosen approach: Scoped service user + global fail-closed machine-scope guard
 
 | Component | Decision | Rationale |
 |-----------|----------|-----------|
-| **Service account role** | `MEMBER` | Excludes OWNER/ADMIN surfaces (user mgmt, source vault, audit, digital employees). MEMBER can write tasks; bridge guard further restricts to bridge-only operations. |
-| **JWT payload** | Standard `JwtPayload` (`sub`, `org_id`, `role`, `token_version`) | No auth stack changes. `role: 'MEMBER'` embedded in existing JWT structure. |
-| **Operator scope claim** | Custom claim via `JwtStrategy`: extend `AuthenticatedUser` with `operatorScope?: string` | Resolved from `User.metadata` (JSON field) during `JwtStrategy.validate()`. Lightweight; no new table. |
-| **Bridge guard** | `OperatorBridgeGuard` with `@OperatorScope('vito-bridge')` decorator | Validates `operatorScope === 'vito-bridge'` on `TenantContext`. Methods without the decorator pass through. |
+| **Service account role** | `MEMBER` | Excludes OWNER/ADMIN surfaces; the global machine-scope guard further restricts the identity to bridge-only operations. |
+| **JWT payload** | Standard `JwtPayload` (`sub`, `org_id`, `role`, `token_version`) | The scope is deliberately not copied into the token, so DB changes revoke or change scope on the next request. |
+| **Machine identity source** | `User.isMachineIdentity` (default `false`) plus nullable `User.machineScope`; bridge account uses `true` + `vito-bridge` | The stable discriminator prevents clearing a scope from silently converting a machine account into an unrestricted human MEMBER. |
+| **Authenticated principal** | `JwtStrategy` returns both DB fields on `AuthenticatedUser` / `request.user` | Classification and scope are re-read from the database on every authenticated request. They are not added to `TenantContext`, which remains tenant/RBAC context only. |
+| **Global scope guard** | `ScopedMachineIdentityGuard` registered as `APP_GUARD` after `JwtAuthGuard` and before `RolesGuard` | A machine identity is denied unless the route has an exact matching `@MachineScope(...)`. Missing, empty, unknown, or mismatched values fail closed. Inconsistent human+scope data also fails closed. |
+| **Bridge route policy** | Both bridge methods use `@MachineScope('vito-bridge')` and `@Roles(MEMBER)` | Only the intended machine scope reaches the bridge; role and scope are conjunctive. An unscoped human MEMBER does not satisfy the machine-only bridge policy. |
+
+#### Global authorization invariant
+
+> **An authenticated identity carrying any machine scope is denied from every endpoint unless that endpoint explicitly accepts that exact scope.**
+
+This is a global authorization invariant, not a bridge-controller convention. Existing endpoints without `@MachineScope(...)` remain available to ordinary unscoped humans under their current JWT and role rules, but are denied to all machine-scoped identities. In v0.1, the only opt-in endpoints are:
+
+```
+POST /v1/operator/tasks
+GET  /v1/operator/tasks/:taskId
+```
+
+| Principal state | Route metadata | Guard result |
+|-----------------|----------------|--------------|
+| Human (`isMachineIdentity=false`, scope null) | No machine scope | Pass through to existing RolesGuard behavior |
+| Human | `@MachineScope(...)` | Deny; bridge routes are machine-only |
+| Machine + exact non-empty scope | Matching `@MachineScope(...)` | Pass through to RolesGuard |
+| Machine + null/empty/unknown/mismatched scope | Any route | Deny |
+| Machine + valid scope | No metadata | Deny |
+| Inconsistent human + non-null scope | Any route | Deny fail-closed |
+
+`JwtAuthGuard` must also authenticate a presented Bearer token on `@Public()` routes before allowing the public route to proceed. Anonymous public access remains unchanged; a request that presents a machine credential remains subject to the global scope guard and cannot bypass it by targeting a public route. Invalid presented credentials fail authentication rather than degrading to anonymous access.
 
 #### What this protects against
 
 | Threat | Mitigation |
 |--------|------------|
-| Compromised operator credential accesses user management | `MEMBER` role excluded from `@Roles(OWNER, ADMIN)` endpoints |
+| Compromised operator credential accesses any unrelated endpoint | Global `ScopedMachineIdentityGuard` denies every route without exact `@MachineScope('vito-bridge')`, including unrelated MEMBER and public routes |
 | Compromised operator credential queries other tenants | `TenantContext.organizationId` bound to JWT; cross-tenant queries rejected |
 | Compromised operator credential accesses source vault | `@Roles(OWNER, ADMIN)` on source vault endpoints; `MEMBER` denied |
 | Compromised operator credential modifies audit records | Audit endpoints are read-only and `@Roles(OWNER, ADMIN)` protected |
-| Credential enters prompts/payloads/logs | Never; enforced by code convention (credential exists only in `Authorization` header, parsed once by Passport, stored in `TenantContext` as `organizationId`/`userId`/`role` only) |
+| Credential enters prompts/payloads/logs | Never; the credential exists only in the `Authorization` header and Passport boundary; only identity attributes are retained on `request.user` and tenant attributes in `TenantContext` |
 
 #### Credential storage topology
 
@@ -243,18 +269,20 @@ External connector/client credential vault
   -> HTTPS Authorization header
   -> VITO ingress (JwtAuthGuard / Passport)
   -> Verified user/org from DB
+  -> request.user populated (org, userId, role, DB-derived machine classification/scope)
   -> TenantContext populated (org, userId, role only)
-  -> Bridge guard validates scope
+  -> Global machine-scope guard validates exact route opt-in
 ```
 
-**VITO must not store its own incoming Bearer token in OperatorBridge configuration.** The credential vault lives outside VITO (external client responsibility). VITO stores only the service account `User` record with `role: MEMBER` and `operatorScope: 'vito-bridge'` in `metadata`.
+**VITO must not store its own incoming Bearer token in OperatorBridge configuration.** The credential vault lives outside VITO (external client responsibility). VITO stores only the service account `User` record with `role: MEMBER`, `isMachineIdentity: true`, and `machineScope: 'vito-bridge'`. Machine classification is not cleared during revocation; suspension/deletion or `tokenVersion` invalidation revokes the account, while a null scope on a machine identity denies all endpoint access.
 
 ### 3.3 Why Not Other Options
 
 | Option | Rejected Because |
 |--------|-----------------|
 | **General OWNER/ADMIN credential** | Exposes user management, source vault, audit, digital employee admin, and all other OWNER/ADMIN endpoints. A compromised credential becomes a full VITO admin. **BLOCKER** by review. |
-| **Dedicated `OperatorServiceCredentialGuard` (new table, API-key hash)** | Cleanest long-term solution but requires a new credential issuance/storage/rotation system. Excessive scope for v0.1 where an existing `MEMBER` user with a scoped JWT suffices. Deferred to v0.2. |
+| **Method-scoped bridge-only guard** | Insufficient: the same scoped MEMBER identity could call unrelated MEMBER endpoints because undecorated methods would pass through. |
+| **Dedicated `OperatorServiceCredentialGuard` (new table, API-key hash)** | Cleanest long-term credential system but excessive for v0.1; the global scope restriction supplies least privilege while preserving the existing JWT lifecycle. Deferred to v0.2. |
 | **OAuth2 client credentials flow** | Requires OAuth2 infrastructure (token endpoint, client registration). Overengineered for v0.1. Deferred. |
 | **IP allowlist only** | Insufficient for machine-to-machine auth; no identity, no tenant binding, no revocation. |
 
@@ -262,12 +290,15 @@ External connector/client credential vault
 
 - JWT bound to a specific organization (`org_id` claim) and role (`MEMBER`)
 - Per-request DB verification ensures user and org remain active (`JwtStrategy.validate()`)
+- Per-request DB resolution of machine classification and scope makes authorization changes effective on the next request
 - `tokenVersion` allows immediate revocation (increment `User.tokenVersion`)
-- `@Roles(MEMBER, ADMIN, OWNER)` enforced by `RolesGuard` -- OWNER/ADMIN endpoints unreachable with MEMBER credential
-- `@OperatorScope('vito-bridge')` enforced by `OperatorBridgeGuard` -- only bridge endpoints reachable
+- `ScopedMachineIdentityGuard` is global and default-deny for every machine-scoped principal
+- `@MachineScope('vito-bridge')` appears only on the two bridge routes in v0.1
+- `@Roles(MEMBER)` is evaluated in addition to the machine scope
 - Bridge controller reads `organizationId` from `TenantContext` only -- never from request body
 - Credential never enters prompts, payloads, logs, sandbox environment, or provider payload
 - Service account `User` record is a standard VITO user with standard lifecycle (can be suspended/deleted)
+- Ordinary users with `isMachineIdentity = false` and `machineScope = null` continue through the existing JWT/Roles authorization behavior unchanged
 
 ---
 
@@ -294,7 +325,7 @@ interface SubmitOperatorTaskRequest {
   /** Capability code identifying the needed capability. */
   readonly capabilityCode: string;
 
-  /** Bounded instruction/prompt (1-524288 chars). */
+  /** Bounded instruction/prompt (1-524288 UTF-8 bytes). */
   readonly prompt: string;
 
   /** Optional assurance level. */
@@ -332,11 +363,11 @@ interface SubmitOperatorTaskResponse {
   /** Correlation ID for audit trail. */
   readonly correlationId: string;
 
-  /** Task status (terminal on success/failure). */
+  /** Terminal for the owner; may be DISPATCHING for an idempotent in-flight return. */
   readonly status: OperatorTaskStatus;
 
-  /** Routing decision ID. */
-  readonly routingDecisionId: string;
+  /** Routing decision ID, absent until routing has produced one. */
+  readonly routingDecisionId: string | null;
 }
 
 /** Full result from GET /v1/operator/tasks/:taskId */
@@ -345,6 +376,10 @@ interface OperatorTaskResult {
   readonly requestId: string;
   readonly status: OperatorTaskStatus;
   readonly correlationId: string;
+
+  /** Stable bridge-generated correlation identities required by dispatch. */
+  readonly workflowRunId: string;
+  readonly workflowStepRunId: string;
 
   /** Execution IDs for audit trail. */
   readonly invocationId?: string;
@@ -358,17 +393,20 @@ interface OperatorTaskResult {
 
   readonly capabilityCode: string;
 
+  /** Original prompt while the sensitive payload is retained. */
+  readonly prompt: string | null;
+
   /** Bounded stdout summary (truncated to MAX_SAFE_TEXT_LENGTH = 2000). */
-  readonly stdout?: string;
+  readonly stdout: string | null;
 
   /** Bounded stderr summary (truncated to MAX_SAFE_TEXT_LENGTH = 2000). */
-  readonly stderr?: string;
+  readonly stderr: string | null;
 
   /** Changed files list. */
   readonly changedFiles?: readonly string[];
 
   /** Governed patch (sensitive engineering payload -- see Section 12). */
-  readonly patch?: string;
+  readonly patch: string | null;
 
   /** Typed error if failed. */
   readonly error?: {
@@ -390,8 +428,14 @@ interface OperatorTaskResult {
   /** Whether human review is required. */
   readonly reviewRequired: boolean;
 
-  /** Sensitive payload expiry (if applicable). */
-  readonly sensitivePayloadExpiresAt?: string;
+  /** True only while sensitive fields remain available in storage. */
+  readonly sensitivePayloadAvailable: boolean;
+
+  /** Configured expiry; retained after deletion as audit metadata. */
+  readonly sensitivePayloadExpiresAt: string;
+
+  /** Actual deletion time, null until the payload is physically cleared. */
+  readonly sensitivePayloadDeletedAt: string | null;
 
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -400,45 +444,49 @@ interface OperatorTaskResult {
 
 ### 4.4 Synchronous Semantics (Corrected)
 
-**v0.1: Fully synchronous execution with POST.**
+**v0.1: Synchronous owner execution with idempotent in-flight returns.**
 
 The lifecycle of a single `POST /v1/operator/tasks` request:
 
-1. **Persist `OperatorTask`** in `RECEIVED` status (before dispatch, so retry is idempotent)
-2. **Invoke `AgentWorkforceService.dispatch()` synchronously** (await the full governed pipeline)
-3. **Persist terminal result** in `OperatorTask` (COMPLETED, HUMAN_GATE, or FAILED)
-4. **Return `SubmitOperatorTaskResponse`** with terminal status
+1. Compute the canonical request fingerprint before opening a transaction and resolve the authenticated `(organizationId, requestId)` key.
+2. **Transaction A:** atomically resolve or create the task directly in dispatch-owned `DISPATCHING` state, then commit.
+3. If this request did not acquire ownership, return the existing terminal or `DISPATCHING` task without calling dispatch.
+4. **Outside every database transaction, only the owner invokes `AgentWorkforceService.dispatch()` synchronously.**
+5. **Transaction B:** persist the mapped terminal result (`COMPLETED`, `HUMAN_GATE`, or `FAILED`) and commit.
+6. Return the persisted terminal response. A duplicate request may instead return the existing `DISPATCHING` response immediately.
 
-The governed execution runs **within the HTTP request lifecycle**. There is no background job queue, no decoupled worker, and no durable async execution in v0.1.
+The governed execution runs **within the dispatch owner's HTTP request lifecycle**, but with no Prisma transaction open. There is no background job queue, no decoupled worker, and no durable async execution in v0.1.
 
 **Client disconnect during execution:**
 - If the client disconnects (HTTP timeout, network failure) while `AgentWorkforceService.dispatch()` is running, the NestJS request lifecycle may be aborted.
 - The governed invocation pipeline (`GovernedInvocationServiceImpl.invoke()`) will continue to completion within the Node.js event loop until the adapter returns or the governed timeout fires.
-- The `OperatorTask` may or may not be updated to terminal status depending on whether the `finally` block in the controller executes.
-- If the task remains in `RECEIVED` or `DISPATCHING` status after client disconnect, it is a **stale in-flight task** -- not a durable background job.
+- The service attempts Transaction B after dispatch returns even if the client disconnects, but process termination or interruption can prevent terminal persistence.
+- If the task remains in `DISPATCHING`, it is a **stale in-flight task** -- not a durable background job.
 - The client can poll via `GET /v1/operator/tasks/:taskId` and will see either the terminal result or a non-terminal status.
-- **No automatic retry or resumption of stale tasks is provided in v0.1.** The client may resubmit with the same `requestId` and same `requestFingerprint` (idempotent -- returns existing task if already terminal, or re-dispatches if still in RECEIVED).
+- **No automatic retry, reclaim, resumption, or redispatch of stale tasks is provided in v0.1.** Re-submission with the same `requestId` and fingerprint returns the existing `DISPATCHING` task. A caller that intentionally wants a new logical execution must submit a new `requestId`.
+
+#### Crash/interruption trade-off
+
+v0.1 deliberately prefers a stale `DISPATCHING` task over accidental double execution. A crash after Transaction A may leave a task permanently `DISPATCHING`, whether dispatch had not started, was interrupted, or completed without Transaction B. Duplicate callers cannot distinguish those cases safely and therefore **MUST NOT redispatch**. Automatic lease expiry, abandoned-task recovery, and reclaim are deferred to v0.2 together with durable background execution.
 
 **Durable background execution is deferred to v0.2** (requires a job queue such as BullMQ or a Postgres-backed outbox pattern).
 
 ---
 
-## 5. Operator Task State Machine (Simplified)
+## 5. Operator Task State Machine and Dispatch Ownership
 
 ### 5.1 States
 
 ```
-RECEIVED
-  -> DISPATCHING
-       -> COMPLETED | HUMAN_GATE | FAILED
+DISPATCHING
+  -> COMPLETED | HUMAN_GATE | FAILED
 ```
 
 ### 5.2 State Definitions
 
 | State | Description | Entry Condition | Persistence |
 |-------|-------------|-----------------|-------------|
-| `RECEIVED` | Task received and persisted; idempotency resolved | HTTP request arrives; OperatorTask created (transactional) | Persisted before dispatch |
-| `DISPATCHING` | Submitted to `AgentWorkforceService.dispatch()`; awaiting governed pipeline | Service call initiated | Persisted before `dispatch()` call |
+| `DISPATCHING` | Dispatch ownership has been durably claimed; execution may be pending, active, interrupted, or stale | Transaction A creates the task and commits | Persisted before `dispatch()`; never reclaimable in v0.1 |
 | `COMPLETED` | Execution completed; result delivered to client | Dispatch returned terminal success | Terminal |
 | `HUMAN_GATE` | Task policy-blocked; requires human approval | `evaluatePolicy()` returned non-ALLOW | Terminal |
 | `FAILED` | Task failed (terminal) | Any terminal error from dispatch | Terminal |
@@ -447,16 +495,17 @@ RECEIVED
 
 For synchronous v0.1, there is **no runtime callback** that updates `OperatorTask` while the governed pipeline is executing. The bridge calls `AgentWorkforceService.dispatch()` synchronously and awaits the full result. When dispatch returns, the result is immediately terminal.
 
-There is no intermediate `RUNNING` state to persist because:
+There is no `RECEIVED` or `RUNNING` state to persist because:
+- Creation directly as `DISPATCHING` makes the unique row itself the dispatch-ownership claim; there is no persisted pre-claim state that duplicate callers could redispatch
 - The governed pipeline's internal states (`AgentExecutionStatus.RUNNING`, etc.) are already tracked by the existing `GovernedExecutionRecord`
 - The bridge has no callback mechanism to observe or update intermediate states
-- Claiming a `RUNNING` state on `OperatorTask` would be dishonest -- the bridge cannot confirm execution is actively running
+- `DISPATCHING` means ownership was claimed, not that execution is confirmed active
 
 Similarly, `RESULT_READY` is collapsed into the terminal states (`COMPLETED`, `HUMAN_GATE`, `FAILED`) because the result is returned in the same HTTP response.
 
 ### 5.4 What Is NOT a Persisted Task State
 
-**Authentication and authorization are guard-layer decisions, not task lifecycle states.** `JwtAuthGuard`, `RolesGuard`, and `OperatorBridgeGuard` execute before the controller handler and before any `OperatorTask` record is created. If auth fails, the request is rejected with 401/403 -- no task record is created, no audit entry is written for a non-existent task.
+**Authentication and authorization are guard-layer decisions, not task lifecycle states.** `JwtAuthGuard`, `ScopedMachineIdentityGuard`, and `RolesGuard` execute before the controller handler and before any `OperatorTask` record is created. If auth fails, the request is rejected with 401/403 -- no task record is created, no audit entry is written for a non-existent task.
 
 The states `AUTHENTICATED` and `AUTHORIZED` from v0.1 design revision 1 are removed. They are implicitly satisfied when a task record exists (task creation requires passing all guards).
 
@@ -466,8 +515,7 @@ The bridge state machine is a **view** over existing internal states. It does **
 
 | Bridge State | Internal State(s) |
 |-------------|-------------------|
-| `RECEIVED` | `OperatorTask.status = RECEIVED` (no internal state yet) |
-| `DISPATCHING` | `GovernedOperationEnvelope.status = PENDING` |
+| `DISPATCHING` | Bridge ownership claim committed; an internal envelope may not exist yet |
 | `COMPLETED` | `AgentExecutionStatus.SUCCEEDED` + `OperatorTask.status = COMPLETED` |
 | `HUMAN_GATE` | `AgentExecutionStatus.POLICY_BLOCKED` + `PolicyReasonCode.RELEASE_GATE_NOT_APPROVED` |
 | `FAILED` | `AgentExecutionStatus.FAILED` or `TIMED_OUT` or other terminal error |
@@ -564,12 +612,14 @@ No automated downstream actions (auto-merge, auto-deploy, etc.) are triggered in
 | T8 | **Result/patch exfiltration** | `redactSecretMaterial()` applied to all output; `sanitizeGovernedReferenceList()` filters non-gov:// refs; patch logged only as size; `workspaceDisposition: 'CLEANED'` |
 | T9 | **Secret leakage** | `CredentialBroker` provides reference-only at adapter boundary; secrets never enter prompts, audit, or result; `redactTrustedSecretsDeep()` applied recursively |
 | T10 | **Task-result enumeration** | taskId is UUID (unpredictable); queries scoped to authenticated `organizationId`; no bulk enumeration endpoint in v0.1 |
-| T11 | **Duplicate dispatch** | `requestId` + `requestFingerprint` idempotency at bridge (tenant-scoped); `GovernedInvocationIdempotencyStore` at invocation level; `buildGovernedLogicalOperationKey()` prevents duplicate consequential actions |
-| T12 | **Client disconnect/retry** | Task persists with terminal status if pipeline completes; `GET /v1/operator/tasks/:taskId` returns cached result; re-submission with same `requestId` + same fingerprint returns existing task |
-| T13 | **Compromised bridge credential** | Service account is `MEMBER` role; `@OperatorScope('vito-bridge')` restricts to bridge endpoints only; `tokenVersion` revocation; org-scoped; credential never enters prompts/payloads/logs |
+| T11 | **Duplicate dispatch** | Transaction A creates one tenant-scoped unique row directly as `DISPATCHING`; only the successful creator owns dispatch; unique-race losers re-read and never dispatch; existing governed invocation idempotency remains defense in depth |
+| T12 | **Client disconnect/retry** | Same-key retries return the existing terminal or `DISPATCHING` task; stale ownership is never reclaimed in v0.1, preferring possible non-execution over accidental double execution |
+| T13 | **Compromised bridge credential** | Global `ScopedMachineIdentityGuard` denies the scoped MEMBER from every endpoint except exact `@MachineScope('vito-bridge')` opt-ins; tokenVersion revocation; org scoping; credential never enters payloads/logs |
 | T14 | **Patch body in audit logs** | Patch is classified as sensitive engineering payload (Section 12); audit records store only changed-file count and patch byte size, never the patch body |
-| T15 | **Stale task confusion** | Tasks that remain in non-terminal status after client disconnect are explicitly documented as stale; no automatic retry/resumption; client must re-submit or poll |
+| T15 | **Stale task confusion** | `DISPATCHING` means ownership claimed, not confirmed liveness; no automatic retry, reclaim, or resumption; same-key submission only returns the row; a new logical attempt requires a new requestId |
 | T16 | **Idempotency fingerprint mismatch** | Same `requestId` + different `requestFingerprint` -> fail closed with `OPERATOR_IDEMPOTENCY_CONFLICT`; prevents semantically different requests from appearing idempotent |
+| T17 | **Machine identity reaches unrelated MEMBER/public endpoint** | Every authenticated non-null machine scope is globally default-denied; route metadata must explicitly require the exact scope; presented Bearer tokens on public routes are authenticated before authorization |
+| T18 | **Expired sensitive payload retained** | Purgeable columns are nullable and actual deletion is represented explicitly; public production exposure is prohibited until a deployed cleanup mechanism physically enforces expiry |
 
 ---
 
@@ -579,17 +629,17 @@ No automated downstream actions (auto-merge, auto-deploy, etc.) are triggered in
 
 | Layer | v0.1 (Development) | v0.2 (Staging) | v0.3 (Production) |
 |-------|--------------------|----------------|--------------------|
-| **VITO API** | `localhost:3000` | Internal service | Internal service |
-| **Bridge endpoint** | `localhost:3000/v1/operator/*` | Same, behind reverse proxy | Same, behind reverse proxy |
-| **Network** | Local only | Reverse proxy (nginx/Caddy) | HTTPS + mTLS or VPN |
-| **ChatGPT access** | Not possible (localhost) | ChatGPT connector / custom plugin | OpenAI connector or MCP-style integration |
+| **VITO API** | `localhost:3000` | Internal service only | Public exposure blocked until retention gate passes |
+| **Bridge endpoint** | `localhost:3000/v1/operator/*` | Same, on trusted/internal network only | Eligible for HTTPS ingress only after cleanup is deployed and verified |
+| **Network** | Local only | Private network; temporary development tunnel only | HTTPS + mTLS or VPN after gate |
+| **ChatGPT access** | Not possible (localhost) | Deferred to OB-002; development tunnel only | Deferred to OB-002 and retention gate |
 
 ### 8.2 Development Path (Safest Incremental)
 
 1. **Local dev** (`localhost` only): Bridge runs on same NestJS server; tested via curl/Postman; no external access
 2. **Tunnel** (optional): `cloudflared tunnel` or `ngrok` for temporary external access; development only; never production
-3. **Reverse proxy** (staging): HTTPS termination; rate limiting; IP allowlist
-4. **Production**: Dedicated HTTPS endpoint; WAF; ChatGPT connector/plugin for programmatic access
+3. **Internal staging**: Private reverse proxy; HTTPS termination; rate limiting; IP allowlist; no public ingress
+4. **Public production**: **FORBIDDEN in v0.1.** Eligibility requires an implemented, deployed, tested, and monitored payload-cleanup mechanism that physically clears expired sensitive fields
 
 ### 8.3 Do Not Assume ChatGPT Can Call Localhost
 
@@ -604,7 +654,7 @@ ChatGPT's function-calling and plugin systems require a publicly reachable HTTPS
 | **OpenAI Connector** | Custom connector for ChatGPT Enterprise | Deferred |
 | **Webhook callback** | Bridge posts results to ChatGPT webhook | Deferred |
 
-**v0.1 recommendation:** Design the bridge API to be OpenAPI-compatible so it can be used as a Custom GPT Action. The API contract itself is ChatGPT-agnostic.
+**v0.1 recommendation:** Keep the bridge API OpenAPI-compatible and ChatGPT-agnostic. Actual public ChatGPT connectivity remains the explicit VITO-OB-002 follow-on and cannot be enabled until the sensitive-payload cleanup deployment gate passes.
 
 ---
 
@@ -620,13 +670,14 @@ ChatGPT's function-calling and plugin systems require a publicly reachable HTTPS
 | `GovernedRuntimeService` | **No change** | Workspace file operations remain governed |
 | `GovernedInvocationServiceImpl` | **No change** | Invocation pipeline, policy, idempotency all preserved |
 | `RemoteExecutionWorker` | **No change** | Sandbox execution remains bounded |
-| `JwtAuthGuard` / `JwtStrategy` | **No change** | Existing JWT auth stack unchanged |
-| `RolesGuard` | **No change** | Existing role enforcement unchanged |
+| `JwtStrategy` / authenticated principal | **Minimal change** | Read DB-backed machine classification and scope into `request.user`; JWT claims remain unchanged |
+| `JwtAuthGuard` | **Minimal change** | Authenticate a presented Bearer token even on public routes so machine scope cannot bypass global authorization |
+| `RolesGuard` | **No policy change** | Existing role enforcement remains and runs after machine-scope authorization |
+| **New: global `ScopedMachineIdentityGuard`** | **New global guard** | Default-deny every machine-scoped identity except exact route opt-ins |
+| **New: `@MachineScope()` decorator** | **New decorator** | Declares the exact machine scope required by a route |
 | **New: `OperatorBridgeModule`** | **New module** | Thin translation layer |
 | **New: `OperatorBridgeController`** | **New controller** | `/v1/operator/tasks` endpoints |
 | **New: `OperatorBridgeService`** | **New service** | Intent -> dispatch translation, idempotency |
-| **New: `OperatorBridgeGuard`** | **New guard** | `@OperatorScope('vito-bridge')` scoped authorization |
-| **New: `@OperatorScope()` decorator** | **New decorator** | Method-level scope metadata |
 | **New: `OperatorTask` model** | **New Prisma model** | Persistent task state for external consumption |
 
 ### 9.2 Why Not Reuse `/agent-workforce/dispatch` Directly
@@ -645,24 +696,35 @@ The bridge facade absorbs this complexity: it creates the necessary internal rec
 ### 10.1 New Files
 
 ```
+apps/api/src/common/
+  decorators/
+    machine-scope.decorator.ts            -- @MachineScope() exact-scope metadata
+  guards/
+    scoped-machine-identity.guard.ts      -- global default-deny machine authorization
+    scoped-machine-identity.guard.spec.ts -- global guard policy tests
+
 apps/api/src/modules/operator-bridge/
   operator-bridge.module.ts              -- NestJS module definition
   operator-bridge.controller.ts          -- HTTP endpoints (POST /tasks, GET /tasks/:id)
-  operator-bridge.service.ts             -- Intent -> dispatch translation, idempotency
+  operator-bridge.service.ts             -- Transaction A/dispatch/Transaction B orchestration
+  operator-bridge.config.ts              -- TTL parsing and v0.1 public-exposure gate
+  operator-bridge.config.spec.ts         -- configuration and exposure-gate tests
   dto/
     submit-operator-task.dto.ts          -- Request validation DTO
-  operator-bridge.guard.ts               -- OperatorBridgeGuard (scoped authorization)
-  operator-bridge.scope.decorator.ts     -- @OperatorScope() decorator
+    submit-operator-task.dto.spec.ts     -- Request validation tests
   operator-bridge.service.spec.ts        -- Unit tests
   operator-bridge.controller.spec.ts     -- Controller tests
+  operator-bridge.pg.spec.ts             -- PostgreSQL transaction/race/purge integration tests
   idempotency.ts                         -- requestFingerprint computation
+  idempotency.spec.ts                    -- canonical fingerprint tests
 
 packages/contracts/src/engineering/
   operator-bridge.ts                     -- Shared types (OperatorTaskStatus, OperatorTaskError)
 
 prisma/
   migrations/
-    <timestamp>_add_operator_task/       -- OperatorTask table migration
+    20260826000000_add_operator_bridge/
+      migration.sql                      -- stable machine identity/scope + OperatorTask schema
 ```
 
 ### 10.2 Expected Modifications to Existing Files
@@ -671,17 +733,24 @@ The design goal is **minimal additive integration**. The following existing file
 
 | File | Modification | Reason |
 |------|-------------|--------|
-| `prisma/schema.prisma` | Add `OperatorTask` model + relation to `Organization` | New persistence model for external task state |
+| `.env.example` | Document `SENSITIVE_PAYLOAD_TTL_HOURS` and `OPERATOR_BRIDGE_EXPOSURE=internal` | Make retention intent and the v0.1 non-public deployment mode explicit |
+| `prisma/schema.prisma` | Add `User.isMachineIdentity`, `User.machineScope`, `OperatorTask`, and `Organization.operatorTasks` | Stable global machine classification and external task persistence |
 | `apps/api/src/app.module.ts` | Add `OperatorBridgeModule` to `imports` array | Register new module in application composition |
+| `apps/api/src/common/auth/authenticated-user.interface.ts` | Add `isMachineIdentity` and `machineScope` | Carry DB-derived machine classification and scope on `request.user` |
+| `apps/api/src/modules/auth/strategies/jwt.strategy.ts` | Return the current DB machine classification and scope | Authorization changes take effect per request without new JWT claims |
+| `apps/api/src/modules/auth/guards/jwt-auth.guard.ts` | Authenticate presented Bearer credentials on `@Public()` routes | Prevent scoped credentials from bypassing the global scope guard via public endpoints |
+| `apps/api/src/modules/auth/auth.module.ts` | Register `ScopedMachineIdentityGuard` globally between JWT and roles guards | Enforce machine-scope default denial across all modules |
+| `apps/api/test/app.e2e-spec.ts` | Add matching/wrong scope, unrelated MEMBER endpoint, public-route Bearer, and ordinary MEMBER regressions | Prove the global invariant through the composed application |
+| `apps/api/package.json` | Add mandatory `test:operator-bridge:pg` script | Make real PostgreSQL ownership/race tests an explicit implementation-gate command |
+| `packages/contracts/src/engineering/index.ts` | Export Operator Bridge contracts from the established engineering barrel | Preserve existing package export structure |
 | `packages/contracts/src/index.ts` | Add export for `OperatorTaskStatus` enum and `OperatorTaskError` | Shared type visibility across packages |
 
-**No modifications to any existing service, controller, guard, or adapter.** The integration is purely additive: one new module, one new Prisma model, one new import in `AppModule`.
+No existing execution service, provider router, governed runtime, adapter, worker, or controller is modified. `AgentWorkforceService.dispatch()` remains the unchanged execution entry point. The authorization changes above are required because bridge-only method guard composition cannot enforce the machine restriction globally.
 
 ### 10.3 Prisma Schema Addition
 
 ```prisma
 enum OperatorTaskStatus {
-  RECEIVED
   DISPATCHING
   COMPLETED
   HUMAN_GATE
@@ -695,10 +764,12 @@ model OperatorTask {
   requestId           String
   requestFingerprint  String
   correlationId       String
+  workflowRunId       String
+  workflowStepRunId   String
   capabilityCode      String
-  prompt              String   @db.Text
+  prompt              String?  @db.Text  // required on create; nullable only for retention cleanup
   assuranceLevel      String?
-  status              OperatorTaskStatus @default(RECEIVED)
+  status              OperatorTaskStatus // explicitly created as DISPATCHING
 
   // Execution budget
   maxDurationMs       Int?
@@ -727,7 +798,9 @@ model OperatorTask {
   durationMs          Int?
 
   // Sensitive payload retention
-  sensitivePayloadExpiresAt DateTime?
+  sensitivePayloadAvailable Boolean  @default(true)
+  sensitivePayloadExpiresAt DateTime
+  sensitivePayloadDeletedAt DateTime?
 
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
@@ -741,13 +814,21 @@ model OperatorTask {
   @@unique([organizationId, requestId])
   @@index([organizationId, status])
   @@index([organizationId, correlationId])
+  @@index([sensitivePayloadAvailable, sensitivePayloadExpiresAt])
   @@map("operator_tasks")
 }
 ```
 
-Additionally, the `Organization` model in `schema.prisma` must add:
+Additionally, `User` receives a stable machine discriminator plus exact nullable scope, and `Organization` receives the task relation:
 
 ```prisma
+model User {
+  // ... existing fields ...
+  isMachineIdentity Boolean @default(false)
+  machineScope      String?
+  // ... existing fields ...
+}
+
 model Organization {
   // ... existing fields ...
   operatorTasks OperatorTask[]
@@ -755,11 +836,13 @@ model Organization {
 }
 ```
 
+The migration adds a database check that prohibits `isMachineIdentity = false` with a non-null scope. A machine identity may have a null scope, but the global guard then denies every endpoint; this supports fail-closed de-scoping without converting the account to a human. Only `isMachineIdentity = true` with exact `machineScope = 'vito-bridge'` can satisfy the two v0.1 bridge route decorators. Both fields are immutable through the existing user API and are not emitted in ordinary user responses. Provisioning sets them through an authorized operational database process; revocation suspends/deletes the user or increments `tokenVersion`, and never flips `isMachineIdentity` to false.
+
 ### 10.4 Idempotency Semantics (Corrected)
 
 #### Request Fingerprint
 
-A **requestFingerprint** is a canonical logical-operation signature derived from the normalized request fields. It prevents semantically different requests from appearing idempotent when the same `requestId` is reused.
+A **requestFingerprint** is a canonical logical-operation signature derived from the exact validated fields that will be persisted and dispatched. It prevents semantically different requests from appearing idempotent when the same `requestId` is reused. Validation does not silently case-fold or trim capability and assurance values; if normalization is ever introduced, the same canonical object must drive fingerprinting, persistence, and dispatch.
 
 **Fingerprint computation** (`idempotency.ts`):
 
@@ -778,122 +861,153 @@ interface FingerprintInput {
 }
 
 function computeRequestFingerprint(input: FingerprintInput): string {
-  const normalized = JSON.stringify({
-    capabilityCode: input.capabilityCode.trim().toLowerCase(),
+  const canonical = JSON.stringify({
+    capabilityCode: input.capabilityCode,
     prompt: input.prompt,  // raw prompt, no normalization (whitespace is significant)
-    assuranceLevel: (input.assuranceLevel ?? 'standard').trim().toLowerCase(),
+    assuranceLevel: input.assuranceLevel ?? null,
     budget: {
       maxDurationMs: input.budget?.maxDurationMs ?? null,
       maxTokens: input.budget?.maxTokens ?? null,
       maxCostMinorUnits: input.budget?.maxCostMinorUnits ?? null,
     },
   });
-  return createHash('sha256').update(normalized).digest('hex');
+  return createHash('sha256').update(canonical).digest('hex');
 }
 ```
 
 The fingerprint is **persisted with `OperatorTask.requestFingerprint`** and used in the transactional create-or-resolve logic.
 
-#### Transactional Create-or-Resolve
+#### Transaction A: Atomic Claim/Create
 
-The idempotency check and task creation are performed in a **single PostgreSQL transaction** to prevent concurrent duplicate submissions from executing twice.
+The canonical fingerprint is computed **before** opening a transaction. Transaction A contains database operations only and commits before any agent code runs.
 
 **Semantics:**
 
 | Scenario | Behavior |
 |----------|----------|
-| Same `requestId` + same `organizationId` + same `requestFingerprint` | **Idempotent**: return existing task. If `RECEIVED`, re-dispatch. If terminal, return cached result. |
-| Same `requestId` + same `organizationId` + **different** `requestFingerprint` | **Conflict**: fail closed with `OPERATOR_IDEMPOTENCY_CONFLICT`. The client has reused a `requestId` for a semantically different operation. |
-| Same `requestId` + **different** `organizationId` | **Independent**: two completely separate tasks in separate tenants. No collision. |
-| Cross-tenant task lookup | **Rejected**: all queries filter by `organizationId` from JWT. No information leakage. |
+| Existing same tenant/request key + different fingerprint | Fail closed with `OPERATOR_IDEMPOTENCY_CONFLICT`; never dispatch |
+| Existing same tenant/request key + terminal state | Return the cached result; never dispatch |
+| Existing same tenant/request key + `DISPATCHING` | Return the existing in-flight/stale task; **never redispatch or reclaim** |
+| Absent same tenant/request key | Create directly as `DISPATCHING`; successful creator acquires dispatch ownership |
+| Same `requestId` + different `organizationId` | Independent tenant-scoped claims and executions |
+| Cross-tenant task lookup | Reject because every query includes the JWT-derived `organizationId` |
+
+The `@@unique([organizationId, requestId])` constraint is the ownership arbiter. An initial read is not sufficient because two transactions can both observe absence. If creation loses with Prisma `P2002`, that failed transaction is over; the loser re-reads the committed row using the normal Prisma client, verifies the fingerprint, and returns it. The loser **MUST NOT execute dispatch**. If the post-race row cannot be read, the request fails closed with an internal persistence error; it does not guess ownership.
+
+#### Dispatch: Outside Every Transaction
+
+Only a request whose committed Transaction A result has `ownsDispatch: true` may call `AgentWorkforceService.dispatch()`. No Prisma transaction object is passed to dispatch, and no transaction callback or interactive transaction remains open while the coding agent executes.
+
+#### Transaction B: Terminal Persistence
+
+Dispatch success, policy block, timeout, and thrown errors are mapped to one terminal update. A separate short Transaction B conditionally updates the owned `DISPATCHING` row and returns its persisted state. If Transaction B fails, the API returns a persistence failure and does not claim that a terminal result is durable; the row can remain stale `DISPATCHING` and is not redispatched in v0.1.
+
+When a future cleanup worker can overlap a long execution, Transaction B must not repopulate payload fields already deleted or expired. It always persists non-sensitive status/correlation/execution metadata. If the payload is still available and unexpired, it persists result payloads normally. If cleanup already ran or expiry passed during execution, Transaction B atomically nulls all four sensitive fields, sets `sensitivePayloadAvailable = false`, and sets `sensitivePayloadDeletedAt` if not already present. This prevents a produced-but-discarded result from being misrepresented as merely "not produced."
 
 **Implementation pattern:**
 
 ```typescript
-// Inside OperatorBridgeService.submitTask(), within a Prisma transaction:
 async submitTask(request: SubmitOperatorTaskRequest, context: TenantContext) {
-  const fingerprint = computeRequestFingerprint({
-    capabilityCode: request.capabilityCode,
-    prompt: request.prompt,
-    assuranceLevel: request.assuranceLevel,
-    budget: request.budget,
-  });
+  // Canonicalization and tenant/request-key resolution happen before Transaction A.
+  const fingerprint = computeRequestFingerprint(request);
+  const key = {
+    organizationId: context.organizationId,
+    requestId: request.requestId,
+  };
+  const newTaskIdentity = {
+    id: uuid(),
+    correlationId: uuid(),
+    workflowRunId: uuid(),
+    workflowStepRunId: uuid(),
+  };
+
+  let claim: { task: OperatorTask; ownsDispatch: boolean };
+  try {
+    claim = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.operatorTask.findUnique({
+        where: { organizationId_requestId: key },
+      });
+
+      if (existing) {
+        return this.resolveExisting(existing, fingerprint); // conflict or ownsDispatch: false
+      }
+
+      const task = await tx.operatorTask.create({
+        data: {
+          ...key,
+          ...newTaskIdentity,
+          userId: context.userId,
+          requestFingerprint: fingerprint,
+          capabilityCode: request.capabilityCode,
+          prompt: request.prompt,
+          assuranceLevel: request.assuranceLevel,
+          status: 'DISPATCHING',
+          maxDurationMs: request.budget?.maxDurationMs,
+          maxTokens: request.budget?.maxTokens,
+          maxCostMinorUnits: request.budget?.maxCostMinorUnits,
+          sensitivePayloadAvailable: true,
+          sensitivePayloadExpiresAt: this.computePayloadExpiry(),
+        },
+      });
+      return { task, ownsDispatch: true };
+    }); // Transaction A commits here.
+  } catch (error) {
+    if (!isOperatorRequestKeyConflict(error)) throw error;
+
+    // The losing transaction has rolled back. Re-read; never dispatch from this path.
+    const existing = await this.prisma.operatorTask.findUnique({
+      where: { organizationId_requestId: key },
+    });
+    if (!existing) throw new OperatorClaimPersistenceException();
+    claim = this.resolveExisting(existing, fingerprint); // always ownsDispatch: false
+  }
+
+  if (!claim.ownsDispatch) return this.toResponse(claim.task);
+
+  // No database transaction is open while the governed agent pipeline executes.
+  let terminal: TerminalOperatorTaskUpdate;
+  try {
+    const result = await this.agentWorkforceService.dispatch(
+      this.toAgentDispatchRequest(claim.task),
+    );
+    terminal = this.mapDispatchResult(result);
+  } catch (error) {
+    terminal = this.mapDispatchFailure(error);
+  }
 
   return this.prisma.$transaction(async (tx) => {
-    // 1. Check for existing task with same requestId
-    const existing = await tx.operatorTask.findUnique({
-      where: {
-        organizationId_requestId: {
-          organizationId: context.organizationId,
-          requestId: request.requestId,
-        },
-      },
-    });
-
-    if (existing) {
-      // 2a. Fingerprint mismatch -> conflict
-      if (existing.requestFingerprint !== fingerprint) {
-        throw new OperatorIdempotencyConflictException(existing.taskId);
-      }
-      // 2b. Fingerprint match -> idempotent return
-      return existing;
-    }
-
-    // 3. No existing task -> create and dispatch
-    const task = await tx.operatorTask.create({
-      data: {
-        organizationId: context.organizationId,
-        userId: context.userId,
-        requestId: request.requestId,
-        requestFingerprint: fingerprint,
-        correlationId: uuid(),
-        capabilityCode: request.capabilityCode,
-        prompt: request.prompt,
-        assuranceLevel: request.assuranceLevel,
-        maxDurationMs: request.budget?.maxDurationMs,
-        maxTokens: request.budget?.maxTokens,
-        maxCostMinorUnits: request.budget?.maxCostMinorUnits,
-        sensitivePayloadExpiresAt: this.computePayloadExpiry(),
-      },
-    });
-
-    // 4. Dispatch synchronously (outside transaction)
-    const result = await this.dispatch(task);
-
-    // 5. Update task to terminal state
-    await tx.operatorTask.update({
-      where: { id: task.id },
-      data: this.mapToTerminalUpdate(result),
-    });
-
-    return this.loadFinalTask(tx, task.id);
+    // Transaction B: persist terminal state and either retain or atomically clear payload.
+    return this.persistTerminalResult(tx, claim.task.id, terminal);
   });
 }
 ```
 
-**Concurrency protection:** The `@@unique([organizationId, requestId])` constraint ensures two concurrent submissions with the same `requestId` cannot both succeed. The second `create` call will throw a Prisma unique constraint violation, which is caught and resolved as an idempotent return (the first submission's task is returned).
+`resolveExisting()` compares the fingerprint before considering state. A match always returns `ownsDispatch: false`, whether status is terminal or `DISPATCHING`; no code path turns an existing row into dispatch ownership. The design therefore provides an at-most-one bridge dispatch claim, not automatic recovery.
+
+`isOperatorRequestKeyConflict()` accepts only Prisma `P2002` whose target is the `(organizationId, requestId)` unique constraint. UUID collisions or any other database error propagate and never enter the race-loser return path.
+
+`workflowRunId` and `workflowStepRunId` are bridge-generated UUID correlation identities persisted in Transaction A and passed unchanged to the existing `AgentWorkforceService.dispatch()` signature. They do not create or imply `WorkflowRun` / `WorkflowStepRun` records: the governed persistence models use these values as correlation fields rather than foreign keys. Persisting them ensures retries and audit queries observe stable identifiers without involving `WorkflowRuntimeService`.
 
 ### 10.5 Tests Required
 
-| Test Type | Scope | Count (est.) |
-|-----------|-------|--------------|
-| Unit: `OperatorBridgeService` | Intent translation, result normalization | 6-8 |
-| Unit: `computeRequestFingerprint()` | Deterministic fingerprint, normalization, collision resistance | 4-5 |
-| Unit: `OperatorBridgeGuard` | Operator authorization policy | 3-4 |
-| Unit: DTO validation | Request schema validation | 6-8 |
-| Integration: Submit task E2E | Full flow: submit -> dispatch -> result | 3-4 |
-| Integration: Idempotency E2E | Same requestId + same org + same fingerprint = same result | 2-3 |
-| Integration: Idempotency conflict E2E | Same requestId + same org + different fingerprint = OPERATOR_IDEMPOTENCY_CONFLICT | 2 |
-| Integration: Concurrency idempotency | Concurrent duplicate submissions (race condition) = only one task created | 2 |
-| Integration: Cross-tenant idempotency | Same requestId + different org = independent tasks | 2 |
-| Integration: Cross-tenant rejection | Different org cannot access tasks | 2 |
-| Integration: Budget enforcement | Budget limits enforced end-to-end | 2-3 |
-| Integration: Patch not in audit logs | Audit records store size, not body | 1-2 |
-| Integration: Sensitive payload expiry | `sensitivePayloadExpiresAt` set on task creation | 1-2 |
+| File | Required coverage |
+|------|-------------------|
+| `apps/api/src/common/guards/scoped-machine-identity.guard.spec.ts` | Human passes an ordinary route; exact machine scope passes an opted-in route; machine on an undecorated route fails; machine with null/wrong/empty/unknown scope fails; inconsistent human+scope fails; human on a machine-required route fails |
+| `apps/api/src/modules/operator-bridge/idempotency.spec.ts` | Stable canonical fingerprint; case/whitespace significance; omitted versus explicit assurance; budget/default distinctions; same canonical object persisted/dispatched |
+| `apps/api/src/modules/operator-bridge/dto/submit-operator-task.dto.spec.ts` | UUID, exact UTF-8 byte limit, capability, assurance, and budget validation |
+| `apps/api/src/modules/operator-bridge/operator-bridge.service.spec.ts` | Intent translation with stable persisted workflow IDs; Transaction A commit before dispatch; no transaction client reaches dispatch; existing terminal and existing `DISPATCHING` never dispatch; all dispatch outcomes enter Transaction B; thrown dispatch error maps to FAILED; Transaction B failure is surfaced without a false terminal response; patch body absent from bridge audit events |
+| `apps/api/src/modules/operator-bridge/operator-bridge.controller.spec.ts` | Tenant context use, POST owner/duplicate response shapes, tenant-scoped GET, purged GET representation |
+| `apps/api/src/modules/operator-bridge/operator-bridge.pg.spec.ts` | Real PostgreSQL unique races, one owner/one dispatch, different-fingerprint conflict, cross-tenant independence, Transaction B before/after expiry, cleanup overlap, and atomic payload clearing semantics |
+| `apps/api/src/modules/operator-bridge/operator-bridge.config.spec.ts` | TTL parsing; internal/local mode allowed; `OPERATOR_BRIDGE_EXPOSURE=public` rejected in v0.1, including production |
+| `apps/api/test/app.e2e-spec.ts` | Composed auth and API behavior: `vito-bridge` machine allowed on both bridge routes; same identity denied on unrelated `POST /tasks`; ordinary MEMBER retains existing `/tasks` behavior; machine with null/wrong scope denied from bridge; scoped Bearer denied on unrelated public route; cross-tenant GET rejected; suspension/token-version revokes machine access without reclassifying it as human |
+
+The test double around Prisma must expose transaction lifetime so the service test can assert that `AgentWorkforceService.dispatch()` begins only after Transaction A has resolved and no transaction callback is active. A simple call-order assertion without transaction-lifetime tracking is insufficient.
+
+The implementation gate runs `OPERATOR_BRIDGE_TEST_DATABASE_URL=<isolated-postgres-url> pnpm --filter @vito/api test:operator-bridge:pg`. The script applies migrations to an isolated database, runs `operator-bridge.pg.spec.ts` serially, and fails rather than skips when the URL is absent. This is intentionally separate from unit tests so the ownership proof cannot silently pass without PostgreSQL.
 
 ### 10.6 Concurrency Idempotency Tests (Detailed)
 
-These tests verify that concurrent duplicate submissions cannot execute twice.
+These PostgreSQL-backed tests verify that concurrent duplicate submissions cannot execute twice and that a race loser cannot accidentally inherit ownership.
 
 **Test: Concurrent submission with same requestId**
 
@@ -902,7 +1016,9 @@ Setup: Two parallel HTTP requests with identical requestId, same org, same paylo
 Expected:
   - Both requests receive the same taskId
   - Only ONE dispatch is executed
-  - The second request returns the existing task (idempotent)
+  - Exactly one Transaction A result owns dispatch
+  - The unique-constraint loser re-reads the row after its failed transaction
+  - The loser returns the existing DISPATCHING or terminal task without dispatch
   - OperatorTask table contains exactly one row for this requestId
 ```
 
@@ -911,9 +1027,10 @@ Expected:
 ```
 Setup: Two parallel HTTP requests with identical requestId, same org, different payload
 Expected:
-  - First request creates task and dispatches
-  - Second request receives OPERATOR_IDEMPOTENCY_CONFLICT error
-  - OperatorTask table contains exactly one row (the first submission)
+  - Exactly one payload wins the unique claim and is dispatched once
+  - The loser re-reads the winner and receives OPERATOR_IDEMPOTENCY_CONFLICT
+  - The loser never dispatches
+  - OperatorTask table contains exactly one row
 ```
 
 **Test: Concurrent submission, same requestId, different orgs**
@@ -924,6 +1041,31 @@ Expected:
   - Both requests create separate tasks (independent tenants)
   - Both dispatch independently
   - OperatorTask table contains two rows (one per org)
+```
+
+**Test: Existing or stale DISPATCHING task**
+
+```
+Setup: Pre-create a matching DISPATCHING row, including one older than normal execution time
+Expected:
+  - Submission returns that taskId and DISPATCHING state
+  - dispatch() is never called
+  - No status, owner, lease, or timestamp is mutated to reclaim the task
+```
+
+**Test: Sensitive payload deletion semantics**
+
+```
+Setup: Create expired and unexpired rows, including null result fields that were never produced
+Expected:
+  - Before deletion, sensitivePayloadAvailable=true; a null output means "not produced"
+  - Cleanup simulation atomically nulls prompt, patch, stdout, and stderr only on expired rows
+  - Cleared rows set sensitivePayloadAvailable=false and sensitivePayloadDeletedAt
+  - Transaction B that observes expiry clears all four fields and records deletion instead of storing produced result payloads
+  - Transaction B overlapping an already-completed cleanup preserves the unavailable state and never repopulates payloads
+  - sensitivePayloadExpiresAt and durable idempotency/audit metadata survive
+  - GET after deletion returns all four fields as null plus sensitivePayloadAvailable=false
+  - Repeating cleanup is idempotent; unexpired rows remain unchanged
 ```
 
 ---
@@ -952,18 +1094,21 @@ The following fields are classified as **sensitive engineering payloads**:
 - `Buffer.byteLength(patch, 'utf8')` (patch size)
 - `capabilityCode`, `correlationId`, timing metadata
 
+All four database columns are nullable even though `prompt` is required in the POST DTO. Nullability is required so physical payload deletion is executable without deleting the durable task row.
+
 ### 12.2 Retention Policy (v0.1)
 
 | Data Category | Retention | Mechanism |
 |---------------|-----------|-----------|
-| **Task metadata** (id, status, timing, correlationId, providerCode) | Indefinite (within v0.1 scope) | `OperatorTask` row persists |
-| **Sensitive payloads** (prompt, patch, stdout, stderr) | Configurable expiry | `OperatorTask.sensitivePayloadExpiresAt` |
+| **Durable task metadata** (`requestId`, `requestFingerprint`, `capabilityCode`, status, correlation/workflow/execution/routing/timing metadata) | Indefinite (within v0.1 scope) | Survives sensitive-payload deletion in the `OperatorTask` row |
+| **Sensitive payloads** (`prompt`, `patch`, `stdout`, `stderr`) | Configurable expiry | Nullable columns + expiry + actual availability/deletion markers; physical cleanup required to enforce |
 | **Audit event metadata** | Indefinite (existing `AuditEvent` retention) | Existing `AuditService` |
 
 **`sensitivePayloadExpiresAt` computation:**
 - Default: `createdAt + SENSITIVE_PAYLOAD_TTL_HOURS` (configurable via environment variable, default 72 hours)
 - Set at task creation time (before dispatch)
-- The cleanup mechanism is **deferred to v0.2** -- the field exists in v0.1 for data model readiness, but no scheduled job purges expired payloads until a cleanup worker is implemented
+- It records policy intent only. **Expiry by itself is not deletion and is not enforced retention.**
+- The scheduled cleanup mechanism is deferred to v0.2; therefore v0.1 is restricted to internal/local development exposure
 
 **When cleanup runs (v0.2):**
 ```sql
@@ -974,19 +1119,51 @@ SET
   patch = NULL,
   stdout = NULL,
   stderr = NULL,
-  sensitivePayloadExpiresAt = NULL
-WHERE sensitivePayloadExpiresAt < NOW();
+  "sensitivePayloadAvailable" = FALSE,
+  "sensitivePayloadDeletedAt" = NOW()
+WHERE "sensitivePayloadAvailable" = TRUE
+  AND "sensitivePayloadExpiresAt" <= NOW();
 ```
 
-### 12.3 Why Not Indefinite Retention
+The cleanup update clears all four fields and flips availability in one database statement. It deliberately preserves `sensitivePayloadExpiresAt` as policy/audit evidence. Cleanup is idempotent because already-unavailable rows no longer match. The v0.2 worker must define and monitor its sweep interval and maximum deletion latency before the production gate can pass.
+
+### 12.3 GET Semantics Before and After Deletion
+
+`GET /v1/operator/tasks/:taskId` reports actual storage state, not a value inferred solely from the clock:
+
+| State | Response semantics |
+|-------|--------------------|
+| Payload retained | `sensitivePayloadAvailable: true`; `prompt` is present; any null `patch`/`stdout`/`stderr` means that output was not produced |
+| Expired but cleanup not yet run | Still reports actual retained state; this condition is permitted only in internal/local v0.1 and demonstrates why expiry alone is not enforcement |
+| Payload physically deleted | `sensitivePayloadAvailable: false`; `prompt`, `patch`, `stdout`, and `stderr` are all `null`; `sensitivePayloadDeletedAt` is populated |
+
+`sensitivePayloadExpiresAt` remains visible after deletion. Consumers must use `sensitivePayloadAvailable`, not null output fields or wall-clock comparison, to distinguish deletion from an output that was never produced.
+
+### 12.4 Public Production Exposure Gate
+
+> **External/public production exposure of the Operator Bridge is forbidden until an actual payload-cleanup mechanism enforces configured expiry.**
+
+For v0.1, `OPERATOR_BRIDGE_EXPOSURE` must remain `internal`; module configuration rejects `public` mode. Local and trusted internal development may proceed without the scheduled cleanup worker. This prohibition cannot be waived merely because `sensitivePayloadExpiresAt` is populated.
+
+The gate may pass only when all of the following are true:
+
+1. A cleanup worker or database scheduler is implemented and deployed.
+2. It atomically clears all four sensitive columns and records actual deletion.
+3. Expired/unexpired, retry/idempotency, and Transaction B race tests pass against PostgreSQL.
+4. Scheduling health, last-success time, deletion count, failures, and maximum deletion latency are monitored and alerted.
+5. The deployment/release review explicitly authorizes `OPERATOR_BRIDGE_EXPOSURE=public`.
+
+The scheduled worker remains deferred to v0.2. VITO-OB-002 and any ChatGPT connector inherit this gate and cannot create public production exposure before it passes.
+
+### 12.5 Why Not Indefinite Retention
 
 - Sensitive payloads contain source code, file contents, and task specifications
 - These are high-value targets for data exfiltration
 - Bounded retention limits the blast radius of a credential compromise
 - VITO engineering tenants should not accumulate unlimited source code artifacts
-- The `sensitivePayloadExpiresAt` field ensures the data model supports deletion when the cleanup worker is implemented
+- Nullable columns plus explicit deletion metadata make cleanup executable without destroying idempotency or audit evidence
 
-### 12.4 Why Not a Separate Artifact Store
+### 12.6 Why Not a Separate Artifact Store
 
 For v0.1, the inline patch approach (within 2MB `MAX_PATCH_BYTES`) is sufficient:
 - Simplifies the architecture (no S3/GCS dependency)
@@ -1014,6 +1191,7 @@ Operator Bridge v0.1 (VITO-OB-001) exposes the secure provider-neutral API. This
 | OpenAPI spec for Custom GPT Action | Yes |
 | MCP server for programmatic tool access | Yes (stretch) |
 | No new execution authority | **Invariant** -- ChatGPT still requests, VITO still authorizes, provider still executes |
+| Public production exposure | **Blocked** until the Section 12.4 cleanup gate passes |
 
 ### 13.3 Separation Rationale
 
@@ -1026,7 +1204,7 @@ OB-002 is separated from OB-001 because:
 
 ### 13.4 Dependency
 
-OB-002 depends on OB-001 being implemented and tested. OB-001 must be implemented first.
+OB-002 depends on OB-001 being implemented and tested. OB-001 must be implemented first. OB-002 development may use local/internal environments, but its public production deployment additionally depends on the sensitive-payload cleanup gate.
 
 **Do not implement OB-002 in OB-001.** The invariant `ChatGPT requests -> VITO authorizes -> Provider executes` is preserved across both blocks.
 
@@ -1039,16 +1217,17 @@ OB-002 depends on OB-001 being implemented and tested. OB-001 must be implemente
 | Item | Status |
 |------|--------|
 | Secure operator API/facade (`/v1/operator/tasks`) | Design complete |
-| Scoped service auth (MEMBER role + `@OperatorScope`) | Design complete |
+| Globally restricted machine auth (MEMBER + DB scope + global guard) | Design complete |
 | Submit task (intent-level only, synchronous) | Design complete |
 | Get task status/result (tenant-scoped) | Design complete |
 | Request fingerprint idempotency with conflict detection | Design complete |
-| Transactional create-or-resolve | Design complete |
+| Short Transaction A claim + transaction-free dispatch + short Transaction B | Design complete |
 | Reuse `AgentWorkforceService.dispatch()` | Existing, unchanged |
 | OpenCode as first configured provider | Existing `LOCAL_TOOL` adapter |
 | Audit/correlation (full trail) | Existing `AuditService` |
 | `OperatorTask` persistence (tenant-scoped idempotency) | Design complete |
-| Sensitive payload retention with configurable expiry | Design complete |
+| Nullable sensitive payloads, actual-deletion indicator, and configurable expiry | Design complete for internal/local v0.1 |
+| Public production exposure | Prohibited until cleanup gate passes |
 | BASELINE_GATE / AUTONOMY_GATE policies | Design complete |
 | Unit + integration tests (including concurrency) | Design complete |
 | VITO-OB-002 follow-on recorded | Design complete |
@@ -1061,16 +1240,17 @@ OB-002 depends on OB-001 being implemented and tested. OB-001 must be implemente
 | Patch application into persistent checkout | No persistent checkout exists in v0.1 |
 | Streaming / WebSocket | Adds complexity; synchronous sufficient for v0.1 |
 | Multi-worker scheduler / durable background execution | Requires job queue; synchronous sufficient for v0.1 budget limits |
+| Stale `DISPATCHING` recovery/reclaim | Cannot safely distinguish pre-dispatch crash from completed execution; v0.1 never redispatches an existing claim |
 | Artifact store (beyond inline patch) | Inline patch within 2MB limit sufficient for v0.1 |
 | Auto-merge | Requires SCM capability (deferred) |
 | Production deployment automation | Separate concern; not in bridge scope |
 | OAuth2 client credentials flow | Service account JWT sufficient for v0.1 |
-| Dedicated `OperatorServiceCredentialGuard` (new credential table) | Existing JWT sufficient for v0.1; scoped via `@OperatorScope` |
+| Dedicated service-credential table/guard | Existing JWT lifecycle plus global DB-backed machine scope is sufficient for v0.1 |
 | MCP server integration | Deferred to VITO-OB-002 |
 | ChatGPT connector/plugin | Deferred to VITO-OB-002 |
 | Operator audit dashboard | Existing audit events queryable via API |
 | Risk-class-based auto-continue policy engine | Manual human gate sufficient for v0.1 |
-| Sensitive payload cleanup worker | `sensitivePayloadExpiresAt` field exists; cleanup scheduler deferred to v0.2 |
+| Sensitive payload cleanup worker | Deferred to v0.2; until deployed and monitored, public production exposure remains forbidden |
 | Cross-organization operator federation | Not in scope |
 
 ---
@@ -1114,13 +1294,16 @@ The coding sandbox retains `--unshare-net`. SCM operations are performed outside
 | `AgentWorkforceController` | **None** | Bridge creates a parallel endpoint; existing endpoint unchanged |
 | `AgentWorkforceService` | **None** | Bridge delegates to existing service; no internal changes |
 | `TenantContext` | **None** | Bridge uses existing JWT-derived tenant context |
-| `JwtAuthGuard` / `RolesGuard` | **None** | Bridge uses existing auth stack; adds operator-specific guard as additional layer |
+| `JwtAuthGuard` | **Minimal composition change** | Presented Bearer tokens on public routes must authenticate so machine authorization cannot be bypassed |
+| `JwtStrategy` / `AuthenticatedUser` | **Minimal additive change** | Current DB machine classification and scope are carried on `request.user`; JWT claims and TenantContext remain unchanged |
+| `RolesGuard` | **None** | Existing role policy remains and composes after machine-scope authorization |
+| Global authorization | **Additive but cross-cutting** | New `ScopedMachineIdentityGuard` is an `APP_GUARD`; ordinary unscoped humans are unaffected |
 | `ProviderRouterService` | **None** | Bridge does not bypass routing |
 | `GovernedRuntimeService` | **None** | Bridge does not bypass governed runtime |
 | `GovernedInvocationServiceImpl` | **None** | Bridge does not bypass invocation pipeline |
 | `RemoteExecutionWorker` | **None** | Bridge does not bypass sandbox |
 | `WorkflowRuntimeService` | **None** | Bridge does not use workflow runtime (v0.1) |
-| Prisma schema | **Additive** | New `OperatorTask` model; relation added to `Organization` |
+| Prisma schema | **Additive** | Stable machine discriminator/scope, new `OperatorTask`, and `Organization.operatorTasks` relation |
 | AppModule | **Additive** | New import only |
 | Contracts barrel | **Additive** | New export only (if shared types used) |
 
@@ -1148,19 +1331,20 @@ All authorization and execution authority remains in the existing governed runti
 | # | Decision | Rationale |
 |---|----------|-----------|
 | D1 | Thin facade over existing pipeline | Reuse over duplication; existing pipeline is battle-tested |
-| D2 | Scoped service auth: MEMBER role + `@OperatorScope` | Prevents compromised operator credential from becoming general admin; excludes OWNER/ADMIN surfaces |
-| D3 | Synchronous dispatch with explicit disconnect semantics | Bounded execution times; honest about v0.1 durability guarantees |
+| D2 | Global DB-backed machine-scope guard + MEMBER role | Machine identities fail closed on every route except exact opt-ins; ordinary human RBAC remains unchanged |
+| D3 | Synchronous owner dispatch outside database transactions | Transaction A commits ownership first; Transaction B persists terminal state; no transaction spans agent execution |
 | D4 | Intent-level request only | External clients never control execution parameters |
 | D5 | `OperatorTask` as external state view | Decouples external interface from internal workflow state machine |
 | D6 | No streaming in v0.1 | Complexity reduction; synchronous sufficient |
 | D7 | No SCM operations in v0.1 (deferred control plane) | Sandbox denies network; workspace ephemeral; separate capability needed |
-| D8 | `requestId` + `requestFingerprint` idempotency | Prevents semantically different requests from appearing idempotent; transactional create-or-resolve |
+| D8 | Unique `DISPATCHING` claim + request fingerprint | Exactly one request owns dispatch; race losers re-read and never dispatch; stale tasks are not reclaimed in v0.1 |
 | D9 | Patch classified as sensitive engineering payload | Not in audit logs; tenant-scoped reads; bounded size |
 | D10 | No durable background execution in v0.1 | Honest about Node.js request lifecycle guarantees |
 | D11 | Provider-neutral capability codes | Bridge does not encode provider knowledge |
 | D12 | Full audit trail for operator tasks | Accountability; leverages existing `AuditService` |
-| D13 | Sensitive payload retention with configurable expiry | `sensitivePayloadExpiresAt` field; cleanup deferred to v0.2 |
-| D14 | VITO-OB-002 as separate follow-on block | ChatGPT integration isolated from bridge security design |
+| D13 | Executable sensitive-payload deletion model | Four nullable fields, explicit actual-availability/deletion metadata, and durable idempotency/audit metadata |
+| D14 | Public production exposure blocked in v0.1 | Expiry metadata alone is not enforcement; cleanup worker remains deferred to v0.2 |
+| D15 | VITO-OB-002 as separate follow-on block | ChatGPT integration adds no execution authority and inherits the production retention gate |
 
 ---
 
@@ -1178,10 +1362,11 @@ All authorization and execution authority remains in the existing governed runti
 | Threat model | Complete (Section 7) |
 | Network/connectivity model | Complete (Section 8) |
 | Files/modules proposed | Complete (Section 10) |
-| Prisma schema (with fingerprint + expiry) | Complete (Section 10.3) |
-| Idempotency semantics (with fingerprint) | Complete (Section 10.4) |
+| Prisma schema (nullable payload + fingerprint + deletion metadata) | Complete (Section 10.3) |
+| Transactional dispatch ownership and idempotency | Complete (Section 10.4) |
 | Concurrency tests | Complete (Section 10.6) |
 | Sensitive payload retention | Complete (Section 12) |
+| Public production exposure constraint | Complete (Section 12.4) |
 | Follow-on integration (VITO-OB-002) | Complete (Section 13) |
 | Tests required | Complete (Section 10.5) |
 | v0.1 scope | Complete (Section 14.1) |
@@ -1191,4 +1376,6 @@ All authorization and execution authority remains in the existing governed runti
 
 ---
 
-**READY FOR FINAL OPERATOR BRIDGE ARCHITECTURE GATE: YES**
+**READY FOR IMPLEMENTATION GATE: YES**
+
+**PUBLIC PRODUCTION EXPOSURE GATE: NO -- blocked until payload cleanup is implemented, deployed, tested, and monitored.**
