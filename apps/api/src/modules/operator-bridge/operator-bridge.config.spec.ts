@@ -8,7 +8,7 @@ describe('loadOperatorBridgeConfig', () => {
     });
   });
 
-  it('accepts a positive configured TTL for internal development', () => {
+  it('accepts internal as an application deployment mode, not a network-isolation control', () => {
     expect(
       loadOperatorBridgeConfig({
         OPERATOR_BRIDGE_EXPOSURE: 'internal',
@@ -26,7 +26,7 @@ describe('loadOperatorBridgeConfig', () => {
   it('rejects public exposure in production', () => {
     expect(() =>
       loadOperatorBridgeConfig({ NODE_ENV: 'production', OPERATOR_BRIDGE_EXPOSURE: 'public' }),
-    ).toThrow(/public exposure is forbidden/);
+    ).toThrow(/cleanup and approved ingress\/network controls are deployed and verified/);
   });
 
   it.each(['0', '-1', 'NaN', 'Infinity', '1e20'])('rejects invalid TTL %p', (ttl) => {

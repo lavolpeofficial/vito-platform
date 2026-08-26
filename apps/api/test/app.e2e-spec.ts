@@ -261,6 +261,36 @@ describe('VITO API (e2e)', () => {
         .expect(400);
     });
 
+    it('retains the ordinary endpoint 100 KiB request limit', async () => {
+      const human = await bootstrapOrgWithUser({ role: 'MEMBER' });
+      const token = await tokenFor(human.user, human.org.id);
+      const belowLimit = JSON.stringify({
+        title: 'Ordinary request below parser limit',
+        padding: 'a'.repeat(100 * 1024 - 100),
+      });
+      const aboveLimit = JSON.stringify({
+        title: 'Ordinary request above parser limit',
+        padding: 'a'.repeat(100 * 1024),
+      });
+      expect(Buffer.byteLength(belowLimit, 'utf8')).toBeLessThan(100 * 1024);
+      expect(Buffer.byteLength(aboveLimit, 'utf8')).toBeGreaterThan(100 * 1024);
+
+      await request(httpServer)
+        .post('/tasks')
+        .set(bearer(token))
+        .set('Content-Type', 'application/json')
+        .send(belowLimit)
+        .expect(400);
+      await request(httpServer)
+        .post('/tasks')
+        .set(bearer(token))
+        .set('Content-Type', 'application/json')
+        .send(aboveLimit)
+        // The existing global filter maps body-parser's PayloadTooLargeError to 500.
+        .expect(500)
+        .expect(({ body }) => expect(body.message).toBe('request entity too large'));
+    });
+
     it('denies the bridge machine from unrelated MEMBER and public endpoints', async () => {
       const machine = await bridgeMachine();
       await request(httpServer)

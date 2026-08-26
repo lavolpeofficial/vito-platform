@@ -286,6 +286,82 @@ describePg('OperatorBridgeService PostgreSQL implementation gate', () => {
     ).resolves.toMatchObject({ isMachineIdentity: true, machineScope: null });
   });
 
+  it('round-trips the authoritative patch exactly, audits metadata only, and purges it', async () => {
+    const tenant = await createTenant();
+    const dto = request();
+    const secret = 'Bearer abcdefghijklmnopqrstuvwxyz123456';
+    const governedPatch = `diff --git a/a b/a\r\n+const fixture = '${secret}';\r\n`;
+    const dispatch = jest.fn(async (input) => {
+      const result = dispatchResult(input);
+      return {
+        ...result,
+        execution: {
+          ...result.execution,
+          providerExecutionMetadata: {
+            ...result.execution.providerExecutionMetadata,
+            governedResultSettling: {
+              ...result.execution.providerExecutionMetadata.governedResultSettling,
+              patch: governedPatch,
+            },
+          },
+        },
+      };
+    });
+    const bridge = service(dispatch);
+
+    const response = await bridge.submitTask(tenant.organizationId, tenant.userId, dto);
+    const persisted = await prisma.operatorTask.findUniqueOrThrow({
+      where: { id: response.taskId },
+    });
+    expect(persisted.patch).toBe(governedPatch);
+    expect(Buffer.from(persisted.patch!, 'utf8')).toEqual(Buffer.from(governedPatch, 'utf8'));
+    await expect(bridge.getTask(tenant.organizationId, response.taskId)).resolves.toMatchObject({
+      patch: governedPatch,
+      sensitivePayloadAvailable: true,
+    });
+
+    const audit = await prisma.auditEvent.findFirstOrThrow({
+      where: {
+        organizationId: tenant.organizationId,
+        entityId: response.taskId,
+        action: 'OPERATOR_TASK_COMPLETED',
+      },
+    });
+    const metadata = audit.metadata as Record<string, unknown>;
+    expect(Object.keys(metadata).sort()).toEqual(
+      [
+        'capabilityCode',
+        'changedFileCount',
+        'correlationId',
+        'durationMs',
+        'errorReason',
+        'errorRetryable',
+        'executionId',
+        'invocationId',
+        'patchBytes',
+        'providerCode',
+        'requestId',
+        'routingDecisionId',
+        'status',
+        'workflowRunId',
+        'workflowStepRunId',
+      ].sort(),
+    );
+    expect(metadata).not.toHaveProperty('patch');
+    expect(metadata.patchBytes).toBe(Buffer.byteLength(governedPatch, 'utf8'));
+    expect(JSON.stringify(metadata)).not.toContain(secret);
+
+    await prisma.operatorTask.update({
+      where: { id: response.taskId },
+      data: { sensitivePayloadExpiresAt: new Date(Date.now() - 60_000) },
+    });
+    expect(await purgeExpiredPayloads()).toBe(1);
+    expect(await prisma.operatorTask.findUniqueOrThrow({ where: { id: response.taskId } })).toMatchObject({
+      patch: null,
+      sensitivePayloadAvailable: false,
+    });
+  });
+
   it('gives one concurrent duplicate the unique dispatch claim and never dispatches the loser', async () => {
     const tenant = await createTenant();
     const dto = request();

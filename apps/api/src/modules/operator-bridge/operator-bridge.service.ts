@@ -28,7 +28,6 @@ import {
 } from './operator-bridge.config';
 
 const MAX_SAFE_TEXT_LENGTH = 2000;
-const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const MAX_CHANGED_FILES = 4096;
 const REDACTED = '[REDACTED]';
 const OPERATOR_TASK_ENTITY = 'OperatorTask';
@@ -291,7 +290,9 @@ export class OperatorBridgeService {
       stdout: readString(metadata.stdout, true),
       stderr: readString(metadata.stderr, true),
       changedFiles: readStringArray(settling.changedFiles, true),
-      patch: sanitizePatch(readString(settling.patch)),
+      // The governed change-set is integrity-bearing. Upstream capture limits are authoritative;
+      // the bridge persists the returned patch exactly and only retention may delete it.
+      patch: readString(settling.patch),
       errorReason:
         (error?.reason !== undefined ? redactSensitiveText(error.reason) : null) ??
         (status === PrismaOperatorTaskStatus.COMPLETED
@@ -560,18 +561,6 @@ function redactSensitiveText(text: string): string {
   return redacted.length > MAX_SAFE_TEXT_LENGTH
     ? `${redacted.slice(0, MAX_SAFE_TEXT_LENGTH)}...`
     : redacted;
-}
-
-function sanitizePatch(patch: string | null): string | null {
-  if (patch === null) return null;
-  if (Buffer.byteLength(patch, 'utf8') > MAX_PATCH_BYTES) {
-    return '[REDACTED: PATCH EXCEEDED LIMIT]';
-  }
-  let redacted = patch;
-  for (const pattern of SECRET_PATTERNS) {
-    redacted = redacted.replace(new RegExp(pattern.source, `${pattern.flags}g`), REDACTED);
-  }
-  return redacted;
 }
 
 function mapThrownDispatchError(error: unknown): {

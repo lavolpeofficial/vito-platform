@@ -2,6 +2,7 @@ export const OPERATOR_BRIDGE_CONFIG = Symbol('OPERATOR_BRIDGE_CONFIG');
 
 export interface OperatorBridgeConfig {
   readonly sensitivePayloadTtlHours: number;
+  /** Application deployment mode only; this value does not create network isolation. */
   readonly exposure: 'internal';
 }
 
@@ -14,7 +15,7 @@ export function loadOperatorBridgeConfig(
   const exposure = environment.OPERATOR_BRIDGE_EXPOSURE ?? 'internal';
   if (exposure !== 'internal') {
     throw new Error(
-      'Operator Bridge v0.1 public exposure is forbidden until sensitive-payload cleanup is deployed and verified.',
+      'Operator Bridge v0.1 public exposure is forbidden until sensitive-payload cleanup and approved ingress/network controls are deployed and verified.',
     );
   }
 

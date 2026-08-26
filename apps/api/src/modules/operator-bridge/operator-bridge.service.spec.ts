@@ -263,8 +263,9 @@ describe('OperatorBridgeService', () => {
     },
   );
 
-  it('redacts secret-shaped stdout, stderr and patch material before persistence', async () => {
+  it('redacts text summaries while preserving the authoritative patch exactly', async () => {
     const secret = 'Bearer abcdefghijklmnopqrstuvwxyz123456';
+    const governedPatch = `diff --git a/a b/a\r\n+const fixture = '${secret}';\r\n`;
     const fixture = setup({
       result: {
         ...dispatchResult,
@@ -277,7 +278,7 @@ describe('OperatorBridgeService', () => {
             governedResultSettling: {
               executionId: 'execution-1',
               changedFiles: ['src/index.ts'],
-              patch: `diff --git a/a b/a\n+${secret}`,
+              patch: governedPatch,
             },
           },
         },
@@ -288,8 +289,56 @@ describe('OperatorBridgeService', () => {
     const data = fixture.tx.operatorTask.update.mock.calls[0][0].data;
     expect(data.stdout).toContain('[REDACTED]');
     expect(data.stderr).toContain('[REDACTED]');
-    expect(data.patch).toContain('[REDACTED]');
-    expect(JSON.stringify(data)).not.toContain(secret);
+    expect(data.patch).toBe(governedPatch);
+    expect(Buffer.from(data.patch, 'utf8')).toEqual(Buffer.from(governedPatch, 'utf8'));
+    const terminalAudit = fixture.record.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.action === 'OPERATOR_TASK_COMPLETED');
+    expect(Object.keys(terminalAudit.metadata).sort()).toEqual(
+      [
+        'capabilityCode',
+        'changedFileCount',
+        'correlationId',
+        'durationMs',
+        'errorReason',
+        'errorRetryable',
+        'executionId',
+        'invocationId',
+        'patchBytes',
+        'providerCode',
+        'requestId',
+        'routingDecisionId',
+        'status',
+        'workflowRunId',
+        'workflowStepRunId',
+      ].sort(),
+    );
+    expect(terminalAudit.metadata).not.toHaveProperty('patch');
+    expect(terminalAudit.metadata.patchBytes).toBe(Buffer.byteLength(governedPatch, 'utf8'));
+    expect(JSON.stringify(terminalAudit.metadata)).not.toContain(secret);
+  });
+
+  it('does not invent a second oversized-patch replacement policy', async () => {
+    const governedPatch = `diff --git a/a b/a\n+${'x'.repeat(2 * 1024 * 1024)}`;
+    const fixture = setup({
+      result: {
+        ...dispatchResult,
+        execution: {
+          ...dispatchResult.execution,
+          providerExecutionMetadata: {
+            ...dispatchResult.execution.providerExecutionMetadata,
+            governedResultSettling: {
+              executionId: 'execution-1',
+              changedFiles: ['a'],
+              patch: governedPatch,
+            },
+          },
+        },
+      },
+    });
+
+    await fixture.service.submitTask('org-1', 'user-1', request);
+    expect(fixture.tx.operatorTask.update.mock.calls[0][0].data.patch).toBe(governedPatch);
   });
 
   it('persists and dispatches the exact generated identities and validated intent', async () => {
