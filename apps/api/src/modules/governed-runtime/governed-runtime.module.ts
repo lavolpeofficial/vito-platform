@@ -11,7 +11,6 @@ import { HeadlessLocalAgentAdapter } from './adapters/headless-local-agent.adapt
 import {
   GovernedHomeDirectoryResolver,
   GovernedWorkingDirectoryResolver,
-  parseGovernedWorkspaceRoot,
 } from './resolvers/governed-workspace.resolvers';
 import { PrismaProviderDeclarationResolver } from './resolvers/prisma-provider-declaration.resolver';
 import { TrustedExecutionPolicyResolver } from './resolvers/trusted-execution-policy.resolver';
@@ -21,16 +20,13 @@ import { GovernedRuntimeService } from './governed-runtime.service';
 import { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-runtime.tokens';
 import { RemoteExecutionWorkerModule } from '../remote-execution-worker/remote-execution-worker.module';
 import { RemoteExecutionWorkerService } from '../remote-execution-worker/remote-execution-worker.service';
+import { GovernedWorkspaceConfigModule } from './governed-workspace-config.module';
 
 export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-runtime.tokens';
 
 @Module({
-  imports: [AuditModule, RemoteExecutionWorkerModule],
+  imports: [AuditModule, GovernedWorkspaceConfigModule, RemoteExecutionWorkerModule],
   providers: [
-    {
-      provide: GOVERNED_WORKSPACE_ROOT,
-      useFactory: () => parseGovernedWorkspaceRoot(process.env.GOVERNED_WORKSPACE_ROOT),
-    },
     TrustedExecutionProfileResolver,
     TrustedLocalExecutableResolver,
     {

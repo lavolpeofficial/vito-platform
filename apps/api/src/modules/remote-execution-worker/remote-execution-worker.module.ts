@@ -5,12 +5,14 @@ import { BubblewrapSandboxExecutor } from './sandbox-executor';
 import { RemoteExecutionWorkerService } from './remote-execution-worker.service';
 import type { RepositoryRegistry, WorkspaceProvisioner, SandboxExecutor } from './types';
 import { GOVERNED_WORKSPACE_ROOT } from '../governed-runtime/governed-runtime.tokens';
+import { GovernedWorkspaceConfigModule } from '../governed-runtime/governed-workspace-config.module';
 
 export const REPOSITORY_REGISTRY = 'REPOSITORY_REGISTRY';
 export const WORKSPACE_PROVISIONER = 'WORKSPACE_PROVISIONER';
 export const SANDBOX_EXECUTOR = 'SANDBOX_EXECUTOR';
 
 @Module({
+  imports: [GovernedWorkspaceConfigModule],
   providers: [
     {
       provide: REPOSITORY_REGISTRY,
