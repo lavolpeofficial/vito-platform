@@ -405,7 +405,7 @@ interface OperatorTaskResult {
   /** Changed files list. */
   readonly changedFiles?: readonly string[];
 
-  /** Governed patch (sensitive engineering payload -- see Section 12). */
+  /** Exact authoritative governed patch (integrity-bearing sensitive payload -- see Section 12). */
   readonly patch: string | null;
 
   /** Typed error if failed. */
@@ -608,9 +608,9 @@ No automated downstream actions (auto-merge, auto-deploy, etc.) are triggered in
 | T4 | **Prompt attempting authority escalation** | Bridge translates intent only; no execution fields pass through; `evaluatePolicy()` (EO-01.4) is mandatory gate; `ExecutionProfileResolver` is trusted |
 | T5 | **Provider/executable injection** | `ProviderRouterService` selects provider by capability; `TrustedLocalExecutableResolver` verifies binary; `RepositoryRegistry` validates repo; none controlled by operator |
 | T6 | **Repository/ref injection** | `RepositoryRegistry` is a trusted server-side registry; `isBaseRefAllowed()` validates ref; operator never specifies repo URL or ref |
-| T7 | **Oversized request/result** | Request: `MAX_PROMPT_BYTES` (512KB), `MAX_ARG_LENGTH` (4096), `MAX_DEFAULT_ARGS` (64); Result: `MAX_PATCH_BYTES` (2MB), `MAX_SAFE_TEXT_LENGTH` (2000) |
-| T8 | **Result/patch exfiltration** | `redactSecretMaterial()` applied to all output; `sanitizeGovernedReferenceList()` filters non-gov:// refs; patch logged only as size; `workspaceDisposition: 'CLEANED'` |
-| T9 | **Secret leakage** | `CredentialBroker` provides reference-only at adapter boundary; secrets never enter prompts, audit, or result; `redactTrustedSecretsDeep()` applied recursively |
+| T7 | **Oversized request/result** | Request: `MAX_PROMPT_BYTES` (512KB), `MAX_ARG_LENGTH` (4096), `MAX_DEFAULT_ARGS` (64); Result: upstream `MAX_PATCH_BYTES` (2MB) fail-closed change-set capture, bridge `MAX_SAFE_TEXT_LENGTH` (2000) for log-safe text |
+| T8 | **Result/patch exfiltration** | Prompt, stdout, stderr, and error/log-safe text use appropriate bounding/redaction policies; the authoritative patch is never rewritten and is protected by exact machine authorization, tenant isolation, retention deletion, blocked public production exposure, and audit/debug metadata that records size/count only |
+| T9 | **Secret leakage** | `CredentialBroker` and governed-runtime credential-reference protections remain applicable upstream; patches can contain sensitive source or secret-like text, so the bridge preserves patch integrity and relies on strict access, isolation, no-body logging, bounded upstream capture, and deletion rather than silently mutating the artifact |
 | T10 | **Task-result enumeration** | taskId is UUID (unpredictable); queries scoped to authenticated `organizationId`; no bulk enumeration endpoint in v0.1 |
 | T11 | **Duplicate dispatch** | Transaction A creates one tenant-scoped unique row directly as `DISPATCHING`; only the successful creator owns dispatch; unique-race losers re-read and never dispatch; existing governed invocation idempotency remains defense in depth |
 | T12 | **Client disconnect/retry** | Same-key retries return the existing terminal or `DISPATCHING` task; stale ownership is never reclaimed in v0.1, preferring possible non-execution over accidental double execution |
@@ -995,9 +995,9 @@ async submitTask(request: SubmitOperatorTaskRequest, context: TenantContext) {
 | `apps/api/src/common/guards/scoped-machine-identity.guard.spec.ts` | Human passes an ordinary route; exact machine scope passes an opted-in route; machine on an undecorated route fails; machine with null/wrong/empty/unknown scope fails; inconsistent human+scope fails; human on a machine-required route fails |
 | `apps/api/src/modules/operator-bridge/idempotency.spec.ts` | Stable canonical fingerprint; case/whitespace significance; omitted versus explicit assurance; budget/default distinctions; same canonical object persisted/dispatched |
 | `apps/api/src/modules/operator-bridge/dto/submit-operator-task.dto.spec.ts` | UUID, exact UTF-8 byte limit, capability, assurance, and budget validation |
-| `apps/api/src/modules/operator-bridge/operator-bridge.service.spec.ts` | Intent translation with stable persisted workflow IDs; Transaction A commit before dispatch; no transaction client reaches dispatch; existing terminal and existing `DISPATCHING` never dispatch; all dispatch outcomes enter Transaction B; thrown dispatch error maps to FAILED; Transaction B failure is surfaced without a false terminal response; patch body absent from bridge audit events |
+| `apps/api/src/modules/operator-bridge/operator-bridge.service.spec.ts` | Intent translation with stable persisted workflow IDs; Transaction A commit before dispatch; no transaction client reaches dispatch; existing terminal and existing `DISPATCHING` never dispatch; all dispatch outcomes enter Transaction B; thrown dispatch error maps to FAILED; Transaction B failure is surfaced without a false terminal response; authoritative patch round-trips byte-for-byte while remaining absent from bridge audit events |
 | `apps/api/src/modules/operator-bridge/operator-bridge.controller.spec.ts` | Tenant context use, POST owner/duplicate response shapes, tenant-scoped GET, purged GET representation |
-| `apps/api/src/modules/operator-bridge/operator-bridge.pg.spec.ts` | Real PostgreSQL unique races, one owner/one dispatch, different-fingerprint conflict, cross-tenant independence, Transaction B before/after expiry, cleanup overlap, and atomic payload clearing semantics |
+| `apps/api/src/modules/operator-bridge/operator-bridge.pg.spec.ts` | Real PostgreSQL unique races, one owner/one dispatch, different-fingerprint conflict, cross-tenant independence, authoritative patch byte-for-byte persistence without audit-body leakage, Transaction B before/after expiry, cleanup overlap, and atomic payload clearing semantics |
 | `apps/api/src/modules/operator-bridge/operator-bridge.config.spec.ts` | TTL parsing; internal/local mode allowed; `OPERATOR_BRIDGE_EXPOSURE=public` rejected in v0.1, including production |
 | `apps/api/test/app.e2e-spec.ts` | Composed auth and API behavior: `vito-bridge` machine allowed on both bridge routes; same identity denied on unrelated `POST /tasks`; ordinary MEMBER retains existing `/tasks` behavior; machine with null/wrong scope denied from bridge; scoped Bearer denied on unrelated public route; cross-tenant GET rejected; suspension/token-version revokes machine access without reclassifying it as human |
 
@@ -1088,6 +1088,22 @@ The following fields are classified as **sensitive engineering payloads**:
 | `OperatorTask.patch` | Governed change-set (binary diff) | Full source code of modified files; structural codebase information |
 | `OperatorTask.stdout` | Execution stdout | May contain file contents, test output, code excerpts |
 | `OperatorTask.stderr` | Execution stderr | May contain error messages with code context |
+
+The authoritative governed patch is also integrity-bearing. The Operator Bridge stores it
+byte-for-byte as returned by the upstream governed execution pipeline and **MUST NOT**
+pattern-redact, truncate, normalize, or otherwise rewrite it. The upstream governed runtime's
+exact credential-reference protections remain applicable where provided, including at the
+adapter boundary, but they do not establish that arbitrary source changes are secret-free. A
+patch may therefore contain sensitive source material or strings that resemble or contain
+credentials.
+
+Prompt, stdout, stderr, and error/log-safe text may use appropriate field-specific redaction and
+bounding policies because they are not the authoritative change-set. The compensating controls
+for the unmodified patch are exact machine authorization, tenant-isolated retrieval, omission of
+the patch body from audit and debug logs, bounded and fail-closed upstream change-set capture,
+retention deletion, and the prohibition on public production exposure in Section 12.4. Future
+secret-content scanning may reject or flag a patch, or produce a separately labelled
+non-authoritative preview, but it may never silently mutate the authoritative artifact.
 
 **None of these fields are stored in audit logs.** Audit records store only:
 - `changedFiles.length` (count)
