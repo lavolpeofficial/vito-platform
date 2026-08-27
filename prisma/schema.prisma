@@ -247,6 +247,13 @@ enum AgentExecutionStatus {
   QUOTA_BLOCKED
 }
 
+enum OperatorTaskStatus {
+  DISPATCHING
+  COMPLETED
+  HUMAN_GATE
+  FAILED
+}
+
 // ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
@@ -259,39 +266,42 @@ model Organization {
   createdAt DateTime           @default(now())
   updatedAt DateTime           @updatedAt
 
-  users                    User[]
-  digitalEmployees         DigitalEmployee[]
-  capabilities             Capability[]
-  tasks                    Task[]
-  auditEvents              AuditEvent[]
-  sources                  Source[]
-  knowledgeSourceLinks     KnowledgeSourceLink[]
-  workflowRuns             WorkflowRun[]
-  workflowStepRuns         WorkflowStepRun[]
-  agentProviders           AgentProvider[]
-  providerRoutingDecisions ProviderRoutingDecision[]
-  providerCapabilities     ProviderCapability[]
+  users                      User[]
+  digitalEmployees           DigitalEmployee[]
+  capabilities               Capability[]
+  tasks                      Task[]
+  auditEvents                AuditEvent[]
+  sources                    Source[]
+  knowledgeSourceLinks       KnowledgeSourceLink[]
+  workflowRuns               WorkflowRun[]
+  workflowStepRuns           WorkflowStepRun[]
+  agentProviders             AgentProvider[]
+  providerRoutingDecisions   ProviderRoutingDecision[]
+  providerCapabilities       ProviderCapability[]
   governedOperationEnvelopes GovernedOperationEnvelope[]
   governedExecutionRecords   GovernedExecutionRecord[]
+  operatorTasks              OperatorTask[]
 
   @@map("organizations")
 }
 
 model User {
-  id              String     @id @default(uuid())
-  organizationId  String
-  email           String
-  firstName       String
-  lastName        String
-  role            UserRole   @default(MEMBER)
-  status          UserStatus @default(ACTIVE)
-  passwordHash    String?
-  lastLoginAt     DateTime?
-  tokenVersion    Int        @default(1)
-  deletedAt       DateTime?
-  deletedByUserId String?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id                String     @id @default(uuid())
+  organizationId    String
+  email             String
+  firstName         String
+  lastName          String
+  role              UserRole   @default(MEMBER)
+  status            UserStatus @default(ACTIVE)
+  passwordHash      String?
+  lastLoginAt       DateTime?
+  tokenVersion      Int        @default(1)
+  isMachineIdentity Boolean    @default(false)
+  machineScope      String?
+  deletedAt         DateTime?
+  deletedByUserId   String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
 
@@ -384,6 +394,59 @@ model Task {
 
   @@index([organizationId])
   @@map("tasks")
+}
+
+model OperatorTask {
+  id                 String             @id @default(uuid())
+  organizationId     String
+  userId             String
+  requestId          String
+  requestFingerprint String
+  correlationId      String
+  workflowRunId      String
+  workflowStepRunId  String
+  capabilityCode     String
+  prompt             String?            @db.Text
+  assuranceLevel     String?
+  status             OperatorTaskStatus
+
+  maxDurationMs     Int?
+  maxTokens         Int?
+  maxCostMinorUnits Int?
+
+  invocationId         String?
+  executionId          String?
+  routingDecisionId    String?
+  providerCode         String?
+  providerName         String?
+  stdout               String?  @db.Text
+  stderr               String?  @db.Text
+  changedFiles         Json?
+  patch                String?  @db.Text
+  errorReason          String?
+  errorMessage         String?
+  errorRetryable       Boolean?
+  reviewRequired       Boolean  @default(false)
+  workspaceDisposition String?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  durationMs  Int?
+
+  sensitivePayloadAvailable Boolean   @default(true)
+  sensitivePayloadExpiresAt DateTime
+  sensitivePayloadDeletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, requestId])
+  @@index([organizationId, status])
+  @@index([organizationId, correlationId])
+  @@index([sensitivePayloadAvailable, sensitivePayloadExpiresAt])
+  @@map("operator_tasks")
 }
 
 model AuditEvent {
@@ -523,30 +586,30 @@ model WorkflowStepRun {
 }
 
 model AgentProvider {
-  id                    String               @id @default(uuid())
-  organizationId        String
-  providerCode          String
-  displayName           String
-  providerType          ProviderType         @default(CLOUD_LLM)
-  status                ProviderStatus       @default(ACTIVE)
-  credentialRequirement ProviderCredentialRequirement @default(UNKNOWN)
-  modelFamily           String?
-  modelName             String?
-  modelCode             String?
-  supportedCapabilities Json                 @default("[]")
+  id                      String                        @id @default(uuid())
+  organizationId          String
+  providerCode            String
+  displayName             String
+  providerType            ProviderType                  @default(CLOUD_LLM)
+  status                  ProviderStatus                @default(ACTIVE)
+  credentialRequirement   ProviderCredentialRequirement @default(UNKNOWN)
+  modelFamily             String?
+  modelName               String?
+  modelCode               String?
+  supportedCapabilities   Json                          @default("[]")
   estimatedCostMinorUnits Int?
-  healthStatus          ProviderHealthStatus @default(UNKNOWN)
-  healthCheckedAt       DateTime?
-  quotaStatus           ProviderQuotaStatus  @default(UNKNOWN)
-  quotaCheckedAt        DateTime?
-  qualityScore          Float?
-  latencyScore          Float?
-  costScore             Float?
-  costMetadata          Json                 @default("{}")
-  assuranceLevels       Json                 @default("[]")
-  metadata              Json                 @default("{}")
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
+  healthStatus            ProviderHealthStatus          @default(UNKNOWN)
+  healthCheckedAt         DateTime?
+  quotaStatus             ProviderQuotaStatus           @default(UNKNOWN)
+  quotaCheckedAt          DateTime?
+  qualityScore            Float?
+  latencyScore            Float?
+  costScore               Float?
+  costMetadata            Json                          @default("{}")
+  assuranceLevels         Json                          @default("[]")
+  metadata                Json                          @default("{}")
+  createdAt               DateTime                      @default(now())
+  updatedAt               DateTime                      @updatedAt
 
   organization     Organization              @relation(fields: [organizationId], references: [id])
   routingDecisions ProviderRoutingDecision[]
@@ -613,13 +676,13 @@ model ProviderRoutingDecision {
 /// GovernedInvocationService-Schnittstelle, ohne Engineering-Workflow-Tabellen
 /// zu überfrachten. Kein Task-Dispatch, keine Human-Gate-Persistenz.
 model GovernedOperationEnvelope {
-  id            String                          @id @default(uuid())
+  id             String                          @id @default(uuid())
   organizationId String
-  purposeCode   String
-  correlationId String?
-  status        GovernedOperationEnvelopeStatus @default(PENDING)
-  createdAt     DateTime                        @default(now())
-  updatedAt     DateTime                        @updatedAt
+  purposeCode    String
+  correlationId  String?
+  status         GovernedOperationEnvelopeStatus @default(PENDING)
+  createdAt      DateTime                        @default(now())
+  updatedAt      DateTime                        @updatedAt
 
   organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   executions   GovernedExecutionRecord[]
@@ -656,7 +719,7 @@ model GovernedInvocationClaim {
 /// Alle JSON-Strukturen sind bereits durch EO-01.5 sanitisierte Formen —
 /// dieser Datensatz speichert KEINE Rohinhalte, Secrets oder Umgebungen.
 model GovernedExecutionRecord {
-  id                      String                @id
+  id                      String               @id
   envelopeId              String
   organizationId          String
   workflowRunId           String
@@ -673,7 +736,7 @@ model GovernedExecutionRecord {
   policyDecisionReference String
   sideEffectSummary       Json?
   usageMetadata           Json?
-  createdAt               DateTime              @default(now())
+  createdAt               DateTime             @default(now())
 
   envelope     GovernedOperationEnvelope @relation(fields: [envelopeId], references: [id], onDelete: Restrict)
   organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)

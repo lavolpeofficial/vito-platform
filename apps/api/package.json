@@ -11,7 +11,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:operator-bridge:pg": "sh -c 'test -n \"$OPERATOR_BRIDGE_TEST_DATABASE_URL\" || { echo \"OPERATOR_BRIDGE_TEST_DATABASE_URL is required\" >&2; exit 1; }; DATABASE_URL=\"$OPERATOR_BRIDGE_TEST_DATABASE_URL\" pnpm exec prisma migrate deploy --schema ../../prisma/schema.prisma && DATABASE_URL=\"$OPERATOR_BRIDGE_TEST_DATABASE_URL\" jest --runInBand --runTestsByPath \"$PWD/src/modules/operator-bridge/operator-bridge.pg.spec.ts\"'"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.4",
@@ -22,11 +23,12 @@
     "@nestjs/swagger": "^7.4.2",
     "@nestjs/throttler": "^5.2.0",
     "@prisma/client": "^5.20.0",
+    "@vito/contracts": "workspace:*",
     "bcryptjs": "^2.4.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "express": "^4.22.1",
     "helmet": "^7.1.0",
-    "@vito/contracts": "workspace:*",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "reflect-metadata": "^0.2.2",

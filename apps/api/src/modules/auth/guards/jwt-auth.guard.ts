@@ -43,18 +43,17 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest<Request>();
+    const hasAuthorizationHeader = request.headers.authorization !== undefined;
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
-    if (isPublic) {
+    if (isPublic && !hasAuthorizationHeader) {
       return true;
     }
 
-    const request = context.switchToHttp().getRequest<Request>();
-    const hasBearerToken = !!request.headers.authorization;
-
-    if (!hasBearerToken) {
+    if (!hasAuthorizationHeader) {
       return this.tryInsecureHeaderFallback(request);
     }
 

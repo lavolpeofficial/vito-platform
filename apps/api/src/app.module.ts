@@ -15,6 +15,7 @@ import { WorkflowRuntimeModule } from './modules/workflow-runtime/workflow-runti
 import { ProviderRegistryModule } from './modules/provider-registry/provider-registry.module';
 import { GovernedRuntimeModule } from './modules/governed-runtime/governed-runtime.module';
 import { AgentWorkforceModule } from './modules/agent-workforce/agent-workforce.module';
+import { OperatorBridgeModule } from './modules/operator-bridge/operator-bridge.module';
 
 /**
  * Seit Sprint 2 gibt es keine `TenantMiddleware` mehr. Authentifizierung
@@ -41,6 +42,7 @@ import { AgentWorkforceModule } from './modules/agent-workforce/agent-workforce.
     ProviderRegistryModule,
     GovernedRuntimeModule,
     AgentWorkforceModule,
+    OperatorBridgeModule,
   ],
 })
 export class AppModule {}

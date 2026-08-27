@@ -1,10 +1,27 @@
-import { INestApplication } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { randomUUID } from 'crypto';
 import * as bcrypt from 'bcryptjs';
-import { createApp } from '../src/main';
+import { configureBodyParsers, createApp } from '../src/main';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { computeRequestFingerprint } from '../src/modules/operator-bridge/idempotency';
+import { CommonModule } from '../src/common/common.module';
+import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
+import { PrismaModule } from '../src/prisma/prisma.module';
+import { AuthModule } from '../src/modules/auth/auth.module';
+import { HealthModule } from '../src/modules/health/health.module';
+import { TasksModule } from '../src/modules/tasks/tasks.module';
+import { AuditModule } from '../src/modules/audit/audit.module';
+import { AgentWorkforceService } from '../src/modules/agent-workforce/agent-workforce.service';
+import { OperatorBridgeController } from '../src/modules/operator-bridge/operator-bridge.controller';
+import { OperatorBridgeService } from '../src/modules/operator-bridge/operator-bridge.service';
+import {
+  OPERATOR_BRIDGE_CONFIG,
+  loadOperatorBridgeConfig,
+} from '../src/modules/operator-bridge/operator-bridge.config';
 
 // Test-Environment: bewusst NICHT NODE_ENV=production, damit der
 // Insecure-Header-Fallback-Test unten (mit ALLOW_INSECURE_TENANT_HEADER)
@@ -15,6 +32,8 @@ process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'test-only-jwt-secret-do-not-
 process.env.JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? '1h';
 process.env.ALLOW_INSECURE_TENANT_HEADER = process.env.ALLOW_INSECURE_TENANT_HEADER ?? 'false';
 process.env.ENABLE_SWAGGER = process.env.ENABLE_SWAGGER ?? 'false';
+process.env.OPERATOR_BRIDGE_EXPOSURE = process.env.OPERATOR_BRIDGE_EXPOSURE ?? 'internal';
+process.env.SENSITIVE_PAYLOAD_TTL_HOURS = process.env.SENSITIVE_PAYLOAD_TTL_HOURS ?? '72';
 
 const DEFAULT_PASSWORD = 'Sup3rSecretPassw0rd!';
 // Niedrige bcrypt-Kostenstufe ausschließlich in Tests, um die Laufzeit
@@ -27,13 +46,46 @@ type UserStatus = 'ACTIVE' | 'INVITED' | 'SUSPENDED' | 'DISABLED';
 type OrgStatus = 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
 
 describe('VITO API (e2e)', () => {
-  let app: INestApplication;
+  let app: NestExpressApplication;
   let httpServer: any;
   let prisma: PrismaService;
   let jwtService: JwtService;
 
   beforeAll(async () => {
-    app = await createApp();
+    if (process.env.OPERATOR_BRIDGE_E2E_ONLY === 'true') {
+      const moduleRef = await Test.createTestingModule({
+        imports: [CommonModule, PrismaModule, AuthModule, HealthModule, TasksModule, AuditModule],
+        controllers: [OperatorBridgeController],
+        providers: [
+          OperatorBridgeService,
+          {
+            provide: AgentWorkforceService,
+            useValue: {
+              dispatch: jest.fn(() => {
+                throw new Error('Unexpected dispatch in composed authorization E2E.');
+              }),
+            },
+          },
+          {
+            provide: OPERATOR_BRIDGE_CONFIG,
+            useFactory: loadOperatorBridgeConfig,
+          },
+        ],
+      }).compile();
+      app = moduleRef.createNestApplication<NestExpressApplication>();
+      configureBodyParsers(app);
+      app.useGlobalPipes(
+        new ValidationPipe({
+          whitelist: true,
+          forbidNonWhitelisted: true,
+          transform: true,
+          transformOptions: { enableImplicitConversion: true },
+        }),
+      );
+      app.useGlobalFilters(new HttpExceptionFilter());
+    } else {
+      app = await createApp();
+    }
     await app.init();
     httpServer = app.getHttpServer();
     prisma = app.get(PrismaService);
@@ -59,6 +111,8 @@ describe('VITO API (e2e)', () => {
       userStatus?: UserStatus;
       orgStatus?: OrgStatus;
       password?: string;
+      isMachineIdentity?: boolean;
+      machineScope?: string | null;
     } = {},
   ) {
     const suffix = randomUUID().slice(0, 8);
@@ -79,6 +133,8 @@ describe('VITO API (e2e)', () => {
         role: opts.role ?? 'OWNER',
         status: opts.userStatus ?? 'ACTIVE',
         passwordHash,
+        isMachineIdentity: opts.isMachineIdentity ?? false,
+        machineScope: opts.machineScope ?? null,
       },
     });
 
@@ -99,12 +155,227 @@ describe('VITO API (e2e)', () => {
     return { Authorization: `Bearer ${token}` };
   }
 
+  function tokenFor(user: { id: string; role: Role; tokenVersion: number }, organizationId: string) {
+    return jwtService.signAsync({
+      sub: user.id,
+      org_id: organizationId,
+      role: user.role,
+      token_version: user.tokenVersion,
+    });
+  }
+
   // ========================================================================
   // 1. Health Endpoint (öffentlich)
   // ========================================================================
   it('GET /health antwortet erfolgreich, ohne Token', async () => {
     const res = await request(httpServer).get('/health').expect(200);
     expect(res.body.status).toBe('ok');
+  });
+
+  describe('VITO-OB-001 Operator Bridge authorization and composed API', () => {
+    const operatorRequest = () => ({
+      requestId: randomUUID(),
+      capabilityCode: 'CODE_BUILD',
+      prompt: 'Return the cached governed result.',
+      assuranceLevel: 'AL-3',
+      budget: { maxDurationMs: 120_000, maxTokens: 1000, maxCostMinorUnits: 50 },
+    });
+
+    async function bridgeMachine(machineScope: string | null = 'vito-bridge') {
+      const tenant = await bootstrapOrgWithUser({
+        role: 'MEMBER',
+        isMachineIdentity: true,
+        machineScope,
+      });
+      return { ...tenant, token: await tokenFor(tenant.user, tenant.org.id) };
+    }
+
+    async function persistCachedTask(
+      tenant: Awaited<ReturnType<typeof bridgeMachine>>,
+      dto: ReturnType<typeof operatorRequest>,
+    ) {
+      return prisma.operatorTask.create({
+        data: {
+          organizationId: tenant.org.id,
+          userId: tenant.user.id,
+          requestId: dto.requestId,
+          requestFingerprint: computeRequestFingerprint(dto),
+          correlationId: randomUUID(),
+          workflowRunId: randomUUID(),
+          workflowStepRunId: randomUUID(),
+          capabilityCode: dto.capabilityCode,
+          prompt: dto.prompt,
+          assuranceLevel: dto.assuranceLevel,
+          status: 'COMPLETED',
+          maxDurationMs: dto.budget.maxDurationMs,
+          maxTokens: dto.budget.maxTokens,
+          maxCostMinorUnits: dto.budget.maxCostMinorUnits,
+          reviewRequired: false,
+          sensitivePayloadExpiresAt: new Date(Date.now() + 60_000),
+        },
+      });
+    }
+
+    it('allows a vito-bridge machine on both bridge endpoints', async () => {
+      const machine = await bridgeMachine();
+      const dto = operatorRequest();
+      const cached = await persistCachedTask(machine, dto);
+
+      await request(httpServer)
+        .post('/v1/operator/tasks')
+        .set(bearer(machine.token))
+        .send(dto)
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body).toMatchObject({ taskId: cached.id, status: 'COMPLETED' });
+        });
+      await request(httpServer)
+        .get(`/v1/operator/tasks/${cached.id}`)
+        .set(bearer(machine.token))
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.taskId).toBe(cached.id);
+          expect(body.sensitivePayloadAvailable).toBe(true);
+        });
+    });
+
+    it('accepts the approved 512 KiB prompt through the HTTP parser and DTO boundary', async () => {
+      const machine = await bridgeMachine();
+      const dto = { ...operatorRequest(), prompt: '\u0001'.repeat(512 * 1024) };
+      const cached = await persistCachedTask(machine, dto);
+
+      await request(httpServer)
+        .post('/v1/operator/tasks')
+        .set(bearer(machine.token))
+        .send(dto)
+        .expect(200)
+        .expect(({ body }) => expect(body.taskId).toBe(cached.id));
+    });
+
+    it('rejects a prompt beyond 512 KiB at the HTTP DTO boundary', async () => {
+      const machine = await bridgeMachine();
+      await request(httpServer)
+        .post('/v1/operator/tasks')
+        .set(bearer(machine.token))
+        .send({ ...operatorRequest(), prompt: 'a'.repeat(512 * 1024 + 1) })
+        .expect(400);
+    });
+
+    it('retains the ordinary endpoint 100 KiB request limit', async () => {
+      const human = await bootstrapOrgWithUser({ role: 'MEMBER' });
+      const token = await tokenFor(human.user, human.org.id);
+      const belowLimit = JSON.stringify({
+        title: 'Ordinary request below parser limit',
+        padding: 'a'.repeat(100 * 1024 - 100),
+      });
+      const aboveLimit = JSON.stringify({
+        title: 'Ordinary request above parser limit',
+        padding: 'a'.repeat(100 * 1024),
+      });
+      expect(Buffer.byteLength(belowLimit, 'utf8')).toBeLessThan(100 * 1024);
+      expect(Buffer.byteLength(aboveLimit, 'utf8')).toBeGreaterThan(100 * 1024);
+
+      await request(httpServer)
+        .post('/tasks')
+        .set(bearer(token))
+        .set('Content-Type', 'application/json')
+        .send(belowLimit)
+        .expect(400);
+      await request(httpServer)
+        .post('/tasks')
+        .set(bearer(token))
+        .set('Content-Type', 'application/json')
+        .send(aboveLimit)
+        // The existing global filter maps body-parser's PayloadTooLargeError to 500.
+        .expect(500)
+        .expect(({ body }) => expect(body.message).toBe('request entity too large'));
+    });
+
+    it('denies the bridge machine from unrelated MEMBER and public endpoints', async () => {
+      const machine = await bridgeMachine();
+      await request(httpServer)
+        .post('/tasks')
+        .set(bearer(machine.token))
+        .send({ title: 'Must be denied' })
+        .expect(403);
+      await request(httpServer).get('/health').set(bearer(machine.token)).expect(403);
+      await request(httpServer).get('/health').expect(200);
+      await request(httpServer)
+        .get('/health')
+        .set('Authorization', 'Bearer invalid-token')
+        .expect(401);
+    });
+
+    it('preserves ordinary MEMBER behavior and keeps bridge routes machine-only', async () => {
+      const human = await bootstrapOrgWithUser({ role: 'MEMBER' });
+      const token = await tokenFor(human.user, human.org.id);
+      await request(httpServer)
+        .post('/tasks')
+        .set(bearer(token))
+        .send({ title: 'Existing MEMBER behavior' })
+        .expect(201);
+      await request(httpServer)
+        .post('/v1/operator/tasks')
+        .set(bearer(token))
+        .send(operatorRequest())
+        .expect(403);
+    });
+
+    it.each([null, '', 'wrong-machine-scope'])(
+      'denies a machine with non-authorized scope %p from bridge routes',
+      async (machineScope) => {
+        const machine = await bridgeMachine(machineScope);
+        await request(httpServer)
+          .post('/v1/operator/tasks')
+          .set(bearer(machine.token))
+          .send(operatorRequest())
+          .expect(403);
+      },
+    );
+
+    it('returns 404 for a cross-tenant bridge task lookup', async () => {
+      const owner = await bridgeMachine();
+      const other = await bridgeMachine();
+      const cached = await persistCachedTask(owner, operatorRequest());
+      await request(httpServer)
+        .get(`/v1/operator/tasks/${cached.id}`)
+        .set(bearer(other.token))
+        .expect(404);
+    });
+
+    it('revokes machine access through tokenVersion and suspension without human downgrade', async () => {
+      const versioned = await bridgeMachine();
+      await prisma.user.update({
+        where: { id: versioned.user.id },
+        data: { tokenVersion: { increment: 1 } },
+      });
+      await request(httpServer)
+        .post('/v1/operator/tasks')
+        .set(bearer(versioned.token))
+        .send(operatorRequest())
+        .expect(401);
+
+      const suspended = await bridgeMachine();
+      await prisma.user.update({ where: { id: suspended.user.id }, data: { status: 'SUSPENDED' } });
+      await request(httpServer)
+        .post('/v1/operator/tasks')
+        .set(bearer(suspended.token))
+        .send(operatorRequest())
+        .expect(401);
+
+      const persisted = await prisma.user.findUniqueOrThrow({ where: { id: suspended.user.id } });
+      expect(persisted).toMatchObject({
+        isMachineIdentity: true,
+        machineScope: 'vito-bridge',
+      });
+    });
+
+    it('does not disclose machine classification or scope in login responses', async () => {
+      const machine = await bridgeMachine();
+      const response = await login(machine.email, machine.password, machine.org.slug).expect(200);
+      expect(response.body.user.isMachineIdentity).toBeUndefined();
+      expect(response.body.user.machineScope).toBeUndefined();
+    });
   });
 
   // ========================================================================
