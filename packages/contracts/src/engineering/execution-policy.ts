@@ -759,6 +759,23 @@ function classifyCommand(
     return { allowed: false, reasonCode: PolicyReasonCode.COMMAND_NOT_ALLOWED };
   }
 
+  // OB-002A: Exact trusted coding-agent alias authorization.
+  // EXACT whole-command match only — no prefix, no wildcard, no chains
+  // ('opencode && x' therefore falls through and is denied chain-wise),
+  // no operands. The aliases are always server-selected per invocation;
+  // they are never derived from prompt text or operator-supplied input.
+  // Only effective for the builder profile (CODE_BUILD run context); any
+  // other profile never benefits from aliases, defense-in-depth even if a
+  // policy object erroneously carries them.
+  if (
+    profile === ExecutionProfile.BUILDER &&
+    policy.trustedCodingAgentAliases !== undefined &&
+    policy.trustedCodingAgentAliases.length > 0 &&
+    policy.trustedCodingAgentAliases.includes(trimmed)
+  ) {
+    return { allowed: true, reasonCode: PolicyReasonCode.POLICY_ALLOWED };
+  }
+
   // Split into chained commands — each must be independently safe
   const chainedCommands = splitShellChains(trimmed);
 
@@ -794,6 +811,15 @@ export interface ExecutionPolicyConfig {
   readonly deniedPaths: readonly string[];
   /** Commands explicitly allowed for this profile. */
   readonly allowedCommands: readonly string[];
+  /**
+   * OB-002A: server-selected trusted coding-agent launcher alias authorized
+   * for this governed invocation. EXACT whole-command match only — no
+   * prefix semantics, no wildcards, no shell chains, no arguments.
+   * Deliberately separate from allowedCommands (which uses prefix matching).
+   * Only ever set per-invocation by the governed execution layer for
+   * CODE_BUILD/builder run contexts backed by a trusted local executable.
+   */
+  readonly trustedCodingAgentAliases?: readonly string[];
   /** Whether network access is permitted. */
   readonly allowNetwork: boolean;
   /** Whether secrets are permitted. */

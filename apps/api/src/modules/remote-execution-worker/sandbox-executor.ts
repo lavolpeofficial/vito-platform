@@ -106,7 +106,8 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
    * Build the sandbox environment.
    * System-managed keys (HOME, TMPDIR, XDG_*) are set to sandbox-visible paths
    * and cannot be overridden by callers. Callers may only supply caller-permitted
-   * keys (PATH, USER, LANG, LC_ALL).
+   * keys — process-compatibility (PATH, USER, LANG, LC_ALL) and governed
+   * execution metadata (OB-002A, see SANDBOX_* in @vito/contracts).
    */
   private buildSandboxEnv(
     request: SandboxExecutionRequest,

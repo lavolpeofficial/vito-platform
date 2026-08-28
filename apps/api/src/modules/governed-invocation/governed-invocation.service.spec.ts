@@ -57,6 +57,9 @@ import {
   type ProviderDeclaration,
   type TrustedExecutableResolver,
   type WorkingDirectoryResolver,
+  EngineeringCapability,
+  SANDBOX_GOVERNED_EXECUTION_METADATA_ENV,
+  SANDBOX_CALLER_PERMITTED_ENV,
 } from '@vito/contracts';
 
 // ---------------------------------------------------------------------------
@@ -3624,5 +3627,249 @@ describe('F1 freeze blocker: idempotency claims restricted to consequential acti
 
     expect(harness.idempotencyStore.claim).not.toHaveBeenCalled();
     expect(harness.idempotencyStore.markCompleted).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OB-002A — Real Provider Runtime Compatibility
+// (Decision A: governed sandbox-env contract; Decision B: exact trusted
+//  coding-agent alias authorization)
+// ---------------------------------------------------------------------------
+
+function makeLocalToolProvider(overrides: Record<string, any> = {}): ProviderDeclaration {
+  return makeProviderDeclaration({
+    providerType: ProviderType.LOCAL_TOOL,
+    metadata: {
+      commandAlias: 'opencode',
+      defaultArgs: [],
+      providesTerminal: true,
+      ...(overrides.metadata ?? {}),
+    },
+    ...overrides,
+  });
+}
+
+describe('OB-002A: governed sandbox environment contract (Decision A)', () => {
+  it('emits exactly the governed execution metadata contract keys for a fully budgeted CODE_BUILD run', async () => {
+    const provider = makeLocalToolProvider({
+      estimatedCostMinorUnits: 2500,
+    });
+    const harness = buildHarness({
+      provider,
+      fakeAdapter: buildFakeAdapter(ProviderType.LOCAL_TOOL),
+    });
+    const request = makeInvocationRequest({
+      invocationId: 'ob002a-env-1',
+      requestedAction: ExecutionAction.RUN_COMMAND,
+      requestedCommand: 'opencode',
+      requestedPath: undefined,
+      executionBudget: {
+        maxDurationMs: 300000,
+        maxTokens: 100000,
+        maxCostMinorUnits: 2500,
+      },
+    });
+
+    const result = await harness.service.invoke(request);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+
+    const [, executionContext] = harness.fakeAdapter.execute.mock.calls[0];
+    const emitted = (Array.from(
+      executionContext.environment.allowlist.keys(),
+    ) as string[]).sort();
+
+    // Upstream emission equals the single authoritative contract (no drift).
+    expect(emitted).toEqual(
+      Array.from(SANDBOX_GOVERNED_EXECUTION_METADATA_ENV).sort(),
+    );
+
+    // Every emitted key is also caller-permitted at the sandbox boundary.
+    for (const key of emitted) {
+      expect(SANDBOX_GOVERNED_EXECUTION_METADATA_ENV.has(key)).toBe(true);
+      expect(SANDBOX_CALLER_PERMITTED_ENV.has(key)).toBe(true);
+    }
+    for (const key of SANDBOX_GOVERNED_EXECUTION_METADATA_ENV) {
+      expect(executionContext.environment.allowlist.has(key)).toBe(true);
+    }
+  });
+
+  it('bounded-budget requests emit only the populated metadata keys — all still contract keys', async () => {
+    const provider = makeLocalToolProvider();
+    const harness = buildHarness({
+      provider,
+      fakeAdapter: buildFakeAdapter(ProviderType.LOCAL_TOOL),
+    });
+    const request = makeInvocationRequest({
+      invocationId: 'ob002a-env-2',
+      requestedAction: ExecutionAction.RUN_COMMAND,
+      requestedCommand: 'opencode',
+      requestedPath: undefined,
+      executionBudget: { maxDurationMs: 60000 },
+    });
+
+    const result = await harness.service.invoke(request);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+
+    const [, executionContext] = harness.fakeAdapter.execute.mock.calls[0];
+    const emitted = Array.from(
+      executionContext.environment.allowlist.keys(),
+    ) as string[];
+    expect(emitted).toContain('EXECUTION_TIMEOUT_MS');
+    expect(emitted).not.toContain('EXECUTION_MAX_TOKENS');
+    expect(emitted).not.toContain('EXECUTION_MAX_COST_MINOR_UNITS');
+    for (const key of emitted) {
+      expect(SANDBOX_GOVERNED_EXECUTION_METADATA_ENV.has(key)).toBe(true);
+    }
+  });
+});
+
+describe('OB-002A: exact trusted coding-agent alias authorization (Decision B)', () => {
+  it('allows the exact trusted alias for a CODE_BUILD builder local-tool run', async () => {
+    const provider = makeLocalToolProvider();
+    const harness = buildHarness({
+      provider,
+      fakeAdapter: buildFakeAdapter(ProviderType.LOCAL_TOOL),
+    });
+    const request = makeInvocationRequest({
+      invocationId: 'ob002a-alias-allow-1',
+      requestedAction: ExecutionAction.RUN_COMMAND,
+      requestedCommand: 'opencode',
+      requestedPath: undefined,
+    });
+
+    const result = await harness.service.invoke(request);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    const [, executionContext] = harness.fakeAdapter.execute.mock.calls[0];
+    expect(executionContext.policyDecision.allowed).toBe(true);
+    expect(executionContext.policyDecision.reasonCode).toBe('POLICY_ALLOWED');
+  });
+
+  it('fails closed when the trusted executable resolver cannot resolve the alias', async () => {
+    const resolver: TrustedExecutableResolver = {
+      resolve: jest.fn().mockResolvedValue(null),
+    };
+    const harness = buildHarness({
+      provider: makeLocalToolProvider(),
+      fakeAdapter: buildFakeAdapter(ProviderType.LOCAL_TOOL),
+      trustedExecutableResolver: resolver,
+    });
+    const request = makeInvocationRequest({
+      invocationId: 'ob002a-alias-unregistered-1',
+      requestedAction: ExecutionAction.RUN_COMMAND,
+      requestedCommand: 'opencode',
+      requestedPath: undefined,
+    });
+
+    const result = await harness.service.invoke(request);
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(result.normalizedError?.executionOutcome).toBe(
+      ExecutionOutcome.POLICY_BLOCKED,
+    );
+    expect(result.normalizedError?.providerMetadata?.policyReasonCode).toBe(
+      'COMMAND_NOT_ALLOWED',
+    );
+  });
+
+  it('mismatched alias fails closed when only a different command is registered', async () => {
+    const resolver: TrustedExecutableResolver = {
+      resolve: jest.fn(async (requestedCommand: string) =>
+        requestedCommand === 'opencode-cli'
+          ? {
+              commandName: 'opencode-cli',
+              resolvedPath: '/usr/bin/opencode-cli',
+              verifiedAt: new Date(),
+            }
+          : null,
+      ),
+    };
+    const harness = buildHarness({
+      provider: makeLocalToolProvider(),
+      fakeAdapter: buildFakeAdapter(ProviderType.LOCAL_TOOL),
+      trustedExecutableResolver: resolver,
+    });
+    const request = makeInvocationRequest({
+      invocationId: 'ob002a-alias-mismatch-1',
+      requestedAction: ExecutionAction.RUN_COMMAND,
+      requestedCommand: 'opencode',
+      requestedPath: undefined,
+    });
+
+    const result = await harness.service.invoke(request);
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(result.normalizedError?.providerMetadata?.policyReasonCode).toBe(
+      'COMMAND_NOT_ALLOWED',
+    );
+  });
+
+  it('does not authorize the alias outside the CODE_BUILD capability', async () => {
+    const provider = makeLocalToolProvider({
+      capabilityAssignments: [
+        {
+          capabilityCode: EngineeringCapability.TEST_EXECUTION,
+          isEnabled: true,
+        },
+      ],
+    });
+    const harness = buildHarness({
+      provider,
+      fakeAdapter: buildFakeAdapter(ProviderType.LOCAL_TOOL),
+    });
+    const request = makeInvocationRequest({
+      invocationId: 'ob002a-alias-wrong-cap-1',
+      capabilityCode: EngineeringCapability.TEST_EXECUTION,
+      requestedAction: ExecutionAction.RUN_COMMAND,
+      requestedCommand: 'opencode',
+      requestedPath: undefined,
+    });
+
+    const result = await harness.service.invoke(request);
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(result.normalizedError?.providerMetadata?.policyReasonCode).toBe(
+      'COMMAND_NOT_ALLOWED',
+    );
+  });
+
+  it('does not authorize the alias outside the BUILDER profile (reviewer fails closed)', async () => {
+    const harness = buildHarness({
+      provider: makeLocalToolProvider(),
+      fakeAdapter: buildFakeAdapter(ProviderType.LOCAL_TOOL),
+      executionProfileResolver: buildFakeExecutionProfileResolver(
+        ExecutionProfile.REVIEWER,
+      ),
+    });
+    const request = makeInvocationRequest({
+      invocationId: 'ob002a-alias-reviewer-1',
+      requestedAction: ExecutionAction.RUN_COMMAND,
+      requestedCommand: 'opencode',
+      requestedPath: undefined,
+    });
+
+    const result = await harness.service.invoke(request);
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(result.normalizedError?.providerMetadata?.policyReasonCode).toBe(
+      'COMMAND_NOT_ALLOWED',
+    );
+  });
+
+  it('does not authorize the alias for non-local-tool providers (cloud LLM fails closed)', async () => {
+    const harness = buildHarness();
+    const request = makeInvocationRequest({
+      invocationId: 'ob002a-alias-cloud-1',
+      requestedAction: ExecutionAction.RUN_COMMAND,
+      requestedCommand: 'opencode',
+      requestedPath: undefined,
+    });
+
+    const result = await harness.service.invoke(request);
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(result.normalizedError?.providerMetadata?.policyReasonCode).toBe(
+      'COMMAND_NOT_ALLOWED',
+    );
   });
 });

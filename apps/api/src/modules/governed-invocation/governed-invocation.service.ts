@@ -51,6 +51,9 @@ import {
   ProviderCredentialRequirement,
   sanitizeProviderExecutionMetadata,
   sanitizeErrorProviderMetadata,
+  EngineeringCapability,
+  SANDBOX_GOVERNED_EXECUTION_METADATA_ENV,
+  SANDBOX_CALLER_PERMITTED_ENV,
 } from '@vito/contracts';
 import { AuditService } from '../audit/audit.service';
 
@@ -167,6 +170,69 @@ async function resolveTrustedExecutionPolicy(
   return resolvedPolicy;
 }
 
+/**
+ * OB-002A: Exact trusted coding-agent alias authorization.
+ *
+ * Provides a per-invocation, capability/profile/provider-scoped policy for
+ * the EXACT trusted coding-agent launcher alias. Authorized ONLY when ALL of
+ * the following hold (narrow, fail-closed):
+ *   - the requested action is RUN_COMMAND,
+ *   - the trusted capability is the CODE_BUILD builder context,
+ *   - the execution profile is BUILDER,
+ *   - the provider types as LOCAL_TOOL (deep local agent workflow), and
+ *   - the exact requestedCommand resolves through the server-owned
+ *     TrustedExecutableResolver (unregistered/mismatched alias => no
+ *     authorization = fail closed).
+ * The alias is never derived from prompt text or operator input; broad
+ * command/network/secret authority is NOT granted by this delta.
+ */
+async function augmentBuilderPolicyWithTrustedCodingAgentAlias(
+  request: GovernedCapabilityInvocationRequest,
+  provider: ProviderDeclaration,
+  executionProfile: ExecutionProfile,
+  policy: ExecutionPolicyConfig,
+  dependencies: GovernedInvocationDependencies,
+): Promise<ExecutionPolicyConfig> {
+  if (
+    request.requestedAction !== ExecutionAction.RUN_COMMAND ||
+    request.capabilityCode !== EngineeringCapability.CODE_BUILD ||
+    executionProfile !== ExecutionProfile.BUILDER ||
+    provider.providerType !== ProviderType.LOCAL_TOOL ||
+    typeof request.requestedCommand !== 'string' ||
+    request.requestedCommand.length === 0
+  ) {
+    return policy;
+  }
+
+  const alias = request.requestedCommand.trim();
+
+  if (!dependencies.trustedExecutableResolver) {
+    return policy;
+  }
+
+  let resolvable = false;
+  try {
+    const executable = await dependencies.trustedExecutableResolver.resolve(alias, {
+      organizationId: request.organizationId,
+      workflowRunId: request.workflowRunId,
+      capabilityCode: request.capabilityCode,
+      providerId: request.providerId,
+    });
+    resolvable = executable !== null;
+  } catch {
+    resolvable = false;
+  }
+
+  if (!resolvable) {
+    return policy;
+  }
+
+  return {
+    ...policy,
+    trustedCodingAgentAliases: [alias],
+  };
+}
+
 async function createPolicyEvaluationContext(
   request: GovernedCapabilityInvocationRequest,
   provider: ProviderDeclaration,
@@ -236,6 +302,14 @@ async function createPolicyEvaluationContext(
 
   const resolvedPolicy = await resolveTrustedExecutionPolicy(request, executionProfile, dependencies);
 
+  const effectivePolicy = await augmentBuilderPolicyWithTrustedCodingAgentAlias(
+    request,
+    provider,
+    executionProfile,
+    resolvedPolicy,
+    dependencies,
+  );
+
   return {
     // Autoritatives Profil aus dem trusted ExecutionProfileResolver —
     // niemals der caller-kontrollierte request.executionProfile-Hinweis.
@@ -249,7 +323,7 @@ async function createPolicyEvaluationContext(
     workflowRunId: request.workflowRunId,
     workflowStepRunId: request.workflowStepRunId,
     correlationId: request.correlationId,
-    policy: resolvedPolicy,
+    policy: effectivePolicy,
   };
 }
 
@@ -277,6 +351,24 @@ async function buildGovernedExecutionEnvironment(
   allowlist.set('WORKFLOW_STEP_RUN_ID', request.workflowStepRunId);
   allowlist.set('CORRELATION_ID', request.correlationId);
   allowlist.set('INVOCATION_ID', request.invocationId);
+
+  // OB-002A fail-closed contract guard: every key this layer emits must be
+  // part of the single authoritative governed execution metadata contract in
+  // @vito/contracts. Divergence means future additions/removals here must be
+  // mirrored in the contract (and vice versa) or the sandbox boundary will
+  // reject them at runtime (ENV_NOT_ALLOWED).
+  for (const key of allowlist.keys()) {
+    if (!SANDBOX_GOVERNED_EXECUTION_METADATA_ENV.has(key)) {
+      throw new Error(
+        `GOVERNED_ENV_CONTRACT_DRIFT: Sandbox environment key '${key}' is not part of the governed execution metadata contract`,
+      );
+    }
+    if (!SANDBOX_CALLER_PERMITTED_ENV.has(key)) {
+      throw new Error(
+        `GOVERNED_ENV_CONTRACT_DRIFT: Sandbox environment key '${key}' is not caller-permitted`,
+      );
+    }
+  }
 
   if (!workingDirectoryResolver) {
     throw new Error('WORKING_DIRECTORY_NOT_GOVERNED: No working directory resolver configured');

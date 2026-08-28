@@ -1,5 +1,6 @@
 import { BubblewrapSandboxExecutor } from './sandbox-executor';
 import type { SandboxExecutionRequest } from './types';
+import { SANDBOX_GOVERNED_EXECUTION_METADATA_ENV } from '@vito/contracts';
 
 jest.mock('node:child_process', () => {
   const actual = jest.requireActual('node:child_process');
@@ -325,6 +326,74 @@ describe('BubblewrapSandboxExecutor', () => {
       try { await executor.execute(request); } catch (e) { caught = e; }
       expect(caught.code).toBe('ENV_NOT_ALLOWED');
       expect(caught.message).toContain('SNEAKY_VAR');
+    });
+  });
+
+  describe('OB-002A governed execution metadata environment', () => {
+    it('accepts every governed execution metadata key from the shared contract', async () => {
+      const child = makeMockChild();
+      mockSpawn.mockReturnValue(child);
+
+      const metadataValues = new Map<string, string>();
+      for (const key of SANDBOX_GOVERNED_EXECUTION_METADATA_ENV) {
+        metadataValues.set(key, `value-for-${key}`);
+      }
+      metadataValues.set('PATH', '/usr/bin:/bin');
+
+      const executor = new BubblewrapSandboxExecutor('bubblewrap', 'development', 'bwrap');
+      const request = makeRequest({ env: metadataValues });
+
+      const resultPromise = executor.execute(request);
+      child.emit('close', 0);
+      await resultPromise;
+
+      const spawnArgs = mockSpawn.mock.calls[0][1] as string[];
+      for (const key of SANDBOX_GOVERNED_EXECUTION_METADATA_ENV) {
+        const keyIdx = spawnArgs.indexOf(key);
+        const setenvIdx = spawnArgs.lastIndexOf('--setenv', keyIdx);
+        expect(setenvIdx).toBeGreaterThanOrEqual(0);
+        expect(spawnArgs[setenvIdx + 1]).toBe(key);
+        expect(spawnArgs[setenvIdx + 2]).toBe(`value-for-${key}`);
+      }
+    });
+
+    it('CRITICAL: rejects credential-shaped unknown variable EVIL_TOKEN fail-closed', async () => {
+      const executor = new BubblewrapSandboxExecutor('bubblewrap', 'development', 'bwrap');
+      const request = makeRequest({
+        env: new Map([['EVIL_TOKEN', 'sk-12345']]),
+      });
+
+      let caught: any;
+      try { await executor.execute(request); } catch (e) { caught = e; }
+      expect(caught.code).toBe('ENV_NOT_ALLOWED');
+      expect(caught.message).toContain('EVIL_TOKEN');
+    });
+
+    it('CRITICAL: rejects LD_PRELOAD injection attempt fail-closed', async () => {
+      const executor = new BubblewrapSandboxExecutor('bubblewrap', 'development', 'bwrap');
+      const request = makeRequest({
+        env: new Map([['LD_PRELOAD', '/tmp/libevil.so']]),
+      });
+
+      let caught: any;
+      try { await executor.execute(request); } catch (e) { caught = e; }
+      expect(caught.code).toBe('ENV_NOT_ALLOWED');
+      expect(caught.message).toContain('LD_PRELOAD');
+    });
+
+    it('CRITICAL: sandboxed process receives NO host process.env (spawn env is {})', async () => {
+      const child = makeMockChild();
+      mockSpawn.mockReturnValue(child);
+
+      const executor = new BubblewrapSandboxExecutor('bubblewrap', 'development', 'bwrap');
+      const request = makeRequest();
+
+      const resultPromise = executor.execute(request);
+      child.emit('close', 0);
+      await resultPromise;
+
+      const spawnOptions = mockSpawn.mock.calls[0][2];
+      expect(spawnOptions.env).toEqual({});
     });
   });
 

@@ -178,4 +178,9 @@ export {
   type ExecutionProfileResolutionContext,
   GovernedSandboxConfig,
   SandboxExecutionResult,
+  SANDBOX_SYSTEM_MANAGED_ENV,
+  SANDBOX_PROCESS_COMPATIBILITY_ENV,
+  SANDBOX_GOVERNED_EXECUTION_METADATA_ENV,
+  SANDBOX_CALLER_PERMITTED_ENV,
+  SANDBOX_ENV_ALLOWLIST,
 } from './engineering/index.js';
