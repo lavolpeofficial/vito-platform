@@ -10,6 +10,7 @@
     "test": "pnpm --filter @vito/contracts test && pnpm --filter @vito/api test",
     "test:contracts": "pnpm --filter @vito/contracts test",
     "test:e2e": "pnpm --filter @vito/api test:e2e",
+    "operator-bridge:real-flow": "node scripts/operator-bridge-real-flow.mjs",
     "prisma:generate": "prisma generate --schema prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema prisma/schema.prisma",
     "prisma:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
