@@ -319,6 +319,12 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
    * Remove the ephemeral session directory (confined). Safe to call multiple
    * times. If the path ever escapes the governed session root, nothing is
    * removed and a fail-closed error is thrown instead.
+   *
+   * Fail closed on cleanup failure (review §9 / MEDIUM): a session that still
+   * contains credential/config artifacts must NEVER yield a successful cloud
+   * execution result. When rmSync fails, an explicit sanitized terminal error
+   * is thrown — from the finally block this discards any pending result
+   * (success, timeout or failure) so cleanup failure is never silently hidden.
    */
   private teardownSession(sessionDir: string): void {
     if (!this.isConfined(sessionDir)) {
@@ -333,7 +339,15 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
     try {
       rmSync(sessionDir, { recursive: true, force: true });
     } catch {
-      // Best-effort: the bounded session must not mask the agent result.
+      // Static, sanitized text only: no path, no underlying error detail and
+      // never a credential value may reach logs or the terminal error.
+      this.logger.error(
+        'Cloud session cleanup failed; ephemeral credential/config artifacts were not removed',
+      );
+      throw new CloudSandboxError(
+        'CLOUD_SESSION_CLEANUP_FAILED',
+        'Cloud session cleanup failed; refusing to report cloud execution success while ephemeral artifacts may remain',
+      );
     }
   }
 }

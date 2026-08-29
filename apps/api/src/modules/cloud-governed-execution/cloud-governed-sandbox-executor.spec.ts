@@ -9,9 +9,26 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CloudGovernedSandboxExecutor } from './cloud-governed-sandbox-executor';
+import { Logger } from '@nestjs/common';
+import { CloudGovernedSandboxExecutor, CloudSandboxError } from './cloud-governed-sandbox-executor';
 import { CloudCredentialResolver } from './cloud-credential.resolver';
 import type { SandboxExecutionRequest } from '../remote-execution-worker/types';
+
+// Deterministic cleanup-failure injection: the executor's rmSync is the ONLY
+// altered fs method; everything else stays real. Used to prove (review §9 /
+// MEDIUM) that teardown failure becomes an explicit sanitized terminal error.
+jest.mock('node:fs', () => {
+  const actual = jest.requireActual<typeof import('node:fs')>('node:fs');
+  return {
+    ...actual,
+    rmSync: jest.fn(actual.rmSync),
+  };
+});
+
+const mockedRmSync = (): jest.Mock => {
+  const { rmSync: rm } = jest.requireMock('node:fs') as { rmSync: jest.Mock };
+  return rm;
+};
 
 const NODE = process.execPath;
 
@@ -323,6 +340,98 @@ describe('CloudGovernedSandboxExecutor (OB-002D ephemeral boundary)', () => {
       expect(result.exitCode).toBeNull();
       expect(result.sandboxLog).toContain('cloud agent process error');
       expect(sessionTreeFreeOfFiles(join(workspaceRoot, SESSION_ROOT))).toBe(true);
+    });
+  });
+
+  describe('cleanup failure fails closed (review §9 / MEDIUM)', () => {
+    const secret = 'SECRET_AUTH_VALUE_prohibit_reporting_success';
+
+    async function expectCleanupTerminalFailure(
+      request: SandboxExecutionRequest,
+      overrides: { resolver?: CloudCredentialResolver } = {},
+    ): Promise<CloudSandboxError> {
+      mockedRmSync().mockImplementationOnce(() => {
+        // Simulate a destructive cleanup failure; the secret embedded here must
+        // never reach the caller's error or the log fixtures (sanitization proof).
+        throw new Error(`EPERM while removing ${secret}`);
+      });
+      const loggerSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      try {
+        const ex = new CloudGovernedSandboxExecutor(
+          overrides.resolver ?? resolverWith('cloud:cleanup', secret),
+          workspaceRoot,
+          'test',
+        );
+        try {
+          const outcome = await ex.execute(request);
+          throw new Error(`expected cleanup failure rejection, got result exitCode=${String(outcome.exitCode)}`);
+        } catch (error) {
+          expect(error).toBeInstanceOf(CloudSandboxError);
+          const cloudError = error as CloudSandboxError;
+          expect(cloudError.code).toBe('CLOUD_SESSION_CLEANUP_FAILED');
+          expect(cloudError.message).not.toContain(secret);
+
+          const logged = loggerSpy.mock.calls.map((call) => String(call[0])).join('\n');
+          expect(logged).toContain('Cloud session cleanup failed');
+          expect(logged).not.toContain(secret);
+
+          return cloudError;
+        }
+      } finally {
+        loggerSpy.mockRestore();
+      }
+    }
+
+    it('CRITICAL: cleanup failure after a SUCCESSFUL execution becomes an explicit terminal failure (never success)', async () => {
+      const error = await expectCleanupTerminalFailure(
+        makeRequest({ args: agentArgs('--auth'), credentialReference: 'cloud:cleanup' }, workspaceRoot),
+      );
+      expect(error.message).toMatch(/refusing to report cloud execution success/);
+    });
+
+    it('CRITICAL: cleanup failure on the TIMEOUT path becomes an explicit terminal failure (never reported)', async () => {
+      await expectCleanupTerminalFailure(
+        makeRequest(
+          {
+            args: agentArgs('--sleep'),
+            sandboxConfig: {
+              technology: 'none',
+              timeoutMs: 600,
+              maxMemoryBytes: 0,
+              maxCpuTimeMs: 0,
+              maxWorktreeBytes: 0,
+            },
+          },
+          workspaceRoot,
+        ),
+      );
+    });
+
+    it('CRITICAL: cleanup failure on the NONZERO-EXIT (failure) path becomes an explicit terminal failure', async () => {
+      await expectCleanupTerminalFailure(
+        makeRequest({ args: [...agentArgs('--exit'), '7'] }, workspaceRoot),
+      );
+    });
+
+    it('CRITICAL: cleanup failure on the SPAWN-ERROR path becomes an explicit terminal failure', async () => {
+      const request = makeRequest({ args: ['--env'] }, workspaceRoot);
+      await expectCleanupTerminalFailure({
+        ...request,
+        executable: { ...request.executable, resolvedPath: join(workspaceRoot, 'does-not-exist.js') },
+      });
+    });
+
+    it('a subsequent cleanup that succeeds restores normal behavior (mock is deterministic and scoped)', async () => {
+      const listRuns = (): string[] => {
+        const runs = join(workspaceRoot, SESSION_ROOT, 'runs');
+        return existsSync(runs) ? readdirSync(runs) : [];
+      };
+      const before = new Set(listRuns());
+      const result = await executor().execute(
+        makeRequest({ args: [...agentArgs('--exit'), '3'] }, workspaceRoot),
+      );
+      expect(result.exitCode).toBe(3);
+      expect(listRuns().filter((run) => !before.has(run))).toHaveLength(0);
     });
   });
 
