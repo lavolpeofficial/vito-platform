@@ -129,6 +129,12 @@ export class CloudGovernedAgentAdapter implements GovernedProviderAdapter {
         sandboxConfig,
         env: context.environment.allowlist.size > 0 ? context.environment.allowlist : undefined,
         credentialReference: context.credentialReference,
+        // Server-owned expected identity — derived ONLY from the immutable
+        // server profile. Never from caller/operator input.
+        expectedProviderIdentity: {
+          providerId: profile.expectedProviderId,
+          ...(profile.allowedModelIds ? { allowedModelIds: profile.allowedModelIds } : {}),
+        },
       });
 
       return mapWorkerResult(
@@ -194,7 +200,30 @@ function mapWorkerResult(
 ): GovernedAdapterResult {
   const commandSummary = `${trustedExecutable.commandName}${args.length ? ' ' + args.join(' ') : ''}`;
 
-  const flight001Acceptance = buildFlight001AcceptanceEvidence(result);
+  // OB002D-MEDIUM-PROVIDER-IDENTITY: acceptance/providership evidence is
+  // sanitized (validated provider/model ids, booleans, paths, hashes — never
+  // content, never credentials). Postcondition UNENFORCED would mean the
+  // server-owned profile did not authorize an identity; enforced-false means
+  // the observed identity failed the profile gate.
+  const identityEvidence = result.observedProviderIdentity
+    ? {
+        observedProviderId: result.observedProviderIdentity.providerId,
+        observedModelId: result.observedProviderIdentity.modelId,
+      }
+    : { observedProviderId: null, observedModelId: null };
+
+  const flight001Acceptance = result.providerIdentityError
+    ? { checked: false }
+    : buildFlight001AcceptanceEvidence(result);
+
+  const providerIdentityPostcondition = result.providerIdentityError
+    ? {
+        enforced: true,
+        passed: false,
+        code: result.providerIdentityError.code,
+        ...identityEvidence,
+      }
+    : { enforced: true, passed: true, ...identityEvidence };
 
   const baseMetadata = {
     executableIntegrityHash: trustedExecutable.integrityHash ?? null,
@@ -205,6 +234,7 @@ function mapWorkerResult(
     workspaceDisposition: result.workspaceDisposition,
     credentialDisposition: 'removed' as const,
     flight001Acceptance,
+    providerIdentityPostcondition,
     sideEffects: {
       filesCreated: [],
       filesModified: result.governedResultSettling?.changedFiles ?? [],
@@ -212,6 +242,20 @@ function mapWorkerResult(
       commandsExecuted: [commandSummary],
     },
   };
+
+  if (result.providerIdentityError) {
+    return {
+      status: AgentExecutionStatus.FAILED,
+      providerExecutionMetadata: baseMetadata,
+      usageMetadata: { durationMs: result.durationMs },
+      error: {
+        code: result.providerIdentityError.code,
+        message: result.providerIdentityError.message,
+        retryable: false,
+      },
+      completedAt: new Date(),
+    };
+  }
 
   if (result.timedOut) {
     return {

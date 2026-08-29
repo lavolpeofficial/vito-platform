@@ -46,6 +46,34 @@ export interface SandboxExecutionRequest {
    * reference into an ephemeral session artifact; everything else ignores it.
    */
   readonly credentialReference?: string;
+  /**
+   * Server-authorized provider identity (from the cloud execution profile)
+   * that the boundary MUST observe (OB002D-MEDIUM-PROVIDER-IDENTITY). Only
+   * present on the CLOUD_GOVERNED path; when absent the boundary still observes
+   * identity but does not enforce. Never caller-derived.
+   */
+  readonly expectedProviderIdentity?: ExpectedProviderIdentity;
+}
+
+export interface ExpectedProviderIdentity {
+  readonly providerId: string;
+  readonly allowedModelIds?: readonly string[];
+}
+
+export interface ObservedProviderIdentity {
+  readonly providerId: string;
+  readonly modelId: string;
+}
+
+export type ProviderIdentityErrorCode =
+  | 'PROVIDER_IDENTITY_MISSING'
+  | 'PROVIDER_IDENTITY_AMBIGUOUS'
+  | 'PROVIDER_IDENTITY_MISMATCH'
+  | 'PROVIDER_IDENTITY_MODEL_NOT_ALLOWED';
+
+export interface ProviderIdentityError {
+  readonly code: ProviderIdentityErrorCode;
+  readonly message: string;
 }
 
 export interface SandboxExecutionResult {
@@ -56,6 +84,8 @@ export interface SandboxExecutionResult {
   readonly timedOut: boolean;
   readonly oomKilled: boolean;
   readonly sandboxLog?: string;
+  readonly observedProviderIdentity?: ObservedProviderIdentity;
+  readonly providerIdentityError?: ProviderIdentityError;
 }
 
 export interface WorkspaceProvisioner {

@@ -11,10 +11,13 @@ import type {
   SandboxExecutor,
   SandboxExecutionRequest,
   SandboxExecutionResult,
+  ExpectedProviderIdentity,
+  ProviderIdentityError,
 } from '../remote-execution-worker/types';
 import { BoundedOutputCapture } from '../remote-execution-worker/output-capture';
 import { CloudCredentialResolver } from './cloud-credential.resolver';
 import { SandboxStartupError } from '../remote-execution-worker/sandbox-executor';
+import { extractProviderIdentity } from './provider-identity';
 
 /**
  * Server-managed cloud-execution hardening flags. Executor-owned constants,
@@ -34,6 +37,16 @@ const SESSION_PATH_TOKEN = 'runs';
 
 /** Fallback PATH — NEVER merged from operator process.env beyond PATH. */
 const DEFAULT_PATH = '/usr/local/bin:/usr/bin:/bin';
+
+/**
+ * Server-owned provider-identity observability flags injected into the agent
+ * invocation when it uses the `run` subcommand. They make the launcher's own
+ * log lines observable on stderr so the boundary can record the sanitized
+ * machine-readable provider/model identity (OB002D-MEDIUM-PROVIDER-IDENTITY).
+ * Only log levels that still emit INFO lines are accepted.
+ */
+const ALLOWED_LOG_LEVELS = new Set(['trace', 'debug', 'info']);
+const DEFAULT_LOG_LEVEL = 'INFO';
 
 /**
  * CloudGovernedSandboxExecutor — the ephemeral CLOUD_GOVERNED execution
@@ -114,16 +127,21 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
       const capture = new BoundedOutputCapture(MAX_OUTPUT_BYTES);
       const startedAt = Date.now();
       const timeoutMs = Math.max(1_000, request.sandboxConfig.timeoutMs || DEFAULT_MAX_DURATION_MS);
+      const launchArgs =
+        request.args.length > 0 && request.args[0] === 'run'
+          ? this.buildRunArgs(request.args)
+          : [...request.args];
 
       return await this.spawnBounded(
         request.executable.resolvedPath,
-        request.args,
+        launchArgs,
         request.prompt,
         request.workspace.worktreePath,
         processEnv,
         capture,
         startedAt,
         timeoutMs,
+        request.expectedProviderIdentity,
       );
     } catch (error) {
       if (error instanceof SandboxStartupError || error instanceof CloudSandboxError) {
@@ -239,6 +257,154 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
     return rel.length > 0 && !rel.startsWith('..') && !isAbsolute(rel);
   }
 
+  /**
+   * Server-owned normalization of a `run`-shaped agent invocation.
+   *
+   * Guarantees (OB002D-MEDIUM-PROVIDER-IDENTITY):
+   *  - the invocation must use the `run` subcommand (fail closed otherwise);
+   *  - caller/operator model or provider selection via `-m`/`--model`/
+   *    `--provider` flags is rejected — the authorized identity can only come
+   *    from the server-owned profile, never from caller input;
+   *  - the log level is validated so identity lines can always be observed
+   *    (INFO-compatible only, single unambiguous value);
+   *  - `--print-logs` and `--log-level <INFO>` are injected when absent so the
+   *    boundary can observe the sanitized provider/model identity.
+   */
+  private buildRunArgs(args: readonly string[]): string[] {
+    if (args.length === 0 || args[0] !== 'run') {
+      throw new CloudSandboxError(
+        'CLOUD_AGENT_ARGS_INVALID',
+        'cloud agent invocation must use the run subcommand',
+      );
+    }
+
+    const rest = args.slice(1);
+    let sawLogLevel = false;
+    let logLevel = DEFAULT_LOG_LEVEL;
+
+    for (let i = 0; i < rest.length; i += 1) {
+      const arg = rest[i];
+      if (
+        arg === '-m' ||
+        arg === '--model' ||
+        arg === '--provider' ||
+        arg.startsWith('--model=') ||
+        arg.startsWith('--provider=')
+      ) {
+        throw new CloudSandboxError(
+          'PROVIDER_MODEL_OVERRIDE_DENIED',
+          'caller/operator model or provider selection is not allowed in governed cloud execution',
+        );
+      }
+
+      if (arg === '--log-level' || arg.startsWith('--log-level=')) {
+        let value: string;
+        if (arg === '--log-level') {
+          i += 1;
+          value = rest[i];
+          if (
+            value === undefined ||
+            value.length === 0 ||
+            value.startsWith('-') ||
+            !ALLOWED_LOG_LEVELS.has(value.toLowerCase())
+          ) {
+            throw new CloudSandboxError(
+              'CLOUD_AGENT_LOG_LEVEL_DENIED',
+              'governed cloud identity observability requires an info-compatible log level',
+            );
+          }
+        } else {
+          value = arg.slice('--log-level='.length);
+          if (!ALLOWED_LOG_LEVELS.has(value.toLowerCase())) {
+            throw new CloudSandboxError(
+              'CLOUD_AGENT_LOG_LEVEL_DENIED',
+              'governed cloud identity observability requires an info-compatible log level',
+            );
+          }
+        }
+        if (sawLogLevel) {
+          throw new CloudSandboxError(
+            'CLOUD_AGENT_ARGS_INVALID',
+            'cloud agent log level is ambiguous',
+          );
+        }
+        sawLogLevel = true;
+        logLevel = value;
+      }
+    }
+
+    const hasPrintLogs = rest.includes('--print-logs');
+    return [
+      'run',
+      ...(hasPrintLogs ? [] : ['--print-logs']),
+      ...(sawLogLevel ? [] : ['--log-level', logLevel]),
+      ...rest,
+    ];
+  }
+
+  /**
+   * Evaluate the observed provider/model identity against the server-owned
+   * expected identity. Fail closed (result carries a sanitized
+   * ProviderIdentityError) on ANY missing, ambiguous or mismatched identity,
+   * or when the observed model is outside the server-authorized allow-list.
+   * Identity values are passed through the strict parser only, so evidence
+   * can never contain arbitrary (e.g. credential) text.
+   */
+  private evaluateProviderIdentity(
+    expected: ExpectedProviderIdentity | undefined,
+    capturedOutput: string,
+  ): {
+    observedProviderIdentity?: { providerId: string; modelId: string };
+    providerIdentityError?: ProviderIdentityError;
+  } {
+    const parsed = extractProviderIdentity(capturedOutput);
+    if (!parsed.ok) {
+      if (!expected) {
+        return {};
+      }
+      return {
+        providerIdentityError: {
+          code: parsed.code,
+          message:
+            parsed.code === 'PROVIDER_IDENTITY_MISSING'
+              ? 'governed cloud execution produced no observable provider identity; failing closed'
+              : 'governed cloud execution produced an ambiguous provider identity; failing closed',
+        },
+      };
+    }
+
+    const identity = parsed.identity;
+    if (!expected) {
+      return { observedProviderIdentity: identity };
+    }
+
+    if (identity.providerId !== expected.providerId) {
+      return {
+        observedProviderIdentity: identity,
+        providerIdentityError: {
+          code: 'PROVIDER_IDENTITY_MISMATCH',
+          message: `observed provider '${identity.providerId}' does not match the server-authorized provider '${expected.providerId}'`,
+        },
+      };
+    }
+
+    if (
+      expected.allowedModelIds &&
+      expected.allowedModelIds.length > 0 &&
+      !expected.allowedModelIds.includes(identity.modelId)
+    ) {
+      return {
+        observedProviderIdentity: identity,
+        providerIdentityError: {
+          code: 'PROVIDER_IDENTITY_MODEL_NOT_ALLOWED',
+          message: `observed model '${identity.modelId}' is not in the server-authorized model allow-list`,
+        },
+      };
+    }
+
+    return { observedProviderIdentity: identity };
+  }
+
   private spawnBounded(
     executablePath: string,
     args: readonly string[],
@@ -248,6 +414,7 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
     capture: BoundedOutputCapture,
     startedAt: number,
     timeoutMs: number,
+    expectedProviderIdentity?: ExpectedProviderIdentity,
   ): Promise<SandboxExecutionResult> {
     return new Promise<SandboxExecutionResult>((resolve) => {
       const child = spawn(executablePath, [...args], {
@@ -278,7 +445,25 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        resolve(result);
+
+        const output = `${capture.getStdout()}\n${capture.getStderr()}`;
+        const identityOutcome = this.evaluateProviderIdentity(expectedProviderIdentity, output);
+
+        this.logger.debug(
+          `Cloud-governed identity observed: ${identityOutcome.observedProviderIdentity
+            ? `${identityOutcome.observedProviderIdentity.providerId}/${identityOutcome.observedProviderIdentity.modelId}`
+            : 'none'}${identityOutcome.providerIdentityError ? ` error=${identityOutcome.providerIdentityError.code}` : ''}`,
+        );
+
+        resolve({
+          ...result,
+          ...(identityOutcome.observedProviderIdentity
+            ? { observedProviderIdentity: identityOutcome.observedProviderIdentity }
+            : {}),
+          ...(identityOutcome.providerIdentityError
+            ? { providerIdentityError: identityOutcome.providerIdentityError }
+            : {}),
+        });
       };
 
       child.on('error', () => {

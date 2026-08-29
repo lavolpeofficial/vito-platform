@@ -38,6 +38,7 @@ describe('AgentWorkforceService', () => {
       providerCode,
       credentialRef: 'cloud:test',
       trustedLauncherAlias: 'worker-agent',
+      expectedProviderId: 'openai',
       maxDurationMs: 60_000,
       maxParallelism: 1,
       enabled: true,

@@ -3893,6 +3893,7 @@ function makeCloudProfile(providerCode: string, overrides: Record<string, any> =
     providerCode,
     credentialRef: 'cloud:test',
     trustedLauncherAlias: 'opencode',
+    expectedProviderId: 'openai',
     maxDurationMs: 60_000,
     maxParallelism: 1,
     enabled: true,

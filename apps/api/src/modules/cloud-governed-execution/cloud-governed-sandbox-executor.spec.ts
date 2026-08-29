@@ -6,6 +6,7 @@ import {
   readFileSync,
   rmSync,
   writeFileSync,
+  chmodSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -88,8 +89,9 @@ describe('CloudGovernedSandboxExecutor (OB-002D ephemeral boundary)', () => {
   let workspaceRoot: string;
   let agentPath: string;
   let sleeperPath: string;
+  let runShimPath: string;
 
-  const agentArgs = (mode: string): string[] => [agentPath, mode];
+  const agentArgs = (mode: string, ...rest: string[]): string[] => [agentPath, mode, ...rest];
 
   beforeAll(() => {
     workspaceRoot = mkdtempSync(join(tmpdir(), 'vito-cloud-executor-'));
@@ -140,6 +142,24 @@ describe('CloudGovernedSandboxExecutor (OB-002D ephemeral boundary)', () => {
         "    process.stdout.write(content);",
         "    process.exit(0);",
         "  }",
+        "  if (mode === '--identity') {",
+        "    const provider = process.argv[3];",
+        "    const model = process.argv[4];",
+        "    process.stderr.write('level=INFO run=fixture message=stream providerID=' + provider + ' modelID=' + model + ' session.id=x agent=build mode=primary\\n');",
+        "    process.stderr.write('level=INFO run=fixture message=\\\"llm runtime selected\\\" llm.provider=' + provider + ' llm.model=' + model + '\\n');",
+        "    process.exit(0);",
+        "  }",
+        "  if (mode === '--identity-ambiguous') {",
+        "    process.stderr.write('level=INFO run=fixture message=\\\"llm runtime selected\\\" llm.provider=openai llm.model=gpt-5.6-terra-fast\\n');",
+        "    process.stderr.write('level=INFO run=fixture message=\\\"llm runtime selected\\\" llm.provider=opencode llm.model=big-pickle\\n');",
+        "    process.stderr.write('level=INFO run=fixture message=stream providerID=openai modelID=gpt-5.6-terra-fast agent=build mode=primary\\n');",
+        "    process.exit(0);",
+        "  }",
+        "  if (mode === '--identity-smuggle') {",
+        "    const value = process.argv[3];",
+        "    process.stderr.write('level=INFO run=fixture message=stream providerID=' + value + ' modelID=gpt-5.6-terra-fast agent=build mode=primary\\n');",
+        "    process.exit(0);",
+        "  }",
         "  if (mode === '--exit') {",
         "    process.exit(parseInt(process.argv[3] || '0', 10));",
         "  }",
@@ -157,6 +177,32 @@ describe('CloudGovernedSandboxExecutor (OB-002D ephemeral boundary)', () => {
         "setInterval(() => {}, 1000);",
       ].join('\n'),
     );
+
+    // Launcher-shaped shim: spawned directly (shebang) with argv[1] === 'run',
+    // exactly like the real opencode launcher subcommand contract. Forwards the
+    // intercepted identity so the boundary can observe/enforce it.
+    runShimPath = join(workspaceRoot, 'run-shim');
+    writeFileSync(
+      runShimPath,
+      [
+        "#!/usr/bin/env node",
+        "function main() {",
+        "  process.stderr.write('ARGS=' + JSON.stringify(process.argv.slice(2)) + '\\n');",
+        "  const idIdx = process.argv.indexOf('--identity');",
+        "  if (idIdx >= 0) {",
+        "    const provider = process.argv[idIdx + 1];",
+        "    const model = process.argv[idIdx + 2];",
+        "    process.stderr.write('level=INFO run=shim message=stream providerID=' + provider + ' modelID=' + model + ' session.id=x agent=build mode=primary\\n');",
+        "    process.stderr.write('level=INFO run=shim message=\\\"llm runtime selected\\\" llm.provider=' + provider + ' llm.model=' + model + '\\n');",
+        "    process.exit(0);",
+        "  }",
+        "  process.stderr.write('level=INFO run=shim message=stream providerID=opencode modelID=big-pickle agent=build mode=primary\\n');",
+        "  process.exit(0);",
+        "}",
+        "main();",
+      ].join('\n'),
+    );
+    chmodSync(runShimPath, 0o755);
   });
 
   afterAll(() => {
@@ -432,6 +478,173 @@ describe('CloudGovernedSandboxExecutor (OB-002D ephemeral boundary)', () => {
       );
       expect(result.exitCode).toBe(3);
       expect(listRuns().filter((run) => !before.has(run))).toHaveLength(0);
+    });
+  });
+
+  describe('provider identity postcondition (OB002D-MEDIUM-PROVIDER-IDENTITY)', () => {
+    const expectedOpenAI = { providerId: 'openai' } as const;
+
+    it('PASS: observed identity matches the server-authorized profile', async () => {
+      const result = await executor().execute(
+        makeRequest(
+          {
+            args: agentArgs('--identity', 'openai', 'gpt-5.6-terra-fast'),
+            expectedProviderIdentity: expectedOpenAI,
+          },
+          workspaceRoot,
+        ),
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.observedProviderIdentity).toEqual({
+        providerId: 'openai',
+        modelId: 'gpt-5.6-terra-fast',
+      });
+      expect(result.providerIdentityError).toBeUndefined();
+    });
+
+    it('fail closed: embedded fallback provider identity never satisfies the authorized profile (the finding)', async () => {
+      const result = await executor().execute(
+        makeRequest(
+          {
+            args: agentArgs('--identity', 'opencode', 'big-pickle'),
+            expectedProviderIdentity: expectedOpenAI,
+          },
+          workspaceRoot,
+        ),
+      );
+      expect(result.providerIdentityError).toBeDefined();
+      expect(result.providerIdentityError?.code).toBe('PROVIDER_IDENTITY_MISMATCH');
+      expect(result.providerIdentityError?.message).toContain("observed provider 'opencode'");
+      expect(result.providerIdentityError?.message).toContain("server-authorized provider 'openai'");
+    });
+
+    it('fail closed: missing identity evidence', async () => {
+      const result = await executor().execute(
+        makeRequest({ args: agentArgs('--env'), expectedProviderIdentity: expectedOpenAI }, workspaceRoot),
+      );
+      expect(result.providerIdentityError?.code).toBe('PROVIDER_IDENTITY_MISSING');
+    });
+
+    it('fail closed: ambiguous identity evidence', async () => {
+      const result = await executor().execute(
+        makeRequest({ args: agentArgs('--identity-ambiguous'), expectedProviderIdentity: expectedOpenAI }, workspaceRoot),
+      );
+      expect(result.providerIdentityError?.code).toBe('PROVIDER_IDENTITY_AMBIGUOUS');
+    });
+
+    it('fail closed: observed model outside the server-authorized allow-list', async () => {
+      const result = await executor().execute(
+        makeRequest(
+          {
+            args: agentArgs('--identity', 'openai', 'gpt-4o'),
+            expectedProviderIdentity: { providerId: 'openai', allowedModelIds: ['gpt-5.6-terra-fast'] },
+          },
+          workspaceRoot,
+        ),
+      );
+      expect(result.providerIdentityError?.code).toBe('PROVIDER_IDENTITY_MODEL_NOT_ALLOWED');
+    });
+
+    it('identity is observed but not enforced when no expected identity is set', async () => {
+      const result = await executor().execute(
+        makeRequest({ args: agentArgs('--identity', 'opencode', 'big-pickle') }, workspaceRoot),
+      );
+      expect(result.observedProviderIdentity).toEqual({ providerId: 'opencode', modelId: 'big-pickle' });
+      expect(result.providerIdentityError).toBeUndefined();
+    });
+
+    it('CRITICAL: provider identity evidence and terminal errors never contain credential values', async () => {
+      const secret = 'SECRET_AUTH_VALUE_identity_isolation';
+      const ex = new CloudGovernedSandboxExecutor(
+        resolverWith('cloud:id-secret', secret),
+        workspaceRoot,
+        'test',
+      );
+      const result = await ex.execute(
+        makeRequest(
+          {
+            args: agentArgs('--identity', 'opencode', 'big-pickle'),
+            credentialReference: 'cloud:id-secret',
+            expectedProviderIdentity: expectedOpenAI,
+          },
+          workspaceRoot,
+        ),
+      );
+      const serialized = JSON.stringify({
+        observedProviderIdentity: result.observedProviderIdentity,
+        providerIdentityError: result.providerIdentityError,
+      });
+      expect(serialized).not.toContain(secret);
+      expect(result.providerIdentityError?.code).toBe('PROVIDER_IDENTITY_MISMATCH');
+    });
+
+    it('CRITICAL: smuggled identity tokens cannot inject arbitrary text into evidence', async () => {
+      const smuggled = 'sk-injected; rm -rf / <<"END"';
+      const result = await executor().execute(
+        makeRequest(
+          {
+            args: agentArgs('--identity-smuggle', smuggled),
+            expectedProviderIdentity: expectedOpenAI,
+          },
+          workspaceRoot,
+        ),
+      );
+      expect(result.providerIdentityError?.code).toBe('PROVIDER_IDENTITY_AMBIGUOUS');
+      expect(JSON.stringify(result.providerIdentityError)).not.toContain(smuggled);
+    });
+
+    it('CRITICAL: caller/operator model or provider override attempts are rejected in args', async () => {
+      const overrideAttempts: Array<{ args: string[]; code: string }> = [
+        { args: ['run', '-m', 'opencode/big-pickle'], code: 'PROVIDER_MODEL_OVERRIDE_DENIED' },
+        { args: ['run', '--model', 'gpt-4o'], code: 'PROVIDER_MODEL_OVERRIDE_DENIED' },
+        { args: ['run', '--provider', 'opencode'], code: 'PROVIDER_MODEL_OVERRIDE_DENIED' },
+        { args: ['run', '--model=gpt-4o'], code: 'PROVIDER_MODEL_OVERRIDE_DENIED' },
+        { args: ['run', '--log-level', 'warn'], code: 'CLOUD_AGENT_LOG_LEVEL_DENIED' },
+        { args: ['run', '--log-level'], code: 'CLOUD_AGENT_LOG_LEVEL_DENIED' },
+        { args: ['run', '--log-level', 'debug', '--log-level', 'INFO'], code: 'CLOUD_AGENT_ARGS_INVALID' },
+      ];
+      for (const attempt of overrideAttempts) {
+        await expect(
+          executor().execute(
+            makeRequest({ args: attempt.args, expectedProviderIdentity: expectedOpenAI }, workspaceRoot),
+          ),
+        ).rejects.toMatchObject({ code: attempt.code });
+      }
+    });
+
+    it('PASS: run-shaped invocation is normalized with identity-observability flags and must match the expected identity', async () => {
+      const result = await executor().execute(
+        makeRequest(
+          {
+            executable: { resolvedPath: runShimPath, commandName: 'run-shim', verifiedAt: new Date() },
+            args: ['run', '--identity', 'openai', 'gpt-5.6-terra-fast'],
+            expectedProviderIdentity: expectedOpenAI,
+          },
+          workspaceRoot,
+        ),
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.observedProviderIdentity).toEqual({
+        providerId: 'openai',
+        modelId: 'gpt-5.6-terra-fast',
+      });
+      expect(result.providerIdentityError).toBeUndefined();
+      expect(result.stderr).toContain('--print-logs');
+      expect(result.stderr).toContain('--log-level');
+    });
+
+    it('fail closed: run-shaped invocation with the embedded fallback identity', async () => {
+      const result = await executor().execute(
+        makeRequest(
+          {
+            executable: { resolvedPath: runShimPath, commandName: 'run-shim', verifiedAt: new Date() },
+            args: ['run', '--identity', 'opencode', 'big-pickle'],
+            expectedProviderIdentity: expectedOpenAI,
+          },
+          workspaceRoot,
+        ),
+      );
+      expect(result.providerIdentityError?.code).toBe('PROVIDER_IDENTITY_MISMATCH');
     });
   });
 

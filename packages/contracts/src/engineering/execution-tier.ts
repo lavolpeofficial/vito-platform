@@ -38,6 +38,18 @@ export interface CloudExecutionProfile {
    * Must resolve through TrustedExecutableResolver; mismatch fails closed.
    */
   readonly trustedLauncherAlias: string;
+  /**
+   * Server-authorized provider identity that the CLOUD_GOVERNED boundary MUST
+   * observe on the coding agent execution path (OB002D-MEDIUM-PROVIDER-IDENTITY).
+   * Missing, ambiguous or mismatched observed identity fails closed. This value
+   * is server-owned and can never be overridden by caller/operator input.
+   */
+  readonly expectedProviderId: string;
+  /**
+   * Optional exact server-authorized model allow-list. When present, an
+   * observed model identity outside this list fails closed.
+   */
+  readonly allowedModelIds?: readonly string[];
   readonly maxDurationMs: number;
   /** Reserved hard cap; v0.2D executes at most one concurrent session. */
   readonly maxParallelism: number;
@@ -85,6 +97,9 @@ const PROFILE_ID_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 const PROVIDER_CODE_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 const CREDENTIAL_REF_PATTERN = /^[a-zA-Z0-9._:-]{1,256}$/;
 const LAUNCHER_ALIAS_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const PROVIDER_ID_PATTERN = /^[a-zA-Z0-9._:-]{1,128}$/;
+const MODEL_ID_PATTERN = /^[a-zA-Z0-9._:\/-]{1,128}$/;
+const MAX_ALLOWED_MODEL_IDS = 64;
 
 export const CLOUD_EXECUTION_PROFILE_MIN_DURATION_MS = 1_000;
 export const CLOUD_EXECUTION_PROFILE_MAX_DURATION_MS = 86_400_000;
@@ -125,6 +140,39 @@ export function toValidatedCloudExecutionProfile(
     return null;
   }
 
+  const expectedProviderId = value.expectedProviderId;
+  if (
+    typeof expectedProviderId !== 'string' ||
+    !PROVIDER_ID_PATTERN.test(expectedProviderId)
+  ) {
+    return null;
+  }
+
+  let allowedModelIds: readonly string[] | undefined;
+  if (value.allowedModelIds !== undefined) {
+    if (
+      !Array.isArray(value.allowedModelIds) ||
+      value.allowedModelIds.length === 0 ||
+      value.allowedModelIds.length > MAX_ALLOWED_MODEL_IDS
+    ) {
+      return null;
+    }
+    const normalized: string[] = [];
+    for (const entry of value.allowedModelIds) {
+      if (typeof entry !== 'string' || !MODEL_ID_PATTERN.test(entry)) {
+        return null;
+      }
+      normalized.push(entry);
+    }
+    if (new Set(normalized).size !== normalized.length) {
+      return null;
+    }
+    allowedModelIds = Object.freeze(normalized);
+  }
+  if (allowedModelIds !== undefined && allowedModelIds.length === 0) {
+    return null;
+  }
+
   const maxDurationMs = value.maxDurationMs;
   if (
     typeof maxDurationMs !== 'number' ||
@@ -155,6 +203,8 @@ export function toValidatedCloudExecutionProfile(
     providerCode,
     credentialRef,
     trustedLauncherAlias,
+    expectedProviderId,
+    ...(allowedModelIds !== undefined ? { allowedModelIds } : {}),
     maxDurationMs,
     maxParallelism,
     enabled,

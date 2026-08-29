@@ -21,6 +21,7 @@ function makeProfile(overrides: Partial<CloudExecutionProfile> = {}): CloudExecu
     providerCode: PROVIDER_CODE,
     credentialRef: CREDENTIAL_REF,
     trustedLauncherAlias: 'worker-agent',
+    expectedProviderId: 'openai',
     maxDurationMs: 60_000,
     maxParallelism: 1,
     enabled: true,
@@ -68,6 +69,7 @@ describe('CloudExecutionProfileRegistry (fail-closed binding)', () => {
           providerCode: PROVIDER_CODE,
           credentialRef: CREDENTIAL_REF,
           trustedLauncherAlias: 'worker-agent',
+          expectedProviderId: 'openai',
           maxDurationMs: 60_000,
           maxParallelism: 1,
           enabled: true,
@@ -92,8 +94,9 @@ describe('CloudExecutionProfileRegistry (fail-closed binding)', () => {
 
     it('drops malformed entries so no provider binds to an invalid boundary', () => {
       const raw = JSON.stringify([
-        { profileId: 'ok', providerCode: 'cloud.ok', credentialRef: 'c:1', trustedLauncherAlias: 'a', maxDurationMs: 1000, maxParallelism: 1, enabled: true },
-        { profileId: 'bad-enabled', providerCode: 'cloud.bad', credentialRef: 'c:2', trustedLauncherAlias: 'a', maxDurationMs: 500, maxParallelism: 1, enabled: true },
+        { profileId: 'ok', providerCode: 'cloud.ok', credentialRef: 'c:1', trustedLauncherAlias: 'a', expectedProviderId: 'openai', maxDurationMs: 1000, maxParallelism: 1, enabled: true },
+        { profileId: 'bad-enabled', providerCode: 'cloud.bad', credentialRef: 'c:2', trustedLauncherAlias: 'a', expectedProviderId: 'openai', maxDurationMs: 500, maxParallelism: 1, enabled: 'not-a-bool' },
+        { profileId: 'bad-identity', providerCode: 'cloud.bad2', credentialRef: 'c:3', trustedLauncherAlias: 'a', expectedProviderId: 'rm -rf /', maxDurationMs: 1000, maxParallelism: 1, enabled: true },
         'not-an-object',
       ]);
       const profiles = parseCloudExecutionProfilesFromEnv(raw);

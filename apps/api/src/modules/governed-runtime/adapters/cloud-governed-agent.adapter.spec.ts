@@ -20,6 +20,7 @@ function makeProfile(overrides: Partial<CloudExecutionProfile> = {}): CloudExecu
     providerCode: PROVIDER_CODE,
     credentialRef: CREDENTIAL_REF,
     trustedLauncherAlias: 'worker-agent',
+    expectedProviderId: 'openai',
     maxDurationMs: 60_000,
     maxParallelism: 1,
     enabled: true,
@@ -344,6 +345,110 @@ describe('CloudGovernedAgentAdapter (CLOUD_GOVERNED tier, §9 gates)', () => {
     expect(result.status).toBe(AgentExecutionStatus.FAILED);
     expect((result.error as { code: string }).code).toBe('CLOUD_AGENT_EXECUTION_ERROR');
     expect(result.error!.retryable).toBe(true);
+  });
+
+  it('forwards the server-owned expected provider identity from the profile', async () => {
+    const worker = makeMockWorkerService();
+    (worker.executeSandboxed as jest.Mock).mockResolvedValue(makeWorkerResult());
+    const adapter = makeAdapter(worker, makeRegistry([makeProfile()]));
+    await adapter.execute({ governedInputPayload: { args: ['--run'] } }, makeContext());
+
+    const callArgs = (worker.executeSandboxed as jest.Mock).mock.calls[0][0];
+    expect(callArgs.expectedProviderIdentity).toEqual({ providerId: 'openai' });
+  });
+
+  it('forwards the optional model allow-list when the profile declares it', async () => {
+    const worker = makeMockWorkerService();
+    (worker.executeSandboxed as jest.Mock).mockResolvedValue(makeWorkerResult());
+    const profile = makeProfile({ allowedModelIds: ['gpt-5.6-terra-fast', 'gpt-5.6-terra-fast-mini'] });
+    const adapter = makeAdapter(worker, makeRegistry([profile]));
+    await adapter.execute({ governedInputPayload: {} }, makeContext());
+
+    const callArgs = (worker.executeSandboxed as jest.Mock).mock.calls[0][0];
+    expect(callArgs.expectedProviderIdentity).toEqual({
+      providerId: 'openai',
+      allowedModelIds: ['gpt-5.6-terra-fast', 'gpt-5.6-terra-fast-mini'],
+    });
+  });
+
+  it('CRITICAL: caller/operator payload cannot override the expected provider identity', async () => {
+    const worker = makeMockWorkerService();
+    (worker.executeSandboxed as jest.Mock).mockResolvedValue(makeWorkerResult());
+    const adapter = makeAdapter(worker);
+    await adapter.execute(
+      {
+        governedInputPayload: {
+          args: ['--run'],
+          expectedProviderIdentity: { providerId: 'opencode' },
+        } as never,
+      },
+      makeContext(),
+    );
+
+    const callArgs = (worker.executeSandboxed as jest.Mock).mock.calls[0][0];
+    expect(callArgs.expectedProviderIdentity).toEqual({ providerId: 'openai' });
+  });
+
+  it('CRITICAL: provider identity mismatch fails closed to FAILED with sanitized evidence', async () => {
+    const worker = makeMockWorkerService();
+    (worker.executeSandboxed as jest.Mock).mockResolvedValue(
+      makeWorkerResult({
+        exitCode: 0,
+        observedProviderIdentity: { providerId: 'opencode', modelId: 'big-pickle' },
+        providerIdentityError: {
+          code: 'PROVIDER_IDENTITY_MISMATCH',
+          message: "observed provider 'opencode' does not match the server-authorized provider 'openai'",
+        },
+      }),
+    );
+    const result = await makeAdapter(worker).execute(
+      { governedInputPayload: { args: ['--run'] } },
+      makeContext(),
+    );
+
+    expect(result.status).toBe(AgentExecutionStatus.FAILED);
+    expect(result.error!.code).toBe('PROVIDER_IDENTITY_MISMATCH');
+    expect(result.error!.retryable).toBe(false);
+    expect(result.error!.message).toBe(
+      "observed provider 'opencode' does not match the server-authorized provider 'openai'",
+    );
+
+    const meta = result.providerExecutionMetadata as Record<string, unknown>;
+    expect(meta.providerIdentityPostcondition).toEqual({
+      enforced: true,
+      passed: false,
+      code: 'PROVIDER_IDENTITY_MISMATCH',
+      observedProviderId: 'opencode',
+      observedModelId: 'big-pickle',
+    });
+    expect(meta.flight001Acceptance).toEqual({ checked: false });
+    const metadataJson = JSON.stringify(meta);
+    expect(metadataJson).not.toContain(CREDENTIAL_REF);
+    expect(metadataJson).not.toContain('secret');
+  });
+
+  it('identity is observed for provership evidence on success (enforced pass)', async () => {
+    const worker = makeMockWorkerService();
+    (worker.executeSandboxed as jest.Mock).mockResolvedValue(
+      makeWorkerResult({
+        exitCode: 0,
+        stdout: 'done',
+        observedProviderIdentity: { providerId: 'openai', modelId: 'gpt-5.6-terra-fast' },
+      }),
+    );
+    const result = await makeAdapter(worker).execute(
+      { governedInputPayload: { args: ['--run'] } },
+      makeContext(),
+    );
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+
+    const meta = result.providerExecutionMetadata as Record<string, unknown>;
+    expect(meta.providerIdentityPostcondition).toEqual({
+      enforced: true,
+      passed: true,
+      observedProviderId: 'openai',
+      observedModelId: 'gpt-5.6-terra-fast',
+    });
   });
 
   it('does not directly spawn shells or child processes', () => {

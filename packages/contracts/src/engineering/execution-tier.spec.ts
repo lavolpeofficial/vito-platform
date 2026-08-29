@@ -24,6 +24,7 @@ function makeProfile(overrides: Partial<CloudExecutionProfile> = {}): CloudExecu
     providerCode: 'openai',
     credentialRef: 'cloud:openai:flight-001',
     trustedLauncherAlias: 'opencode',
+    expectedProviderId: 'openai',
     maxDurationMs: 600_000,
     maxParallelism: 1,
     enabled: true,
@@ -84,6 +85,7 @@ describe('toValidatedCloudExecutionProfile', () => {
       providerCode: 'openai',
       credentialRef: 'cloud:openai:flight-001',
       trustedLauncherAlias: 'opencode',
+      expectedProviderId: 'openai',
       maxDurationMs: 600_000,
       maxParallelism: 1,
       enabled: true,
@@ -92,11 +94,69 @@ describe('toValidatedCloudExecutionProfile', () => {
     expect(Object.isFrozen(profile)).toBe(true);
   });
 
+  it('accepts an optional authorized model allow-list and freezes it', () => {
+    const profile = toValidatedCloudExecutionProfile({
+      profileId: 'flight-001',
+      providerCode: 'openai',
+      credentialRef: 'cloud:openai:flight-001',
+      trustedLauncherAlias: 'opencode',
+      expectedProviderId: 'openai',
+      allowedModelIds: ['gpt-5.6-terra-fast', 'gpt-4o'],
+      maxDurationMs: 600_000,
+      maxParallelism: 1,
+      enabled: true,
+    });
+    expect(profile?.allowedModelIds).toEqual(['gpt-5.6-terra-fast', 'gpt-4o']);
+    expect(Object.isFrozen(profile?.allowedModelIds)).toBe(true);
+  });
+
+  it('rejects a missing, empty or malformed expectedProviderId (fail closed)', () => {
+    const base = {
+      profileId: 'flight-001',
+      providerCode: 'openai',
+      credentialRef: 'cloud:openai:flight-001',
+      trustedLauncherAlias: 'opencode',
+      maxDurationMs: 600_000,
+      maxParallelism: 1,
+      enabled: true,
+    };
+    expect(toValidatedCloudExecutionProfile({ ...base, expectedProviderId: undefined })).toBeNull();
+    expect(toValidatedCloudExecutionProfile({ ...base, expectedProviderId: '' })).toBeNull();
+    expect(toValidatedCloudExecutionProfile({ ...base, expectedProviderId: 'bad provider id' })).toBeNull();
+    expect(toValidatedCloudExecutionProfile({ ...base, expectedProviderId: 'rm -rf /' })).toBeNull();
+    expect(toValidatedCloudExecutionProfile({ ...base, expectedProviderId: 42 })).toBeNull();
+  });
+
+  it('rejects a malformed allowedModelIds (non-array, empty, oversized, bad or duplicate entries)', () => {
+    const base = {
+      profileId: 'flight-001',
+      providerCode: 'openai',
+      credentialRef: 'cloud:openai:flight-001',
+      trustedLauncherAlias: 'opencode',
+      expectedProviderId: 'openai',
+      maxDurationMs: 600_000,
+      maxParallelism: 1,
+      enabled: true,
+    };
+    expect(toValidatedCloudExecutionProfile({ ...base, allowedModelIds: 'gpt-4o' })).toBeNull();
+    expect(toValidatedCloudExecutionProfile({ ...base, allowedModelIds: [] })).toBeNull();
+    expect(toValidatedCloudExecutionProfile({ ...base, allowedModelIds: [42] })).toBeNull();
+    expect(toValidatedCloudExecutionProfile({ ...base, allowedModelIds: ['bad model name'] })).toBeNull();
+    expect(toValidatedCloudExecutionProfile({ ...base, allowedModelIds: ['gpt-4o', 'gpt-4o'] })).toBeNull();
+    expect(
+      toValidatedCloudExecutionProfile({
+        ...base,
+        allowedModelIds: Array.from({ length: 65 }, (_, i) => `m-${i}`),
+      }),
+    ).toBeNull();
+  });
+
   it('rejects missing, empty or malformed profileId', () => {
     const base = {
       providerCode: 'openai',
       credentialRef: 'cloud:openai:flight-001',
       trustedLauncherAlias: 'opencode',
+      expectedProviderId: 'openai',
       maxDurationMs: 600_000,
       maxParallelism: 1,
       enabled: true,
@@ -113,6 +173,7 @@ describe('toValidatedCloudExecutionProfile', () => {
         providerCode: 'openai',
         credentialRef: 'with spaces',
         trustedLauncherAlias: 'opencode',
+        expectedProviderId: 'openai',
         maxDurationMs: 600_000,
         maxParallelism: 1,
         enabled: true,
@@ -127,6 +188,7 @@ describe('toValidatedCloudExecutionProfile', () => {
         providerCode: 'openai',
         credentialRef: 'ref',
         trustedLauncherAlias: 'dangerous;rm',
+        expectedProviderId: 'openai',
         maxDurationMs: 600_000,
         maxParallelism: 1,
         enabled: true,
@@ -140,6 +202,7 @@ describe('toValidatedCloudExecutionProfile', () => {
       providerCode: 'openai',
       credentialRef: 'ref',
       trustedLauncherAlias: 'opencode',
+      expectedProviderId: 'openai',
       maxParallelism: 1,
       enabled: true,
     };
@@ -155,6 +218,7 @@ describe('toValidatedCloudExecutionProfile', () => {
       providerCode: 'openai',
       credentialRef: 'ref',
       trustedLauncherAlias: 'opencode',
+      expectedProviderId: 'openai',
       maxDurationMs: 600_000,
       enabled: true,
     };
@@ -168,6 +232,7 @@ describe('toValidatedCloudExecutionProfile', () => {
       providerCode: 'openai',
       credentialRef: 'ref',
       trustedLauncherAlias: 'opencode',
+      expectedProviderId: 'openai',
       maxDurationMs: 600_000,
       maxParallelism: 1,
     };
