@@ -40,6 +40,40 @@ export interface SandboxExecutionRequest {
   readonly prompt?: string;
   readonly sandboxConfig: GovernedSandboxConfig;
   readonly env?: ReadonlyMap<string, string>;
+  /**
+   * Server-owned opaque credential reference (e.g. a cloud auth.json key).
+   * NEVER a credential value. Only the cloud-governed boundary resolves this
+   * reference into an ephemeral session artifact; everything else ignores it.
+   */
+  readonly credentialReference?: string;
+  /**
+   * Server-authorized provider identity (from the cloud execution profile)
+   * that the boundary MUST observe (OB002D-MEDIUM-PROVIDER-IDENTITY). Only
+   * present on the CLOUD_GOVERNED path; when absent the boundary still observes
+   * identity but does not enforce. Never caller-derived.
+   */
+  readonly expectedProviderIdentity?: ExpectedProviderIdentity;
+}
+
+export interface ExpectedProviderIdentity {
+  readonly providerId: string;
+  readonly allowedModelIds?: readonly string[];
+}
+
+export interface ObservedProviderIdentity {
+  readonly providerId: string;
+  readonly modelId: string;
+}
+
+export type ProviderIdentityErrorCode =
+  | 'PROVIDER_IDENTITY_MISSING'
+  | 'PROVIDER_IDENTITY_AMBIGUOUS'
+  | 'PROVIDER_IDENTITY_MISMATCH'
+  | 'PROVIDER_IDENTITY_MODEL_NOT_ALLOWED';
+
+export interface ProviderIdentityError {
+  readonly code: ProviderIdentityErrorCode;
+  readonly message: string;
 }
 
 export interface SandboxExecutionResult {
@@ -50,6 +84,8 @@ export interface SandboxExecutionResult {
   readonly timedOut: boolean;
   readonly oomKilled: boolean;
   readonly sandboxLog?: string;
+  readonly observedProviderIdentity?: ObservedProviderIdentity;
+  readonly providerIdentityError?: ProviderIdentityError;
 }
 
 export interface WorkspaceProvisioner {
@@ -70,41 +106,27 @@ export interface OutputCapture {
 }
 
 /**
- * System-managed sandbox environment keys.
- * These are set by the executor to sandbox-visible paths.
- * Callers MUST NOT override them — attempts are rejected fail-closed.
+ * Sandbox environment classification — single authoritative source is the
+ * governed sandbox-environment contract in @vito/contracts (OB-002A).
+ * The sandbox boundary MUST NOT maintain an independent key list; additions
+ * or removals must happen in the contract and be mirrored by contract-drift
+ * tests. See SANDBOX_* comments there.
+ *
+ * SANDBOX_SYSTEM_MANAGED_ENV   — Class A: executor-owned; callers may never
+ *                                override (ENV_OVERRIDE_DENIED).
+ * SANDBOX_PROCESS_COMPATIBILITY_ENV — Class B: explicitly permitted from the
+ *                                trusted adapter boundary.
+ * SANDBOX_GOVERNED_EXECUTION_METADATA_ENV — Class C: server-generated governed
+ *                                execution context the invocation layer may
+ *                                forward.
+ * SANDBOX_CALLER_PERMITTED_ENV = B ∪ C.
+ * SANDBOX_ENV_ALLOWLIST        = A ∪ B ∪ C.
  */
-export const SANDBOX_SYSTEM_MANAGED_ENV: ReadonlySet<string> = Object.freeze(
-  new Set([
-    'HOME',
-    'TMPDIR',
-    'XDG_CONFIG_HOME',
-    'XDG_CACHE_HOME',
-  ]),
-);
-
-/**
- * Caller-permitted environment keys.
- * Callers may supply values for these keys in request.env.
- * All other keys (including system-managed keys) are REJECTED.
- */
-export const SANDBOX_CALLER_PERMITTED_ENV: ReadonlySet<string> = Object.freeze(
-  new Set([
-    'PATH',
-    'USER',
-    'LANG',
-    'LC_ALL',
-  ]),
-);
-
-/**
- * Combined allowlist: system-managed + caller-permitted.
- * Used for backward-compatible validation in buildSandboxEnv.
- */
-export const SANDBOX_ENV_ALLOWLIST: ReadonlySet<string> = Object.freeze(
-  new Set([
-    ...SANDBOX_SYSTEM_MANAGED_ENV,
-    ...SANDBOX_CALLER_PERMITTED_ENV,
-  ]),
-);
+export {
+  SANDBOX_SYSTEM_MANAGED_ENV,
+  SANDBOX_PROCESS_COMPATIBILITY_ENV,
+  SANDBOX_GOVERNED_EXECUTION_METADATA_ENV,
+  SANDBOX_CALLER_PERMITTED_ENV,
+  SANDBOX_ENV_ALLOWLIST,
+} from '@vito/contracts';
 

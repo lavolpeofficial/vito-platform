@@ -8,6 +8,7 @@ import { GovernedAdapterRegistryImpl } from '../governed-invocation/governed-ada
 import { PrismaGovernedIdempotencyStore } from './persistence/prisma-governed-idempotency.store';
 import { WorkspaceFileToolAdapter } from './adapters/workspace-file.adapter';
 import { HeadlessLocalAgentAdapter } from './adapters/headless-local-agent.adapter';
+import { CloudGovernedAgentAdapter } from './adapters/cloud-governed-agent.adapter';
 import {
   GovernedHomeDirectoryResolver,
   GovernedWorkingDirectoryResolver,
@@ -21,11 +22,23 @@ import { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-r
 import { RemoteExecutionWorkerModule } from '../remote-execution-worker/remote-execution-worker.module';
 import { RemoteExecutionWorkerService } from '../remote-execution-worker/remote-execution-worker.service';
 import { GovernedWorkspaceConfigModule } from './governed-workspace-config.module';
+import {
+  CLOUD_EXECUTION_WORKER,
+  CloudGovernedExecutionModule,
+} from '../cloud-governed-execution/cloud-governed-execution.module';
+import { CloudExecutionProfileRegistry } from '../cloud-governed-execution/cloud-execution-profile.registry';
+import { CloudCredentialResolver } from '../cloud-governed-execution/cloud-credential.resolver';
+import { CloudCredentialBroker } from '../cloud-governed-execution/cloud-credential.resolver';
 
 export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-runtime.tokens';
 
 @Module({
-  imports: [AuditModule, GovernedWorkspaceConfigModule, RemoteExecutionWorkerModule],
+  imports: [
+    AuditModule,
+    GovernedWorkspaceConfigModule,
+    RemoteExecutionWorkerModule,
+    CloudGovernedExecutionModule,
+  ],
   providers: [
     TrustedExecutionProfileResolver,
     TrustedLocalExecutableResolver,
@@ -52,10 +65,28 @@ export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-r
         new HeadlessLocalAgentAdapter(workerService),
     },
     {
+      provide: CloudGovernedAgentAdapter,
+      inject: [CLOUD_EXECUTION_WORKER, CloudExecutionProfileRegistry],
+      useFactory: (
+        cloudWorker: RemoteExecutionWorkerService,
+        profileRegistry: CloudExecutionProfileRegistry,
+      ) => new CloudGovernedAgentAdapter(cloudWorker, profileRegistry),
+    },
+    {
+      provide: CloudCredentialBroker,
+      inject: [PrismaProviderDeclarationResolver, CloudExecutionProfileRegistry, CloudCredentialResolver],
+      useFactory: (
+        providerResolver: PrismaProviderDeclarationResolver,
+        profileRegistry: CloudExecutionProfileRegistry,
+        credentialResolver: CloudCredentialResolver,
+      ) => new CloudCredentialBroker(providerResolver, profileRegistry, credentialResolver),
+    },
+    {
       provide: GOVERNED_ADAPTER_REGISTRY,
       useFactory: (
         workspaceAdapter: WorkspaceFileToolAdapter,
         localAgentAdapter: HeadlessLocalAgentAdapter,
+        cloudAgentAdapter: CloudGovernedAgentAdapter,
       ): GovernedAdapterRegistry => {
         const registry = new GovernedAdapterRegistryImpl();
         registry.register({
@@ -70,9 +101,19 @@ export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-r
           registeredAt: new Date(),
           version: 'agent-workforce.0.1',
         });
+        registry.register({
+          providerType: ProviderType.CLOUD_LLM,
+          adapter: cloudAgentAdapter,
+          registeredAt: new Date(),
+          version: 'cloud-governed.0.2d',
+        });
         return registry;
       },
-      inject: [WorkspaceFileToolAdapter, HeadlessLocalAgentAdapter],
+      inject: [
+        WorkspaceFileToolAdapter,
+        HeadlessLocalAgentAdapter,
+        CloudGovernedAgentAdapter,
+      ],
     },
     PrismaProviderDeclarationResolver,
     PrismaGovernedIdempotencyStore,
@@ -88,6 +129,8 @@ export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-r
         homeDirectoryResolver: GovernedHomeDirectoryResolver,
         idempotencyStore: PrismaGovernedIdempotencyStore,
         executionPolicyResolver: TrustedExecutionPolicyResolver,
+        credentialBroker: CloudCredentialBroker,
+        cloudExecutionProfileRegistry: CloudExecutionProfileRegistry,
       ) =>
         new GovernedInvocationServiceImpl({
           providerResolver,
@@ -99,11 +142,11 @@ export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-r
           idempotencyStore,
           executionPolicyResolver,
           trustedExecutableResolver,
-          // Deliberately deferred until a secret broker and approval resolver
-          // are durable. Credential-requiring providers and consequential
-          // actions continue to fail closed.
-          credentialBroker: null,
+          credentialBroker,
+          // Deliberately deferred until an approval resolver is durable.
+          // Consequential human-gated actions continue to fail closed.
           humanGateResolver: null,
+          cloudExecutionProfileRegistry,
         }),
       inject: [
         PrismaProviderDeclarationResolver,
@@ -115,6 +158,8 @@ export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-r
         GovernedHomeDirectoryResolver,
         PrismaGovernedIdempotencyStore,
         TrustedExecutionPolicyResolver,
+        CloudCredentialBroker,
+        CloudExecutionProfileRegistry,
       ],
     },
     GovernedRuntimeService,

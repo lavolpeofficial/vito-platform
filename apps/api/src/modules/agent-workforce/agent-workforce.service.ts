@@ -1,6 +1,9 @@
 import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import {
+  ExecutionTier,
   ProviderType,
+  isCloudGovernedProviderType,
+  resolveExecutionTier,
   type ExecutionBudget,
   type IndependenceContext,
 } from '@vito/contracts';
@@ -11,6 +14,7 @@ import {
   GovernedRuntimeService,
   TRUSTED_RUNTIME_ORIGIN,
 } from '../governed-runtime/governed-runtime.service';
+import { CloudExecutionProfileRegistry } from '../cloud-governed-execution/cloud-execution-profile.registry';
 
 const MAX_PROMPT_BYTES = 512 * 1024;
 const MAX_DEFAULT_ARGS = 64;
@@ -36,10 +40,17 @@ export interface DispatchAgentTaskInput {
  */
 @Injectable()
 export class AgentWorkforceService {
+  private readonly profileRegistry: CloudExecutionProfileRegistry;
+
   constructor(
     private readonly providerRouter: ProviderRouterService,
     private readonly governedRuntime: GovernedRuntimeService,
-  ) {}
+    profileRegistry?: CloudExecutionProfileRegistry,
+  ) {
+    // Absent registry (e.g. tests) === no cloud profiles bound => any
+    // cloud-governed dispatch candidate fails closed.
+    this.profileRegistry = profileRegistry ?? new CloudExecutionProfileRegistry([]);
+  }
 
   async dispatch(input: DispatchAgentTaskInput) {
     this.validateInput(input);
@@ -69,7 +80,8 @@ export class AgentWorkforceService {
       });
     }
 
-    if (provider.providerType !== ProviderType.LOCAL_TOOL) {
+    const tier = this.detectDispatchTier(provider);
+    if (tier === null) {
       throw new ServiceUnavailableException({
         code: 'AGENT_PROVIDER_ADAPTER_NOT_READY',
         providerId: provider.id,
@@ -146,5 +158,34 @@ export class AgentWorkforceService {
       args.push(arg);
     }
     return Object.freeze(args);
+  }
+
+  /**
+   * Server-owned dispatch tier gate (OB-002D). The tier is NEVER a caller
+   * field. Fail closed (null) when the provider/tier combination is
+   * ambiguous or misconfigured:
+   *  - LOCAL_TOOL  → LOCAL_ISOLATED only with NO cloud profile bound
+   *    (an enabled cloud profile on a local-tool provider is a server config
+   *     error that must deny, not silently downgrade);
+   *  - CLOUD_LLM   → CLOUD_GOVERNED only when an enabled server-owned profile
+   *    binds the provider (no profile ⇒ no cloud dispatch);
+   *  - anything else → null.
+   */
+  private detectDispatchTier(provider: {
+    readonly providerType: ProviderType;
+    readonly providerCode: string;
+  }): ExecutionTier | null {
+    if (provider.providerType === ProviderType.LOCAL_TOOL) {
+      return this.profileRegistry.peek(provider.providerCode) === null
+        ? ExecutionTier.LOCAL_ISOLATED
+        : null;
+    }
+    if (isCloudGovernedProviderType(provider.providerType)) {
+      return resolveExecutionTier(
+        provider.providerType,
+        this.profileRegistry.resolve(provider.providerCode),
+      );
+    }
+    return null;
   }
 }

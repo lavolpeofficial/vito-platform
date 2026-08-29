@@ -1389,6 +1389,140 @@ describe('Finding A: command classification grammar', () => {
 });
 
 // ===========================================================================
+// OB-002A — Exact Trusted Coding-Agent Alias Authorization (Decision B)
+// ===========================================================================
+describe('OB-002A: exact trusted coding-agent alias authorization', () => {
+  const aliasPolicy = () =>
+    ({ ...createBuilderPolicy(WORKTREE_ROOT), trustedCodingAgentAliases: ['opencode'] });
+
+  it('allows the exact server-selected trusted coding-agent alias under the builder policy', () => {
+    expectAllow(
+      decide({
+        requestedAction: ExecutionAction.RUN_COMMAND,
+        requestedCommand: 'opencode',
+        policy: aliasPolicy(),
+      }),
+    );
+  });
+
+  it('keeps existing safe builder commands allowed when aliases are present', () => {
+    const policy = aliasPolicy();
+    for (const command of ['git status', 'npm test', 'npm run build', 'tsc --noEmit']) {
+      expectAllow(
+        decide({
+          requestedAction: ExecutionAction.RUN_COMMAND,
+          requestedCommand: command,
+          policy,
+        }),
+      );
+    }
+  });
+
+  it('grants no global/world-readable authority: a bare builder policy without aliases still denies the alias', () => {
+    expectDeny(
+      decide({
+        requestedAction: ExecutionAction.RUN_COMMAND,
+        requestedCommand: 'opencode',
+      }),
+      PolicyReasonCode.COMMAND_NOT_ALLOWED,
+    );
+  });
+
+  it('does not grant the alias outside the intended profile (reviewer still denies)', () => {
+    expectDeny(
+      decide({
+        executionProfile: ExecutionProfile.REVIEWER,
+        requestedAction: ExecutionAction.RUN_COMMAND,
+        requestedCommand: 'opencode',
+        policy: {
+          ...createReviewerPolicy(WORKTREE_ROOT),
+          trustedCodingAgentAliases: ['opencode'],
+        },
+      }),
+      PolicyReasonCode.COMMAND_NOT_ALLOWED,
+    );
+  });
+
+  it('matches the exact whole command only — no prefix, no arguments', () => {
+    const policy = aliasPolicy();
+    for (const command of ['opencode --dangerous', 'opencode status', 'opencode foo', 'opencode --help']) {
+      expectDeny(
+        decide({ requestedAction: ExecutionAction.RUN_COMMAND, requestedCommand: command, policy }),
+        PolicyReasonCode.COMMAND_NOT_ALLOWED,
+      );
+    }
+  });
+
+  it('rejects an unregistered/mismatched alias fail-closed', () => {
+    const policy = aliasPolicy();
+    for (const command of ['codex', 'claude', 'gemini']) {
+      expectDeny(
+        decide({ requestedAction: ExecutionAction.RUN_COMMAND, requestedCommand: command, policy }),
+        PolicyReasonCode.COMMAND_NOT_ALLOWED,
+      );
+    }
+  });
+
+  it('does not authorize shell chaining through the alias', () => {
+    const policy = aliasPolicy();
+    for (const command of ['opencode && opencode', 'opencode && git status', 'opencode ; opencode']) {
+      expectDeny(
+        decide({ requestedAction: ExecutionAction.RUN_COMMAND, requestedCommand: command, policy }),
+        PolicyReasonCode.COMMAND_NOT_ALLOWED,
+      );
+    }
+  });
+
+  it('arbitrary shell/opaque-wrapper execution remains blocked even with the alias present', () => {
+    const policy = aliasPolicy();
+    for (const command of ['bash -c opencode', 'sh -c "opencode"', 'node -e "process.exit(1)"', 'cat /etc/passwd']) {
+      expectDeny(
+        decide({ requestedAction: ExecutionAction.RUN_COMMAND, requestedCommand: command, policy }),
+        PolicyReasonCode.COMMAND_NOT_ALLOWED,
+      );
+    }
+  });
+
+  it('arbitrary executable paths remain impossible through policy input', () => {
+    const policy = aliasPolicy();
+    for (const command of ['./opencode', '/usr/bin/opencode', '~/opencode', '../opencode']) {
+      expectDeny(
+        decide({ requestedAction: ExecutionAction.RUN_COMMAND, requestedCommand: command, policy }),
+        PolicyReasonCode.COMMAND_NOT_ALLOWED,
+      );
+    }
+  });
+
+  it('does not broaden network, secret, or git-release authority', () => {
+    const policy = aliasPolicy();
+    expectDeny(
+      decide({
+        requestedAction: ExecutionAction.NETWORK_ACCESS,
+        requestedPath: 'https://evil.example',
+        policy,
+      }),
+      PolicyReasonCode.NETWORK_ACCESS_DENIED,
+    );
+    expectDeny(
+      decide({ requestedAction: ExecutionAction.RUN_COMMAND, requestedCommand: 'git commit -m "x"', policy }),
+      PolicyReasonCode.GIT_COMMIT_DENIED,
+    );
+    expectDeny(
+      decide({ requestedAction: ExecutionAction.RUN_COMMAND, requestedCommand: 'git push origin main', policy }),
+      PolicyReasonCode.GIT_PUSH_DENIED,
+    );
+    expectDeny(
+      decide({
+        requestedAction: ExecutionAction.READ_SECRET,
+        requestedPath: `${WORKTREE_ROOT}/.env`,
+        policy,
+      }),
+      PolicyReasonCode.SECRET_ACCESS_DENIED,
+    );
+  });
+});
+
+// ===========================================================================
 // BLOCKING FINDING B — Path Canonicalization / Traversal Regression Tests
 // ===========================================================================
 describe('Finding B: path canonicalization and encoded traversal', () => {

@@ -6,6 +6,16 @@
  */
 
 export { EngineeringCapability } from './capabilities.js';
+export {
+  ExecutionTier,
+  isCloudGovernedProviderType,
+  resolveExecutionTier,
+  toValidatedCloudExecutionProfile,
+  CLOUD_EXECUTION_PROFILE_MIN_DURATION_MS,
+  CLOUD_EXECUTION_PROFILE_MAX_DURATION_MS,
+  CLOUD_EXECUTION_PROFILE_MAX_PARALLELISM,
+  type CloudExecutionProfile,
+} from './execution-tier.js';
 export { AssuranceLevel } from './assurance.js';
 export {
   WorkflowRunStatus,
@@ -86,6 +96,13 @@ export {
   type ExecutionPolicyConfig,
   type PolicyEvaluationContext,
 } from './execution-policy.js';
+export {
+  SANDBOX_SYSTEM_MANAGED_ENV,
+  SANDBOX_PROCESS_COMPATIBILITY_ENV,
+  SANDBOX_GOVERNED_EXECUTION_METADATA_ENV,
+  SANDBOX_CALLER_PERMITTED_ENV,
+  SANDBOX_ENV_ALLOWLIST,
+} from './sandbox-environment.js';
 export {
   GovernedCapabilityInvocationRequest,
   GovernedCapabilityInvocationResult,

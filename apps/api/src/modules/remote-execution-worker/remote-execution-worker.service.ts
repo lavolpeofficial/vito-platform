@@ -8,6 +8,9 @@ import type {
   RepositoryRegistry,
   WorkspaceProvisioner,
   SandboxExecutor,
+  ExpectedProviderIdentity,
+  ObservedProviderIdentity,
+  ProviderIdentityError,
 } from './types';
 import type { GovernedSandboxConfig, TrustedExecutable } from '@vito/contracts';
 import { captureGovernedResultSettling } from './change-set-capture';
@@ -39,6 +42,17 @@ export interface ExecuteSandboxedInput {
   readonly prompt?: string;
   readonly sandboxConfig: GovernedSandboxConfig;
   readonly env?: ReadonlyMap<string, string>;
+  /**
+   * Server-owned opaque credential reference (never a credential value).
+   * The cloud-governed boundary resolves this ref into an ephemeral session
+   * artifact ONLY; the local Bubblewrap path never receives credential refs.
+   */
+  readonly credentialReference?: string;
+  /**
+   * Server-authorized provider identity the CLOUD_GOVERNED boundary must
+   * observe (OB002D-MEDIUM-PROVIDER-IDENTITY). Never caller-derived.
+   */
+  readonly expectedProviderIdentity?: ExpectedProviderIdentity;
 }
 
 export interface ExecuteSandboxedResult {
@@ -54,6 +68,8 @@ export interface ExecuteSandboxedResult {
   /** Audit-only — workspace is cleaned before this result is returned. */
   readonly workspaceDisposition: 'CLEANED';
   readonly governedResultSettling: GovernedResultSettling;
+  readonly observedProviderIdentity?: ObservedProviderIdentity;
+  readonly providerIdentityError?: ProviderIdentityError;
 }
 
 @Injectable()
@@ -111,6 +127,8 @@ export class RemoteExecutionWorkerService {
         prompt: input.prompt,
         sandboxConfig: input.sandboxConfig,
         env: input.env,
+        credentialReference: input.credentialReference,
+        expectedProviderIdentity: input.expectedProviderIdentity,
       };
 
       const sandboxResult = await this.sandboxExecutor.execute(sandboxRequest);
@@ -152,6 +170,12 @@ export class RemoteExecutionWorkerService {
         repositoryId: workspace.repositoryId,
         workspaceDisposition: 'CLEANED' as const,
         governedResultSettling,
+        ...(sandboxResult.observedProviderIdentity
+          ? { observedProviderIdentity: sandboxResult.observedProviderIdentity }
+          : {}),
+        ...(sandboxResult.providerIdentityError
+          ? { providerIdentityError: sandboxResult.providerIdentityError }
+          : {}),
       });
     } finally {
       await this.workspaceProvisioner.cleanup(workspace);
