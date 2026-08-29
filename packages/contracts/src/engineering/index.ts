@@ -6,6 +6,16 @@
  */
 
 export { EngineeringCapability } from './capabilities.js';
+export {
+  ExecutionTier,
+  isCloudGovernedProviderType,
+  resolveExecutionTier,
+  toValidatedCloudExecutionProfile,
+  CLOUD_EXECUTION_PROFILE_MIN_DURATION_MS,
+  CLOUD_EXECUTION_PROFILE_MAX_DURATION_MS,
+  CLOUD_EXECUTION_PROFILE_MAX_PARALLELISM,
+  type CloudExecutionProfile,
+} from './execution-tier.js';
 export { AssuranceLevel } from './assurance.js';
 export {
   WorkflowRunStatus,

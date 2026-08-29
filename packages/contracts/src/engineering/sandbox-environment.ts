@@ -25,7 +25,7 @@
 
 /** Class A — set inside the sandbox by the executor; never caller-overridable. */
 export const SANDBOX_SYSTEM_MANAGED_ENV: ReadonlySet<string> = Object.freeze(
-  new Set(['HOME', 'TMPDIR', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME']),
+  new Set(['HOME', 'TMPDIR', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME']),
 );
 
 /** Class B — explicitly permitted from the trusted adapter boundary. */

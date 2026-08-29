@@ -42,6 +42,10 @@ describe('GovernedRuntimeModule (B2c assembly)', () => {
     const registry = moduleRef.get('GOVERNED_ADAPTER_REGISTRY');
     expect(registry.has(ProviderType.DETERMINISTIC_TOOL)).toBe(true);
     expect(registry.has(ProviderType.LOCAL_TOOL)).toBe(true);
+    expect(registry.has(ProviderType.CLOUD_LLM)).toBe(true);
+
+    const cloudAdapter = registry.get(ProviderType.CLOUD_LLM);
+    expect(cloudAdapter.providerType).toBe(ProviderType.CLOUD_LLM);
 
     const root = moduleRef.get<string>(GOVERNED_WORKSPACE_ROOT);
     expect(root).toBe(process.env.GOVERNED_WORKSPACE_ROOT);

@@ -31,6 +31,7 @@ describe('governed sandbox environment contract', () => {
         'TMPDIR',
         'XDG_CACHE_HOME',
         'XDG_CONFIG_HOME',
+        'XDG_DATA_HOME',
       ]);
     });
 

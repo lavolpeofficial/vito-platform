@@ -40,6 +40,12 @@ export interface SandboxExecutionRequest {
   readonly prompt?: string;
   readonly sandboxConfig: GovernedSandboxConfig;
   readonly env?: ReadonlyMap<string, string>;
+  /**
+   * Server-owned opaque credential reference (e.g. a cloud auth.json key).
+   * NEVER a credential value. Only the cloud-governed boundary resolves this
+   * reference into an ephemeral session artifact; everything else ignores it.
+   */
+  readonly credentialReference?: string;
 }
 
 export interface SandboxExecutionResult {

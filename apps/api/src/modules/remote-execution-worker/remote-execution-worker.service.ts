@@ -39,6 +39,12 @@ export interface ExecuteSandboxedInput {
   readonly prompt?: string;
   readonly sandboxConfig: GovernedSandboxConfig;
   readonly env?: ReadonlyMap<string, string>;
+  /**
+   * Server-owned opaque credential reference (never a credential value).
+   * The cloud-governed boundary resolves this ref into an ephemeral session
+   * artifact ONLY; the local Bubblewrap path never receives credential refs.
+   */
+  readonly credentialReference?: string;
 }
 
 export interface ExecuteSandboxedResult {
@@ -111,6 +117,7 @@ export class RemoteExecutionWorkerService {
         prompt: input.prompt,
         sandboxConfig: input.sandboxConfig,
         env: input.env,
+        credentialReference: input.credentialReference,
       };
 
       const sandboxResult = await this.sandboxExecutor.execute(sandboxRequest);

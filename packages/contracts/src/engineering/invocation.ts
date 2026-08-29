@@ -187,6 +187,8 @@ export interface GovernedExecutionContext {
   readonly capabilityCode: string;
   readonly providerId: string;
   readonly providerType: ProviderType;
+  /** Stable provider code (e.g. 'openai') for server-owned profile binding. */
+  readonly providerCode?: string;
   readonly executionProfile: ExecutionProfile;
   readonly assuranceLevel?: string;
   readonly executionBudget: ExecutionBudget;

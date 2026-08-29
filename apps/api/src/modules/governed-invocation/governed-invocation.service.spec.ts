@@ -17,6 +17,8 @@ import type {
   HomeDirectoryResolver,
   ProviderResolver,
 } from './governed-invocation.service';
+import { CloudExecutionProfileRegistry } from '../cloud-governed-execution/cloud-execution-profile.registry';
+import type { CloudExecutionProfile } from '@vito/contracts';
 import { AuditService } from '../audit/audit.service';
 import {
   AgentExecutionStatus,
@@ -383,6 +385,12 @@ function buildHarness(overrides: Partial<Record<string, any>> = {}): Harness {
     overrides.executionProfileResolver ?? buildFakeExecutionProfileResolver();
   const executionPolicyResolver =
     overrides.executionPolicyResolver ?? buildFakeExecutionPolicyResolver();
+  // Expliziter undefined-Vergleich: ohne Registry bleibt der Cloud-Provider
+  // unautorisiert (Fail-closed), was den Standard-Fixture-Provider zutreffend modelliert.
+  const cloudExecutionProfileRegistry =
+    overrides.cloudExecutionProfileRegistry !== undefined
+      ? overrides.cloudExecutionProfileRegistry
+      : null;
 
   const service = new GovernedInvocationServiceImpl({
     providerResolver,
@@ -396,6 +404,7 @@ function buildHarness(overrides: Partial<Record<string, any>> = {}): Harness {
     idempotencyStore,
     executionProfileResolver,
     executionPolicyResolver,
+    cloudExecutionProfileRegistry,
   });
 
   return {
@@ -3871,5 +3880,134 @@ describe('OB-002A: exact trusted coding-agent alias authorization (Decision B)',
     expect(result.normalizedError?.providerMetadata?.policyReasonCode).toBe(
       'COMMAND_NOT_ALLOWED',
     );
+  });
+});
+
+// ===========================================================================
+// OB-002D: Cloud-governed alias augmentation boundary (CLOUD_GOVERNED tier)
+// ===========================================================================
+
+function makeCloudProfile(providerCode: string, overrides: Record<string, any> = {}): CloudExecutionProfile {
+  return {
+    profileId: 'profile-cloud-1',
+    providerCode,
+    credentialRef: 'cloud:test',
+    trustedLauncherAlias: 'opencode',
+    maxDurationMs: 60_000,
+    maxParallelism: 1,
+    enabled: true,
+    ...overrides,
+  } as CloudExecutionProfile;
+}
+
+describe('OB-002D: cloud-governed alias augmentation boundary', () => {
+  it('CRITICAL: CLOUD_LLM provider with an ENABLED profile is authorized and the context carries providerCode', async () => {
+    const harness = buildHarness({
+      provider: makeProviderDeclaration({ providerCode: 'cloud.openai.main' }),
+      fakeAdapter: buildFakeAdapter(ProviderType.CLOUD_LLM),
+      cloudExecutionProfileRegistry: new CloudExecutionProfileRegistry([
+        makeCloudProfile('cloud.openai.main'),
+      ]),
+    });
+    const request = makeInvocationRequest({
+      invocationId: 'ob002d-cloud-augment-1',
+      requestedAction: ExecutionAction.RUN_COMMAND,
+      requestedCommand: 'opencode',
+      requestedPath: undefined,
+    });
+
+    const result = await harness.service.invoke(request);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+
+    const [, executionContext] = harness.fakeAdapter.execute.mock.calls[0];
+    expect(executionContext.providerCode).toBe('cloud.openai.main');
+    expect(executionContext.policyDecision.allowed).toBe(true);
+  });
+
+  it('CRITICAL: CLOUD_LLM provider with a DISABLED profile is never authorized to augment', async () => {
+    const harness = buildHarness({
+      provider: makeProviderDeclaration({ providerCode: 'cloud.openai.main' }),
+      fakeAdapter: buildFakeAdapter(ProviderType.CLOUD_LLM),
+      cloudExecutionProfileRegistry: new CloudExecutionProfileRegistry([
+        makeCloudProfile('cloud.openai.main', { enabled: false }),
+      ]),
+    });
+    const request = makeInvocationRequest({
+      invocationId: 'ob002d-cloud-disabled-1',
+      requestedAction: ExecutionAction.RUN_COMMAND,
+      requestedCommand: 'opencode',
+      requestedPath: undefined,
+    });
+
+    const result = await harness.service.invoke(request);
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(result.normalizedError?.providerMetadata?.policyReasonCode).toBe(
+      'COMMAND_NOT_ALLOWED',
+    );
+  });
+
+  it('CRITICAL: CLOUD_LLM provider without ANY profile stays blocked (fail closed)', async () => {
+    const harness = buildHarness({
+      provider: makeProviderDeclaration({ providerCode: 'cloud.unbound' }),
+      fakeAdapter: buildFakeAdapter(ProviderType.CLOUD_LLM),
+      cloudExecutionProfileRegistry: new CloudExecutionProfileRegistry([]),
+    });
+    const request = makeInvocationRequest({
+      invocationId: 'ob002d-cloud-none-1',
+      requestedAction: ExecutionAction.RUN_COMMAND,
+      requestedCommand: 'opencode',
+      requestedPath: undefined,
+    });
+
+    const result = await harness.service.invoke(request);
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+  });
+
+  it('CRITICAL: unresolvable alias still fails closed even with an enabled cloud profile', async () => {
+    const harness = buildHarness({
+      provider: makeProviderDeclaration({ providerCode: 'cloud.openai.main' }),
+      fakeAdapter: buildFakeAdapter(ProviderType.CLOUD_LLM),
+      trustedExecutableResolver: { resolve: jest.fn().mockResolvedValue(null) },
+      cloudExecutionProfileRegistry: new CloudExecutionProfileRegistry([
+        makeCloudProfile('cloud.openai.main'),
+      ]),
+    });
+    const request = makeInvocationRequest({
+      invocationId: 'ob002d-cloud-alias-missing-1',
+      requestedAction: ExecutionAction.RUN_COMMAND,
+      requestedCommand: 'opencode',
+      requestedPath: undefined,
+    });
+
+    const result = await harness.service.invoke(request);
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+  });
+
+  it('CRITICAL: an enabled cloud profile on a LOCAL_TOOL provider is a config error → deny, never local downgrade', async () => {
+    const harness = buildHarness({
+      provider: makeProviderDeclaration({
+        providerType: ProviderType.LOCAL_TOOL,
+        providerCode: 'cloud.openai.main',
+        metadata: { commandAlias: 'opencode', defaultArgs: [] },
+      }),
+      fakeAdapter: buildFakeAdapter(ProviderType.LOCAL_TOOL),
+      cloudExecutionProfileRegistry: new CloudExecutionProfileRegistry([
+        makeCloudProfile('cloud.openai.main'),
+      ]),
+    });
+    const request = makeInvocationRequest({
+      invocationId: 'ob002d-local-with-cloud-profile-1',
+      requestedAction: ExecutionAction.RUN_COMMAND,
+      requestedCommand: 'opencode',
+      requestedPath: undefined,
+    });
+
+    const result = await harness.service.invoke(request);
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
   });
 });
