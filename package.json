@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "license": "UNLICENSED",
   "scripts": {
-    "build": "pnpm --filter @vito/api build",
+    "build": "pnpm --filter @vito/contracts build && pnpm --filter @vito/api build && pnpm verify:prod-build",
+    "verify:prod-build": "node scripts/verify-prod-resolution.mjs",
     "start": "pnpm --filter @vito/api start",
     "start:dev": "pnpm --filter @vito/api start:dev",
     "test": "pnpm --filter @vito/contracts test && pnpm --filter @vito/api test",
