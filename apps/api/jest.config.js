@@ -7,6 +7,7 @@ module.exports = {
   },
   moduleNameMapper: {
     '^(\\.\\.?\\/.*)\\.js$': '$1',
+    '^@vito/contracts$': '<rootDir>/../../../packages/contracts/src/index.ts',
   },
   collectCoverageFrom: ['**/*.(t|j)s'],
   coverageDirectory: '../coverage',
