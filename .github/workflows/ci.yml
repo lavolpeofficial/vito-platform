@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   verify:
-    name: Install, generate, migrate, test, gate and build
+    name: Install, generate, test, gate and build
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
