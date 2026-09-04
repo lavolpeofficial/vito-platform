@@ -7,6 +7,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
 enum OrganizationStatus {
   ACTIVE
   SUSPENDED
@@ -104,6 +108,192 @@ enum ActorType {
   SYSTEM
 }
 
+enum SourceType {
+  DOCUMENT
+  SPREADSHEET
+  PRESENTATION
+  IMAGE
+  AUDIO
+  VIDEO
+  EMAIL
+  WEB_CAPTURE
+  DATASET
+  OTHER
+}
+
+enum SourceConfidentiality {
+  PUBLIC
+  INTERNAL
+  CONFIDENTIAL
+  RESTRICTED
+}
+
+enum SourceRightsStatus {
+  OWNED
+  LICENSED
+  CUSTOMER_PROVIDED
+  THIRD_PARTY_REFERENCE
+  UNKNOWN
+}
+
+enum SourceIngestionStatus {
+  RECEIVED
+  HASHED
+  STORED
+  FAILED
+  QUARANTINED
+}
+
+enum SourceExtractionStatus {
+  NOT_STARTED
+  PROCESSING
+  EXTRACTED
+  PARTIAL
+  FAILED
+  NOT_REQUIRED
+}
+
+enum SourceValidationStatus {
+  UNREVIEWED
+  REVIEWED
+  VALIDATED
+  REJECTED
+  SUPERSEDED
+}
+
+enum SourceLocatorType {
+  PAGE
+  SHEET
+  CELL_RANGE
+  SLIDE
+  TIMECODE
+  SECTION
+  MESSAGE
+  OTHER
+}
+
+enum SourceDerivationType {
+  QUOTE
+  PARAPHRASE
+  EXTRACTION
+  INFERENCE
+  SYNTHESIS
+}
+
+enum WorkflowRunStatus {
+  CREATED
+  RUNNING
+  WAITING_FOR_HUMAN
+  BLOCKED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum WorkflowStepStatus {
+  PENDING
+  READY
+  RUNNING
+  WAITING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+  CANCELLED
+}
+
+enum EngineeringStepType {
+  PLAN
+  BUILD
+  TEST
+  PACKAGE
+  RED_TEAM
+  PARSE_VERDICT
+  CORRECTION
+  VERIFY
+  HUMAN_RELEASE_GATE
+  RELEASE_EXECUTION
+  REMOTE_VERIFY
+}
+
+enum ProviderStatus {
+  ACTIVE
+  DISABLED
+  DEGRADED
+}
+
+enum ProviderHealthStatus {
+  UNKNOWN
+  HEALTHY
+  DEGRADED
+  QUOTA_LIMITED
+  UNAVAILABLE
+  DISABLED
+}
+
+enum ProviderQuotaStatus {
+  UNKNOWN
+  AVAILABLE
+  LIMITED
+  EXHAUSTED
+}
+
+enum ProviderType {
+  CLOUD_LLM
+  LOCAL_LLM
+  DETERMINISTIC_TOOL
+  LOCAL_TOOL
+}
+
+/// Credential requirement state of a provider (EO-01.5).
+/// UNKNOWN must fail closed for productive invocation; missing data is
+/// never silently mapped to NOT_REQUIRED.
+enum ProviderCredentialRequirement {
+  REQUIRED
+  NOT_REQUIRED
+  UNKNOWN
+}
+
+/// Interner Claim-State der Governed-Idempotenz-Grenze (EO-01.5 Phase 3H.1).
+/// Kein zweiter Lifecycle-Motor: Claims werden NIE freigegeben.
+enum GovernedInvocationClaimState {
+  IN_PROGRESS
+  COMPLETED
+  TIMED_OUT_UNKNOWN
+  FAILED_UNKNOWN
+}
+
+/// Status einer intern initiierten governed Operation (B2a).
+enum GovernedOperationEnvelopeStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+/// Ausführungsstatus einer einzelnen Provider-Ausführung (Spiegel des
+/// EO-Contracts AgentExecutionStatus).
+enum AgentExecutionStatus {
+  QUEUED
+  STARTING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  TIMED_OUT
+  CANCELLED
+  POLICY_BLOCKED
+  QUOTA_BLOCKED
+}
+
+enum OperatorTaskStatus {
+  DISPATCHING
+  COMPLETED
+  HUMAN_GATE
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
 model Organization {
   id        String             @id @default(uuid())
   name      String
@@ -112,16 +302,26 @@ model Organization {
   createdAt DateTime           @default(now())
   updatedAt DateTime           @updatedAt
 
-  users              User[]
-  workforceInstances WorkforceInstance[]
-  departments        Department[]
-  teams              Team[]
-  organizationRoles  OrganizationRole[]
-  positions          Position[]
-  digitalEmployees   DigitalEmployee[]
-  capabilities       Capability[]
-  tasks              Task[]
-  auditEvents        AuditEvent[]
+  users                      User[]
+  workforceInstances         WorkforceInstance[]
+  departments                Department[]
+  teams                      Team[]
+  organizationRoles          OrganizationRole[]
+  positions                  Position[]
+  digitalEmployees           DigitalEmployee[]
+  capabilities               Capability[]
+  tasks                      Task[]
+  auditEvents                AuditEvent[]
+  sources                    Source[]
+  knowledgeSourceLinks       KnowledgeSourceLink[]
+  workflowRuns               WorkflowRun[]
+  workflowStepRuns           WorkflowStepRun[]
+  agentProviders             AgentProvider[]
+  providerRoutingDecisions   ProviderRoutingDecision[]
+  providerCapabilities       ProviderCapability[]
+  governedOperationEnvelopes GovernedOperationEnvelope[]
+  governedExecutionRecords   GovernedExecutionRecord[]
+  operatorTasks              OperatorTask[]
 
   @@map("organizations")
 }
@@ -196,7 +396,7 @@ model Team {
   organization      Organization      @relation(fields: [organizationId], references: [id])
   workforceInstance WorkforceInstance @relation(fields: [workforceInstanceId], references: [id], onDelete: Cascade)
   department        Department        @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-  manager           DigitalEmployee? @relation("TeamManager", fields: [managerEmployeeId], references: [id], onDelete: SetNull)
+  manager           DigitalEmployee?  @relation("TeamManager", fields: [managerEmployeeId], references: [id], onDelete: SetNull)
   positions         Position[]
 
   @@unique([departmentId, code])
@@ -227,22 +427,22 @@ model OrganizationRole {
 }
 
 model Position {
-  id                     String         @id @default(uuid())
-  organizationId         String
-  workforceInstanceId    String
-  departmentId           String?
-  teamId                 String?
-  organizationRoleId     String
-  managerPositionId      String?
-  occupantEmployeeId     String?        @unique
-  code                   String
-  title                  String
-  description            String?
-  status                 PositionStatus @default(DRAFT)
-  isLeadership           Boolean        @default(false)
-  budgetResponsibility   Decimal?       @db.Decimal(18, 2)
-  createdAt              DateTime       @default(now())
-  updatedAt              DateTime       @updatedAt
+  id                   String         @id @default(uuid())
+  organizationId       String
+  workforceInstanceId  String
+  departmentId         String?
+  teamId               String?
+  organizationRoleId   String
+  managerPositionId    String?
+  occupantEmployeeId   String?        @unique
+  code                 String
+  title                String
+  description          String?
+  status               PositionStatus @default(DRAFT)
+  isLeadership         Boolean        @default(false)
+  budgetResponsibility Decimal?       @db.Decimal(18, 2)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
 
   organization      Organization      @relation(fields: [organizationId], references: [id])
   workforceInstance WorkforceInstance @relation(fields: [workforceInstanceId], references: [id], onDelete: Cascade)
@@ -264,26 +464,30 @@ model Position {
 }
 
 model User {
-  id              String     @id @default(uuid())
-  organizationId  String
-  email           String
-  firstName       String
-  lastName        String
-  role            UserRole   @default(MEMBER)
-  status          UserStatus @default(ACTIVE)
-  passwordHash    String?
-  lastLoginAt     DateTime?
-  tokenVersion    Int        @default(1)
-  deletedAt       DateTime?
-  deletedByUserId String?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id                String     @id @default(uuid())
+  organizationId    String
+  email             String
+  firstName         String
+  lastName          String
+  role              UserRole   @default(MEMBER)
+  status            UserStatus @default(ACTIVE)
+  passwordHash      String?
+  lastLoginAt       DateTime?
+  tokenVersion      Int        @default(1)
+  isMachineIdentity Boolean    @default(false)
+  machineScope      String?
+  deletedAt         DateTime?
+  deletedByUserId   String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
-  deletedByUser User?        @relation("UserDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
-  disabledUsers User[]       @relation("UserDeletedBy")
-  assignedTasks Task[]       @relation("TaskAssignedUser")
-  createdTasks  Task[]       @relation("TaskCreatedByUser")
+
+  deletedByUser User?  @relation("UserDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+  disabledUsers User[] @relation("UserDeletedBy")
+
+  assignedTasks Task[] @relation("TaskAssignedUser")
+  createdTasks  Task[] @relation("TaskCreatedByUser")
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -292,7 +496,7 @@ model User {
 }
 
 model DigitalEmployee {
-  id                  String                 @id @default(uuid())
+  id                  String                @id @default(uuid())
   organizationId      String
   workforceInstanceId String?
   name                String
@@ -301,8 +505,8 @@ model DigitalEmployee {
   status              DigitalEmployeeStatus @default(DRAFT)
   employeeType        EmployeeType
   version             String
-  createdAt           DateTime               @default(now())
-  updatedAt           DateTime               @updatedAt
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
 
   organization           Organization                @relation(fields: [organizationId], references: [id])
   workforceInstance      WorkforceInstance?          @relation("WorkforceMembers", fields: [workforceInstanceId], references: [id], onDelete: SetNull)
@@ -368,13 +572,66 @@ model Task {
   updatedAt                 DateTime     @updatedAt
   completedAt               DateTime?
 
-  organization           Organization     @relation(fields: [organizationId], references: [id])
+  organization            Organization     @relation(fields: [organizationId], references: [id])
   assignedUser            User?            @relation("TaskAssignedUser", fields: [assignedUserId], references: [id])
   assignedDigitalEmployee DigitalEmployee? @relation("TaskAssignedDigitalEmployee", fields: [assignedDigitalEmployeeId], references: [id])
-  createdByUser            User?           @relation("TaskCreatedByUser", fields: [createdByUserId], references: [id])
+  createdByUser           User?            @relation("TaskCreatedByUser", fields: [createdByUserId], references: [id])
 
   @@index([organizationId])
   @@map("tasks")
+}
+
+model OperatorTask {
+  id                 String             @id @default(uuid())
+  organizationId     String
+  userId             String
+  requestId          String
+  requestFingerprint String
+  correlationId      String
+  workflowRunId      String
+  workflowStepRunId  String
+  capabilityCode     String
+  prompt             String?            @db.Text
+  assuranceLevel     String?
+  status             OperatorTaskStatus
+
+  maxDurationMs     Int?
+  maxTokens         Int?
+  maxCostMinorUnits Int?
+
+  invocationId         String?
+  executionId          String?
+  routingDecisionId    String?
+  providerCode         String?
+  providerName         String?
+  stdout               String?  @db.Text
+  stderr               String?  @db.Text
+  changedFiles         Json?
+  patch                String?  @db.Text
+  errorReason          String?
+  errorMessage         String?
+  errorRetryable       Boolean?
+  reviewRequired       Boolean  @default(false)
+  workspaceDisposition String?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  durationMs  Int?
+
+  sensitivePayloadAvailable Boolean   @default(true)
+  sensitivePayloadExpiresAt DateTime
+  sensitivePayloadDeletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, requestId])
+  @@index([organizationId, status])
+  @@index([organizationId, correlationId])
+  @@index([sensitivePayloadAvailable, sensitivePayloadExpiresAt])
+  @@map("operator_tasks")
 }
 
 model AuditEvent {
@@ -393,4 +650,284 @@ model AuditEvent {
   @@index([organizationId])
   @@index([organizationId, entityType, entityId])
   @@map("audit_events")
+}
+
+model Source {
+  id                 String                 @id @default(uuid())
+  sourceId           String                 @unique
+  organizationId     String
+  projectKey         String?
+  domain             String?
+  sourceType         SourceType
+  originalFilename   String
+  mimeType           String
+  byteSize           BigInt
+  sha256             String
+  storageUri         String
+  version            Int                    @default(1)
+  supersedesSourceId String?
+  parentSourceId     String?
+  language           String?
+  title              String?
+  author             String?
+  sourceDate         DateTime?
+  ingestedAt         DateTime               @default(now())
+  ingestedBy         String
+  confidentiality    SourceConfidentiality  @default(INTERNAL)
+  rightsStatus       SourceRightsStatus     @default(UNKNOWN)
+  retentionClass     String?
+  ingestionStatus    SourceIngestionStatus  @default(RECEIVED)
+  extractionStatus   SourceExtractionStatus @default(NOT_STARTED)
+  validationStatus   SourceValidationStatus @default(UNREVIEWED)
+  metadata           Json                   @default("{}")
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  organization   Organization          @relation(fields: [organizationId], references: [id])
+  supersedes     Source?               @relation("SourceVersion", fields: [supersedesSourceId], references: [id], onDelete: SetNull)
+  supersededBy   Source[]              @relation("SourceVersion")
+  parent         Source?               @relation("SourceParent", fields: [parentSourceId], references: [id], onDelete: SetNull)
+  children       Source[]              @relation("SourceParent")
+  knowledgeLinks KnowledgeSourceLink[]
+
+  @@unique([organizationId, sha256])
+  @@index([organizationId])
+  @@index([organizationId, projectKey])
+  @@index([organizationId, originalFilename])
+  @@index([supersedesSourceId])
+  @@index([parentSourceId])
+  @@map("sources")
+}
+
+model KnowledgeSourceLink {
+  id             String               @id @default(uuid())
+  organizationId String
+  sourceId       String
+  knowledgeRef   String
+  locatorType    SourceLocatorType?
+  locatorValue   String?
+  derivationType SourceDerivationType
+  confidence     Float?
+  metadata       Json                 @default("{}")
+  createdAt      DateTime             @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  source       Source       @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([sourceId])
+  @@index([organizationId, knowledgeRef])
+  @@map("knowledge_source_links")
+}
+
+model WorkflowRun {
+  id                        String               @id @default(uuid())
+  organizationId            String
+  taskId                    String?
+  workflowDefinitionCode    String
+  workflowDefinitionVersion String
+  assuranceLevel            String
+  status                    WorkflowRunStatus    @default(CREATED)
+  currentStepType           EngineeringStepType?
+  correctionLoopCount       Int                  @default(0)
+  maxCorrectionLoops        Int                  @default(3)
+  correlationId             String
+  blockReasonCode           String?
+  failureReasonCode         String?
+  createdAt                 DateTime             @default(now())
+  updatedAt                 DateTime             @updatedAt
+  startedAt                 DateTime?
+  completedAt               DateTime?
+
+  organization Organization      @relation(fields: [organizationId], references: [id])
+  stepRuns     WorkflowStepRun[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, correlationId])
+  @@index([correlationId])
+  @@map("workflow_runs")
+}
+
+model WorkflowStepRun {
+  id             String              @id @default(uuid())
+  organizationId String
+  workflowRunId  String
+  stepType       EngineeringStepType
+  status         WorkflowStepStatus  @default(PENDING)
+  attemptNumber  Int                 @default(1)
+  causationId    String?
+  metadata       Json                @default("{}")
+  startedAt      DateTime?
+  finishedAt     DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  workflowRun  WorkflowRun  @relation(fields: [workflowRunId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([workflowRunId])
+  @@index([organizationId, workflowRunId])
+  @@map("workflow_step_runs")
+}
+
+model AgentProvider {
+  id                      String                        @id @default(uuid())
+  organizationId          String
+  providerCode            String
+  displayName             String
+  providerType            ProviderType                  @default(CLOUD_LLM)
+  status                  ProviderStatus                @default(ACTIVE)
+  credentialRequirement   ProviderCredentialRequirement @default(UNKNOWN)
+  modelFamily             String?
+  modelName               String?
+  modelCode               String?
+  supportedCapabilities   Json                          @default("[]")
+  estimatedCostMinorUnits Int?
+  healthStatus            ProviderHealthStatus          @default(UNKNOWN)
+  healthCheckedAt         DateTime?
+  quotaStatus             ProviderQuotaStatus           @default(UNKNOWN)
+  quotaCheckedAt          DateTime?
+  qualityScore            Float?
+  latencyScore            Float?
+  costScore               Float?
+  costMetadata            Json                          @default("{}")
+  assuranceLevels         Json                          @default("[]")
+  metadata                Json                          @default("{}")
+  createdAt               DateTime                      @default(now())
+  updatedAt               DateTime                      @updatedAt
+
+  organization     Organization              @relation(fields: [organizationId], references: [id])
+  routingDecisions ProviderRoutingDecision[]
+  capabilities     ProviderCapability[]
+
+  @@unique([organizationId, providerCode])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, providerCode])
+  @@map("agent_providers")
+}
+
+/// Durable Capability-Zuweisung: verknüpft einen AgentProvider mit einem
+/// EngineeringCapability-Code. Nur ENABLED Assignments berechtigen zum Routing.
+/// Das legacy JSON `supportedCapabilities` ist KEINE Routing-Authorität mehr.
+model ProviderCapability {
+  id              String   @id @default(uuid())
+  organizationId  String
+  agentProviderId String
+  capabilityCode  String
+  isEnabled       Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization  Organization  @relation(fields: [organizationId], references: [id])
+  agentProvider AgentProvider @relation(fields: [agentProviderId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, agentProviderId, capabilityCode])
+  @@index([organizationId])
+  @@index([organizationId, capabilityCode])
+  @@index([organizationId, capabilityCode, isEnabled])
+  @@map("provider_capabilities")
+}
+
+model ProviderRoutingDecision {
+  id                   String   @id @default(uuid())
+  organizationId       String
+  correlationId        String
+  workflowRunId        String?
+  workflowStepRunId    String?
+  requestedCapability  String
+  assuranceLevel       String?
+  selectedProviderId   String?
+  candidateProviderIds Json     @default("[]")
+  rejectionReasons     Json     @default("{}")
+  scoreComponents      Json     @default("{}")
+  finalScore           Float?
+  decisionReason       String
+  routingPolicyVersion String?
+  createdAt            DateTime @default(now())
+
+  organization     Organization   @relation(fields: [organizationId], references: [id])
+  selectedProvider AgentProvider? @relation(fields: [selectedProviderId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([organizationId, correlationId])
+  @@index([organizationId, workflowRunId])
+  @@index([selectedProviderId])
+  @@map("provider_routing_decisions")
+}
+
+/// Intern initiierte governed Operation (B2a): liefert die vertrauenswürdige
+/// workflowRunId-Identität für Aufrufe der eingefrorenen EO-01.5
+/// GovernedInvocationService-Schnittstelle, ohne Engineering-Workflow-Tabellen
+/// zu überfrachten. Kein Task-Dispatch, keine Human-Gate-Persistenz.
+model GovernedOperationEnvelope {
+  id             String                          @id @default(uuid())
+  organizationId String
+  purposeCode    String
+  correlationId  String?
+  status         GovernedOperationEnvelopeStatus @default(PENDING)
+  createdAt      DateTime                        @default(now())
+  updatedAt      DateTime                        @updatedAt
+
+  organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  executions   GovernedExecutionRecord[]
+
+  @@index([organizationId])
+  @@index([correlationId])
+  @@map("governed_operation_envelopes")
+}
+
+/// Claim-Eintrag der Governed-Idempotenz-Grenze (EO-01.5 Phase 3H.1).
+///
+/// Dedup-Primärschlüssel ist die LOGISCHE OPERATION (logicalOperationKey),
+/// trusted abgeleitet und inklusive organizationId-Feld (length-präfixierte
+/// Kodierung) — ein fremder Tenant kann keinen kollidierenden Schlüssel
+/// erzeugen. Die Attempt-Identität (invocationId) ist ebenfalls UNIQUE:
+/// dieselbe invocationId unter einem anderen logischen Schlüssel ist
+/// CONTEXT_CONFLICT. Bewusst OHNE eigenes organizationId-Feld: die
+/// eingefrorene Store-Schnittstelle führt keine Tenant-ID; die Tenant-
+/// Bindung steckt unveränderlich im Schlüssel selbst.
+/// Claims werden NIE freigegeben (kein Release-Pfad).
+model GovernedInvocationClaim {
+  id                  String                        @id @default(uuid())
+  logicalOperationKey String                        @unique
+  invocationId        String                        @unique
+  contextFingerprint  String
+  state               GovernedInvocationClaimState @default(IN_PROGRESS)
+  claimedAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
+
+  @@map("governed_invocation_claims")
+}
+
+/// Persistiertes Ergebnis einer governed Invocation (Evidence Ledger).
+/// Alle JSON-Strukturen sind bereits durch EO-01.5 sanitisierte Formen —
+/// dieser Datensatz speichert KEINE Rohinhalte, Secrets oder Umgebungen.
+model GovernedExecutionRecord {
+  id                      String               @id
+  envelopeId              String
+  organizationId          String
+  workflowRunId           String
+  workflowStepRunId       String
+  capabilityCode          String
+  providerId              String
+  status                  AgentExecutionStatus
+  startedAt               DateTime
+  completedAt             DateTime?
+  durationMs              Int?
+  outputReference         String?
+  artifactReferences      Json?
+  normalizedError         Json?
+  policyDecisionReference String
+  sideEffectSummary       Json?
+  usageMetadata           Json?
+  createdAt               DateTime             @default(now())
+
+  envelope     GovernedOperationEnvelope @relation(fields: [envelopeId], references: [id], onDelete: Restrict)
+  organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([envelopeId])
+  @@index([organizationId, workflowRunId])
+  @@map("governed_execution_records")
 }

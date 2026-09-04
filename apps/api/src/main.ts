@@ -2,6 +2,8 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { json, urlencoded } from 'express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -87,7 +89,8 @@ function buildCorsOptions() {
 export async function createApp() {
   assertSecureProductionConfig();
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
+  configureBodyParsers(app);
 
   // Sprint 2.1: Security-Header per Helmet (u. a. Content-Security-Policy-
   // Basisschutz, X-Frame-Options, X-Content-Type-Options, HSTS in
@@ -127,6 +130,15 @@ export async function createApp() {
   }
 
   return app;
+}
+
+export function configureBodyParsers(app: NestExpressApplication): void {
+  // Register the larger bridge envelope first; all ordinary endpoints retain
+  // Express's previous/default 100 KiB limit.
+  app.use('/v1/operator/tasks', json({ limit: 4 * 1024 * 1024 }));
+  app.use('/v1/operator/tasks', urlencoded({ limit: 4 * 1024 * 1024, extended: true }));
+  app.use(json({ limit: 100 * 1024 }));
+  app.use(urlencoded({ limit: 100 * 1024, extended: true }));
 }
 
 async function bootstrap() {

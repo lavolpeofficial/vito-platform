@@ -17,9 +17,24 @@ concurrency:
 
 jobs:
   verify:
-    name: Install, generate, test and build
+    name: Install, generate, test, gate and build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: vito_operator_bridge_ci
+          POSTGRES_USER: vito_ci
+          POSTGRES_PASSWORD: vito_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vito_ci -d vito_operator_bridge_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Check out repository
@@ -45,6 +60,20 @@ jobs:
 
       - name: Run unit tests
         run: pnpm test
+
+      - name: Run mandatory Operator Bridge PostgreSQL gate
+        env:
+          OPERATOR_BRIDGE_TEST_DATABASE_URL: postgresql://vito_ci:vito_ci@127.0.0.1:5432/vito_operator_bridge_ci
+        run: pnpm --filter @vito/api test:operator-bridge:pg
+
+      - name: Run mandatory composed auth and Operator Bridge E2E gate
+        env:
+          DATABASE_URL: postgresql://vito_ci:vito_ci@127.0.0.1:5432/vito_operator_bridge_ci
+          JWT_SECRET: ci-only-operator-bridge-jwt-secret
+          OPERATOR_BRIDGE_E2E_ONLY: "true"
+          OPERATOR_BRIDGE_EXPOSURE: internal
+          SENSITIVE_PAYLOAD_TTL_HOURS: "72"
+        run: pnpm --filter @vito/api test:e2e --runInBand --testNamePattern="VITO-OB-001 Operator Bridge authorization and composed API"
 
       - name: Build API
         run: pnpm build

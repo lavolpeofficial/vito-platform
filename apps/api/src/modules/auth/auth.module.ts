@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { ScopedMachineIdentityGuard } from '../../common/guards/scoped-machine-identity.guard';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -35,20 +36,21 @@ const LOGIN_RATE_LIMIT_WINDOW_MS = process.env.LOGIN_RATE_LIMIT_WINDOW_MS
   providers: [
     AuthService,
     JwtStrategy,
-    JwtAuthGuard,
-    RolesGuard,
     // Global registriert: JwtAuthGuard schützt standardmäßig alle
-    // Endpunkte außer @Public(); RolesGuard greift zusätzlich überall
-    // dort, wo @Roles(...) gesetzt ist. Beide Guards sind request-scoped,
-    // weil sie den request-scoped TenantContext verwenden. useExisting
-    // stellt sicher, dass APP_GUARD dieselben DI-verwalteten Instanzen nutzt.
+    // Endpunkte außer anonymen @Public()-Requests. Danach erzwingt der
+    // ScopedMachineIdentityGuard den globalen Machine-Scope und erst dann
+    // prüft RolesGuard bestehende Rollen-Metadaten.
     {
       provide: APP_GUARD,
-      useExisting: JwtAuthGuard,
+      useClass: JwtAuthGuard,
     },
     {
       provide: APP_GUARD,
-      useExisting: RolesGuard,
+      useClass: ScopedMachineIdentityGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,
     },
   ],
   // Sprint 3A: AuthService.issueTokenFor() wird von UsersService

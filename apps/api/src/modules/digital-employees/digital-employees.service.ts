@@ -1,7 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { ActivateDigitalEmployeeDto } from './dto/activate-digital-employee.dto';
 import { AssignWorkforceDto } from './dto/assign-workforce.dto';
 import { CreateDigitalEmployeeDto } from './dto/create-digital-employee.dto';
 import { UpdateDigitalEmployeeDto } from './dto/update-digital-employee.dto';
@@ -14,6 +15,10 @@ export class DigitalEmployeesService {
   ) {}
 
   async create(organizationId: string, dto: CreateDigitalEmployeeDto) {
+    if (dto.status === 'ACTIVE') {
+      throw new BadRequestException('DigitalEmployees must pass the activation gate before becoming ACTIVE.');
+    }
+
     try {
       return await this.prisma.$transaction(async (tx) => {
         const digitalEmployee = await tx.digitalEmployee.create({
@@ -26,6 +31,7 @@ export class DigitalEmployeesService {
             status: dto.status,
             version: dto.version,
           },
+          include: { workforceInstance: true },
         });
 
         await this.auditService.record(
@@ -71,14 +77,15 @@ export class DigitalEmployeesService {
         capabilities: { include: { capability: true } },
       },
     });
-    if (!digitalEmployee) {
-      throw new NotFoundException('DigitalEmployee nicht gefunden.');
-    }
+    if (!digitalEmployee) throw new NotFoundException('DigitalEmployee nicht gefunden.');
     return digitalEmployee;
   }
 
   async update(organizationId: string, id: string, dto: UpdateDigitalEmployeeDto) {
     await this.findByIdOrFail(organizationId, id);
+    if (dto.status === 'ACTIVE') {
+      throw new BadRequestException('Direct activation is forbidden. Use the activation gate endpoint.');
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.digitalEmployee.update({
@@ -104,7 +111,6 @@ export class DigitalEmployeesService {
         },
         tx,
       );
-
       return updated;
     });
   }
@@ -118,9 +124,7 @@ export class DigitalEmployeesService {
         where: { id: workforceInstanceId, organizationId },
         select: { id: true },
       });
-      if (!workforce) {
-        throw new NotFoundException('WorkforceInstance nicht gefunden.');
-      }
+      if (!workforce) throw new NotFoundException('WorkforceInstance nicht gefunden.');
     }
 
     if (!workforceInstanceId && employee.orchestratedWorkforces.length) {
@@ -140,7 +144,9 @@ export class DigitalEmployeesService {
         {
           organizationId,
           actorType: 'SYSTEM',
-          action: workforceInstanceId ? 'DIGITAL_EMPLOYEE_ASSIGNED_TO_WORKFORCE' : 'DIGITAL_EMPLOYEE_REMOVED_FROM_WORKFORCE',
+          action: workforceInstanceId
+            ? 'DIGITAL_EMPLOYEE_ASSIGNED_TO_WORKFORCE'
+            : 'DIGITAL_EMPLOYEE_REMOVED_FROM_WORKFORCE',
           entityType: 'DigitalEmployee',
           entityId: updated.id,
           metadata: {
@@ -150,15 +156,61 @@ export class DigitalEmployeesService {
         },
         tx,
       );
-
       return updated;
     });
   }
 
-  /**
-   * Prüft, dass ein DigitalEmployee existiert und derselben Organization
-   * angehört. Wird u. a. von TasksService für Zuweisungsvalidierung genutzt.
-   */
+  async activate(organizationId: string, id: string, dto: ActivateDigitalEmployeeDto) {
+    const employee = await this.findByIdOrFail(organizationId, id);
+    if (employee.status !== 'DRAFT' && employee.status !== 'PAUSED') {
+      throw new BadRequestException(`Only DRAFT or PAUSED employees may be activated. Current status: ${employee.status}`);
+    }
+    if (!dto.capabilitiesReviewed || !dto.dataAccessReviewed) {
+      throw new BadRequestException('Capabilities and data access must be explicitly reviewed before activation.');
+    }
+    if (employee.capabilities.length === 0) {
+      throw new BadRequestException('At least one capability must be assigned before activation.');
+    }
+
+    const enabled = employee.capabilities.filter((assignment) => assignment.isEnabled);
+    if (enabled.length === 0) {
+      throw new BadRequestException('At least one capability must be explicitly enabled before activation.');
+    }
+    const unsafe = enabled.filter(
+      ({ capability }) =>
+        (capability.riskLevel === 'HIGH' || capability.riskLevel === 'CRITICAL') && !capability.requiresApproval,
+    );
+    if (unsafe.length > 0) {
+      throw new BadRequestException(`High-risk capabilities must require approval: ${unsafe.map((x) => x.capability.code).join(', ')}`);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const activated = await tx.digitalEmployee.update({
+        where: { id },
+        data: { status: 'ACTIVE' },
+        include: { workforceInstance: true },
+      });
+      await this.auditService.record(
+        {
+          organizationId,
+          actorType: 'SYSTEM',
+          action: 'DIGITAL_EMPLOYEE_ACTIVATED',
+          entityType: 'DigitalEmployee',
+          entityId: id,
+          metadata: {
+            approvalNote: dto.approvalNote,
+            capabilitiesReviewed: true,
+            dataAccessReviewed: true,
+            enabledCapabilityCodes: enabled.map((x) => x.capability.code),
+            activationGateVersion: '0.1.0',
+          },
+        },
+        tx,
+      );
+      return activated;
+    });
+  }
+
   async assertBelongsToOrganization(organizationId: string, digitalEmployeeId: string): Promise<void> {
     const digitalEmployee = await this.prisma.digitalEmployee.findFirst({
       where: { id: digitalEmployeeId, organizationId },

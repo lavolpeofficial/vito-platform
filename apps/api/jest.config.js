@@ -3,7 +3,11 @@ module.exports = {
   rootDir: 'src',
   testRegex: '.*\\.spec\\.ts$',
   transform: {
-    '^.+\\.(t|j)s$': 'ts-jest',
+    '^.+\\.ts$': ['ts-jest', { tsconfig: 'tsconfig.spec.json' }],
+  },
+  moduleNameMapper: {
+    '^(\\.\\.?\\/.*)\\.js$': '$1',
+    '^@vito/contracts$': '<rootDir>/../../../packages/contracts/src/index.ts',
   },
   collectCoverageFrom: ['**/*.(t|j)s'],
   coverageDirectory: '../coverage',

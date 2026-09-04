@@ -15,6 +15,13 @@ import { DigitalEmployeesModule } from './modules/digital-employees/digital-empl
 import { CapabilitiesModule } from './modules/capabilities/capabilities.module';
 import { TasksModule } from './modules/tasks/tasks.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { SourceVaultModule } from './modules/source-vault/source-vault.module';
+import { AoeImportModule } from './modules/aoe-import/aoe-import.module';
+import { WorkflowRuntimeModule } from './modules/workflow-runtime/workflow-runtime.module';
+import { ProviderRegistryModule } from './modules/provider-registry/provider-registry.module';
+import { GovernedRuntimeModule } from './modules/governed-runtime/governed-runtime.module';
+import { AgentWorkforceModule } from './modules/agent-workforce/agent-workforce.module';
+import { OperatorBridgeModule } from './modules/operator-bridge/operator-bridge.module';
 
 /**
  * Seit Sprint 2 gibt es keine `TenantMiddleware` mehr. Authentifizierung
@@ -41,6 +48,13 @@ import { AuditModule } from './modules/audit/audit.module';
     CapabilitiesModule,
     TasksModule,
     AuditModule,
+    SourceVaultModule,
+    AoeImportModule,
+    WorkflowRuntimeModule,
+    ProviderRegistryModule,
+    GovernedRuntimeModule,
+    AgentWorkforceModule,
+    OperatorBridgeModule,
   ],
 })
 export class AppModule {}

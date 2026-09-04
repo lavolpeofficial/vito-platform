@@ -1,0 +1,26 @@
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: vito-n8n
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      N8N_HOST: 127.0.0.1
+      N8N_LISTEN_ADDRESS: 127.0.0.1
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_SECURE_COOKIE: "false"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      N8N_UNVERIFIED_PACKAGES_ENABLED: "false"
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY}
+      VITO_WORKER_URL: http://127.0.0.1:8081
+      VITO_WORKER_TOKEN: ${VITO_WORKER_TOKEN:?set VITO_WORKER_TOKEN}
+    volumes:
+      - vito_n8n_data:/home/node/.n8n
+      - ./workflows:/opt/vito/workflows:ro
+
+volumes:
+  vito_n8n_data:
