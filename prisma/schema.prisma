@@ -17,6 +17,42 @@ enum OrganizationStatus {
   ARCHIVED
 }
 
+enum WorkforceStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum DepartmentStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum TeamStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum OrganizationRoleStatus {
+  DRAFT
+  ACTIVE
+  DEPRECATED
+  ARCHIVED
+}
+
+enum PositionStatus {
+  DRAFT
+  OPEN
+  OCCUPIED
+  VACANT
+  ARCHIVED
+}
+
 enum UserRole {
   OWNER
   ADMIN
@@ -267,6 +303,11 @@ model Organization {
   updatedAt DateTime           @updatedAt
 
   users                      User[]
+  workforceInstances         WorkforceInstance[]
+  departments                Department[]
+  teams                      Team[]
+  organizationRoles          OrganizationRole[]
+  positions                  Position[]
   digitalEmployees           DigitalEmployee[]
   capabilities               Capability[]
   tasks                      Task[]
@@ -283,6 +324,143 @@ model Organization {
   operatorTasks              OperatorTask[]
 
   @@map("organizations")
+}
+
+model WorkforceInstance {
+  id                     String          @id @default(uuid())
+  organizationId         String
+  code                   String
+  name                   String
+  description            String?
+  status                 WorkforceStatus @default(DRAFT)
+  isDefault              Boolean         @default(false)
+  orchestratorEmployeeId String?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id])
+  orchestrator DigitalEmployee?  @relation("WorkforceOrchestrator", fields: [orchestratorEmployeeId], references: [id], onDelete: SetNull)
+  members      DigitalEmployee[] @relation("WorkforceMembers")
+  departments Department[]
+  teams       Team[]
+  positions   Position[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([orchestratorEmployeeId])
+  @@map("workforce_instances")
+}
+
+model Department {
+  id                  String           @id @default(uuid())
+  organizationId      String
+  workforceInstanceId String
+  parentDepartmentId  String?
+  managerEmployeeId   String?
+  code                String
+  name                String
+  description         String?
+  status              DepartmentStatus @default(DRAFT)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  organization      Organization      @relation(fields: [organizationId], references: [id])
+  workforceInstance WorkforceInstance @relation(fields: [workforceInstanceId], references: [id], onDelete: Cascade)
+  parentDepartment  Department?       @relation("DepartmentHierarchy", fields: [parentDepartmentId], references: [id], onDelete: SetNull)
+  childDepartments  Department[]      @relation("DepartmentHierarchy")
+  manager           DigitalEmployee?  @relation("DepartmentManager", fields: [managerEmployeeId], references: [id], onDelete: SetNull)
+  teams             Team[]
+  positions         Position[]
+
+  @@unique([workforceInstanceId, code])
+  @@index([organizationId])
+  @@index([workforceInstanceId])
+  @@index([parentDepartmentId])
+  @@index([managerEmployeeId])
+  @@map("departments")
+}
+
+model Team {
+  id                  String     @id @default(uuid())
+  organizationId      String
+  workforceInstanceId String
+  departmentId        String
+  managerEmployeeId   String?
+  code                String
+  name                String
+  description         String?
+  status              TeamStatus @default(DRAFT)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  organization      Organization      @relation(fields: [organizationId], references: [id])
+  workforceInstance WorkforceInstance @relation(fields: [workforceInstanceId], references: [id], onDelete: Cascade)
+  department        Department        @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  manager           DigitalEmployee?  @relation("TeamManager", fields: [managerEmployeeId], references: [id], onDelete: SetNull)
+  positions         Position[]
+
+  @@unique([departmentId, code])
+  @@index([organizationId])
+  @@index([workforceInstanceId])
+  @@index([departmentId])
+  @@index([managerEmployeeId])
+  @@map("teams")
+}
+
+model OrganizationRole {
+  id               String                 @id @default(uuid())
+  organizationId   String
+  code             String
+  name             String
+  description      String?
+  status           OrganizationRoleStatus @default(DRAFT)
+  responsibilities Json                   @default("[]")
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  positions    Position[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@map("organization_roles")
+}
+
+model Position {
+  id                   String         @id @default(uuid())
+  organizationId       String
+  workforceInstanceId  String
+  departmentId         String?
+  teamId               String?
+  organizationRoleId   String
+  managerPositionId    String?
+  occupantEmployeeId   String?        @unique
+  code                 String
+  title                String
+  description          String?
+  status               PositionStatus @default(DRAFT)
+  isLeadership         Boolean        @default(false)
+  budgetResponsibility Decimal?       @db.Decimal(18, 2)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  organization      Organization      @relation(fields: [organizationId], references: [id])
+  workforceInstance WorkforceInstance @relation(fields: [workforceInstanceId], references: [id], onDelete: Cascade)
+  department        Department?       @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  team              Team?             @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  organizationRole  OrganizationRole  @relation(fields: [organizationRoleId], references: [id])
+  managerPosition   Position?         @relation("PositionHierarchy", fields: [managerPositionId], references: [id], onDelete: SetNull)
+  directReports     Position[]        @relation("PositionHierarchy")
+  occupant          DigitalEmployee?  @relation("PositionOccupant", fields: [occupantEmployeeId], references: [id], onDelete: SetNull)
+
+  @@unique([workforceInstanceId, code])
+  @@index([organizationId])
+  @@index([workforceInstanceId])
+  @@index([departmentId])
+  @@index([teamId])
+  @@index([organizationRoleId])
+  @@index([managerPositionId])
+  @@map("positions")
 }
 
 model User {
@@ -318,23 +496,30 @@ model User {
 }
 
 model DigitalEmployee {
-  id             String                @id @default(uuid())
-  organizationId String
-  name           String
-  code           String
-  description    String?
-  status         DigitalEmployeeStatus @default(DRAFT)
-  employeeType   EmployeeType
-  version        String
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
+  id                  String                @id @default(uuid())
+  organizationId      String
+  workforceInstanceId String?
+  name                String
+  code                String
+  description         String?
+  status              DigitalEmployeeStatus @default(DRAFT)
+  employeeType        EmployeeType
+  version             String
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
 
-  organization  Organization                @relation(fields: [organizationId], references: [id])
-  capabilities  DigitalEmployeeCapability[]
-  assignedTasks Task[]                      @relation("TaskAssignedDigitalEmployee")
+  organization           Organization                @relation(fields: [organizationId], references: [id])
+  workforceInstance      WorkforceInstance?          @relation("WorkforceMembers", fields: [workforceInstanceId], references: [id], onDelete: SetNull)
+  orchestratedWorkforces WorkforceInstance[]         @relation("WorkforceOrchestrator")
+  managedDepartments     Department[]                @relation("DepartmentManager")
+  managedTeams           Team[]                      @relation("TeamManager")
+  position               Position?                   @relation("PositionOccupant")
+  capabilities           DigitalEmployeeCapability[]
+  assignedTasks          Task[]                      @relation("TaskAssignedDigitalEmployee")
 
   @@unique([organizationId, code])
   @@index([organizationId])
+  @@index([workforceInstanceId])
   @@map("digital_employees")
 }
 
@@ -704,13 +889,13 @@ model GovernedOperationEnvelope {
 /// Bindung steckt unveränderlich im Schlüssel selbst.
 /// Claims werden NIE freigegeben (kein Release-Pfad).
 model GovernedInvocationClaim {
-  id                  String                       @id @default(uuid())
-  logicalOperationKey String                       @unique
-  invocationId        String                       @unique
+  id                  String                        @id @default(uuid())
+  logicalOperationKey String                        @unique
+  invocationId        String                        @unique
   contextFingerprint  String
   state               GovernedInvocationClaimState @default(IN_PROGRESS)
-  claimedAt           DateTime                     @default(now())
-  updatedAt           DateTime                     @updatedAt
+  claimedAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
 
   @@map("governed_invocation_claims")
 }

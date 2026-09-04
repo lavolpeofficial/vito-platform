@@ -58,6 +58,11 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm prisma:generate
 
+      - name: Validate clean PostgreSQL migration chain
+        env:
+          DATABASE_URL: postgresql://vito_ci:vito_ci@127.0.0.1:5432/vito_operator_bridge_ci
+        run: pnpm prisma:migrate:deploy
+
       - name: Run unit tests
         run: pnpm test
 

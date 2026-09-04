@@ -5,6 +5,12 @@ import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
 import { UsersModule } from './modules/users/users.module';
+import { WorkforceInstancesModule } from './modules/workforce-instances/workforce-instances.module';
+import { DepartmentsModule } from './modules/departments/departments.module';
+import { TeamsModule } from './modules/teams/teams.module';
+import { OrganizationRolesModule } from './modules/organization-roles/organization-roles.module';
+import { PositionsModule } from './modules/positions/positions.module';
+import { OrganizationChartModule } from './modules/organization-chart/organization-chart.module';
 import { DigitalEmployeesModule } from './modules/digital-employees/digital-employees.module';
 import { CapabilitiesModule } from './modules/capabilities/capabilities.module';
 import { TasksModule } from './modules/tasks/tasks.module';
@@ -32,6 +38,12 @@ import { OperatorBridgeModule } from './modules/operator-bridge/operator-bridge.
     HealthModule,
     OrganizationsModule,
     UsersModule,
+    WorkforceInstancesModule,
+    DepartmentsModule,
+    TeamsModule,
+    OrganizationRolesModule,
+    PositionsModule,
+    OrganizationChartModule,
     DigitalEmployeesModule,
     CapabilitiesModule,
     TasksModule,
