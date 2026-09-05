@@ -43,8 +43,10 @@ export class CommandBusService {
       timestamp: new Date().toISOString(),
     };
 
+    // The insecure development header is not an authenticated tenant boundary.
+    // Do not write a tenant-scoped audit event from an unverified organizationId.
     if (actor.authenticationMethod !== 'jwt' || !actor.userId || !actor.role) {
-      return this.reject(command, 'JWT_AUTH_REQUIRED');
+      return this.result(command, 'REJECTED', undefined, 'JWT_AUTH_REQUIRED');
     }
 
     if (!handler) {
@@ -115,7 +117,7 @@ export class CommandBusService {
   private async reject(command: VitoCommand, reason: string): Promise<CommandResult> {
     await this.audit.record({
       organizationId: command.organizationId,
-      actorType: command.requestedBy === 'anonymous' ? 'SYSTEM' : 'USER',
+      actorType: 'USER',
       actorId: command.requestedBy,
       action: 'COMMAND.REJECTED',
       entityType: 'COMMAND',
