@@ -16,6 +16,8 @@ export interface WorldStatusSnapshot {
 @Injectable()
 export class WorldStatusAdapter implements CommandHandler<WorldStatusSnapshot> {
   readonly commandType = 'WORLD.GET_STATUS';
+  readonly target = 'WORLD';
+  readonly requiredApprovalLevel = 'L0' as const;
 
   async execute(_command: VitoCommand): Promise<WorldStatusSnapshot> {
     const client = new WorldGitHubClient();
