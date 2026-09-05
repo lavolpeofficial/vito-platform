@@ -1,8 +1,12 @@
-import { WorldStatusAdapter } from './world-status.adapter';
+import { ServerCredentialResolver } from '../server-credentials/server-credential.resolver';
 import type { VitoCommand } from './command-bus.types';
+import { WorldGitHubClient } from './world-github.client';
+import { WorldStatusAdapter } from './world-status.adapter';
+
+const clientWithToken = () =>
+  new WorldGitHubClient(new ServerCredentialResolver(new Map([['github.world.actions', 'test-token']])));
 
 describe('WorldStatusAdapter', () => {
-  const originalToken = process.env.VITO_GITHUB_TOKEN;
   const command: VitoCommand = {
     commandId: 'cmd-status',
     commandType: 'WORLD.GET_STATUS',
@@ -15,14 +19,9 @@ describe('WorldStatusAdapter', () => {
     timestamp: new Date().toISOString(),
   };
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-    if (originalToken === undefined) delete process.env.VITO_GITHUB_TOKEN;
-    else process.env.VITO_GITHUB_TOKEN = originalToken;
-  });
+  afterEach(() => jest.restoreAllMocks());
 
   it('reads the private WORLD manifest through the authenticated GitHub API', async () => {
-    process.env.VITO_GITHUB_TOKEN = 'test-token';
     const manifest = {
       gate: 'G35',
       caseId: 'WORLD-LOCATION-SELECTION',
@@ -37,10 +36,17 @@ describe('WorldStatusAdapter', () => {
       }),
     } as Response);
 
-    const result = await new WorldStatusAdapter().execute(command);
+    const result = await new WorldStatusAdapter(clientWithToken()).execute(command);
     expect(result).toMatchObject({ gate: 'G35', source: 'GITHUB_API' });
 
     const headers = fetchMock.mock.calls[0][1]?.headers as Headers;
     expect(headers.get('authorization')).toBe('Bearer test-token');
+  });
+
+  it('fails closed when the configured credential reference cannot be resolved', async () => {
+    const client = new WorldGitHubClient(new ServerCredentialResolver(new Map()));
+    await expect(new WorldStatusAdapter(client).execute(command)).rejects.toThrow(
+      'WORLD_GITHUB_CREDENTIAL_MISSING',
+    );
   });
 });
