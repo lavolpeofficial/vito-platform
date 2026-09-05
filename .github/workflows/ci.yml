@@ -80,5 +80,13 @@ jobs:
           SENSITIVE_PAYLOAD_TTL_HOURS: "72"
         run: pnpm --filter @vito/api test:e2e --runInBand --testNamePattern="VITO-OB-001 Operator Bridge authorization and composed API"
 
+      - name: Run mandatory JARVIS Command Bus auth boundary E2E gate
+        env:
+          DATABASE_URL: postgresql://vito_ci:vito_ci@127.0.0.1:5432/vito_operator_bridge_ci
+          JWT_SECRET: ci-only-command-bus-jwt-secret
+          OPERATOR_BRIDGE_EXPOSURE: internal
+          SENSITIVE_PAYLOAD_TTL_HOURS: "72"
+        run: pnpm --filter @vito/api test:e2e --runInBand --runTestsByPath "$PWD/test/command-bus.e2e-spec.ts"
+
       - name: Build API
         run: pnpm build
