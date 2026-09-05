@@ -1,8 +1,12 @@
-import { WorldGateResultAdapter } from './world-gate-result.adapter';
+import { ServerCredentialResolver } from '../server-credentials/server-credential.resolver';
 import type { VitoCommand } from './command-bus.types';
+import { WorldGateResultAdapter } from './world-gate-result.adapter';
+import { WorldGitHubClient } from './world-github.client';
+
+const clientWithToken = () =>
+  new WorldGitHubClient(new ServerCredentialResolver(new Map([['github.world.actions', 'test-token']])));
 
 describe('WorldGateResultAdapter', () => {
-  const originalToken = process.env.VITO_GITHUB_TOKEN;
   const command: VitoCommand = {
     commandId: 'cmd-result-g35',
     commandType: 'WORLD.GET_GATE_RESULT',
@@ -15,14 +19,9 @@ describe('WorldGateResultAdapter', () => {
     timestamp: new Date().toISOString(),
   };
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-    if (originalToken === undefined) delete process.env.VITO_GITHUB_TOKEN;
-    else process.env.VITO_GITHUB_TOKEN = originalToken;
-  });
+  afterEach(() => jest.restoreAllMocks());
 
   it('returns completed run state and artifacts for the governed WORLD workflow', async () => {
-    process.env.VITO_GITHUB_TOKEN = 'test-token';
     jest.spyOn(global, 'fetch')
       .mockResolvedValueOnce({
         ok: true,
@@ -56,7 +55,7 @@ describe('WorldGateResultAdapter', () => {
         }),
       } as Response);
 
-    const result = await new WorldGateResultAdapter().execute(command);
+    const result = await new WorldGateResultAdapter(clientWithToken()).execute(command);
     expect(result.status).toBe('completed');
     expect(result.conclusion).toBe('success');
     expect(result.artifacts).toEqual([
@@ -65,7 +64,6 @@ describe('WorldGateResultAdapter', () => {
   });
 
   it('does not expose artifacts until the run completes', async () => {
-    process.env.VITO_GITHUB_TOKEN = 'test-token';
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -83,14 +81,13 @@ describe('WorldGateResultAdapter', () => {
       }),
     } as Response);
 
-    const result = await new WorldGateResultAdapter().execute(command);
+    const result = await new WorldGateResultAdapter(clientWithToken()).execute(command);
     expect(result.status).toBe('in_progress');
     expect(result.artifacts).toEqual([]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('fails closed for a run outside the governed workflow', async () => {
-    process.env.VITO_GITHUB_TOKEN = 'test-token';
     jest.spyOn(global, 'fetch').mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -107,7 +104,7 @@ describe('WorldGateResultAdapter', () => {
       }),
     } as Response);
 
-    await expect(new WorldGateResultAdapter().execute(command)).rejects.toThrow(
+    await expect(new WorldGateResultAdapter(clientWithToken()).execute(command)).rejects.toThrow(
       'WORLD_GATE_RUN_WORKFLOW_MISMATCH',
     );
   });
