@@ -19,13 +19,14 @@ export class WorldStatusAdapter implements CommandHandler<WorldStatusSnapshot> {
   readonly target = 'WORLD';
   readonly requiredApprovalLevel = 'L0' as const;
 
+  constructor(private readonly client: WorldGitHubClient) {}
+
   async execute(_command: VitoCommand): Promise<WorldStatusSnapshot> {
-    const client = new WorldGitHubClient();
-    const manifest = await client.getManifest();
+    const manifest = await this.client.getManifest();
     return {
       system: 'WORLD',
-      repository: client.repository,
-      branch: client.branch,
+      repository: this.client.repository,
+      branch: this.client.branch,
       gate: manifest.gate,
       caseId: manifest.caseId,
       verifier: manifest.verifier,

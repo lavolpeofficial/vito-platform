@@ -27,28 +27,29 @@ export class WorldRunGateAdapter implements CommandHandler<WorldRunGateResult> {
   readonly target = 'WORLD';
   readonly requiredApprovalLevel = 'L3' as const;
 
+  constructor(private readonly client: WorldGitHubClient) {}
+
   async execute(command: VitoCommand): Promise<WorldRunGateResult> {
     const { gate } = command.parameters as unknown as WorldRunGateParameters;
     if (typeof gate !== 'string' || !/^G[0-9]+$/.test(gate)) throw new Error('WORLD_GATE_INVALID');
 
-    const client = new WorldGitHubClient();
-    const manifest = await client.getManifest();
+    const manifest = await this.client.getManifest();
     if (manifest.gate !== gate) throw new Error(`WORLD_GATE_NOT_GOVERNED:${manifest.gate}`);
     if (manifest.caseId !== 'WORLD-LOCATION-SELECTION') throw new Error('WORLD_GATE_CASE_NOT_ALLOWED');
     if (!/^scripts\/world-g[0-9]+-verify\.sh$/.test(manifest.verifier)) {
       throw new Error('WORLD_GATE_VERIFIER_NOT_ALLOWED');
     }
 
-    const headSha = await client.getBranchHeadSha();
+    const headSha = await this.client.getBranchHeadSha();
     const dispatchedAt = Date.now();
-    await client.dispatchWorkflow();
-    const run = await this.correlateRun(client, headSha, dispatchedAt);
+    await this.client.dispatchWorkflow();
+    const run = await this.correlateRun(this.client, headSha, dispatchedAt);
 
     return {
       system: 'WORLD',
-      repository: client.repository,
-      branch: client.branch,
-      workflow: client.workflow,
+      repository: this.client.repository,
+      branch: this.client.branch,
+      workflow: this.client.workflow,
       gate: manifest.gate,
       caseId: manifest.caseId,
       verifier: manifest.verifier,

@@ -1,3 +1,6 @@
+import { Injectable } from '@nestjs/common';
+import { ServerCredentialResolver } from '../server-credentials/server-credential.resolver';
+
 interface GitHubContentsResponse {
   content?: string;
   encoding?: string;
@@ -46,15 +49,14 @@ export interface WorldGateManifest {
 export type WorldWorkflowRun = WorkflowRun;
 export type WorldWorkflowArtifact = WorkflowArtifact;
 
+@Injectable()
 export class WorldGitHubClient {
-  constructor(
-    readonly repository = process.env.WORLD_REPOSITORY ?? 'lavolpeofficial/aoe-knowledge-engine',
-    readonly branch = process.env.WORLD_BRANCH ?? 'case/global-resilience-harvest-v0.1-agent',
-    readonly workflow = process.env.WORLD_GATE_WORKFLOW ?? 'world-remote-gate.yml',
-    private readonly token = process.env.VITO_GITHUB_TOKEN,
-  ) {
-    if (!this.token) throw new Error('WORLD_GITHUB_TOKEN_MISSING');
-  }
+  readonly repository = process.env.WORLD_REPOSITORY ?? 'lavolpeofficial/aoe-knowledge-engine';
+  readonly branch = process.env.WORLD_BRANCH ?? 'case/global-resilience-harvest-v0.1-agent';
+  readonly workflow = process.env.WORLD_GATE_WORKFLOW ?? 'world-remote-gate.yml';
+  readonly credentialRef = process.env.WORLD_GITHUB_CREDENTIAL_REF ?? 'github.world.actions';
+
+  constructor(private readonly credentials: ServerCredentialResolver) {}
 
   async getManifest(): Promise<WorldGateManifest> {
     const url = `https://api.github.com/repos/${this.repository}/contents/ci/world-remote-gate.json?ref=${encodeURIComponent(this.branch)}`;
@@ -111,9 +113,12 @@ export class WorldGitHubClient {
   }
 
   private async request(url: string, init: RequestInit = {}): Promise<Response> {
+    const token = this.credentials.resolve(this.credentialRef);
+    if (!token) throw new Error('WORLD_GITHUB_CREDENTIAL_MISSING');
+
     const headers = new Headers(init.headers);
     headers.set('accept', 'application/vnd.github+json');
-    headers.set('authorization', `Bearer ${this.token}`);
+    headers.set('authorization', `Bearer ${token}`);
     headers.set('x-github-api-version', '2022-11-28');
 
     const response = await fetch(url, { ...init, headers });
