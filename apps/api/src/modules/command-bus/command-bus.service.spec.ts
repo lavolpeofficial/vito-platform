@@ -43,7 +43,7 @@ describe('CommandBusService', () => {
     expect(result.reason).toBe('HANDLER_NOT_FOUND');
   });
 
-  it('rejects insecure-header callers even for L0 commands', async () => {
+  it('rejects insecure-header callers without writing a tenant-scoped audit', async () => {
     const bus = new CommandBusService(audit);
     bus.register({
       commandType: 'WORLD.GET_STATUS',
@@ -53,10 +53,11 @@ describe('CommandBusService', () => {
     });
     const result = await bus.dispatchRequest(
       { commandType: 'WORLD.GET_STATUS', parameters: {} },
-      { organizationId: 'org-1', userId: null, role: null, authenticationMethod: 'insecure-header' },
+      { organizationId: 'untrusted-org', userId: null, role: null, authenticationMethod: 'insecure-header' },
     );
     expect(result.status).toBe('REJECTED');
     expect(result.reason).toBe('JWT_AUTH_REQUIRED');
+    expect(audit.record).not.toHaveBeenCalled();
   });
 
   it('requires OWNER or ADMIN for L3 commands', async () => {
