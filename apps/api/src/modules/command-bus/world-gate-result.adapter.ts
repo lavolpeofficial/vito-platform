@@ -32,22 +32,23 @@ export class WorldGateResultAdapter implements CommandHandler<WorldGateResultSna
   readonly target = 'WORLD';
   readonly requiredApprovalLevel = 'L0' as const;
 
+  constructor(private readonly client: WorldGitHubClient) {}
+
   async execute(command: VitoCommand): Promise<WorldGateResultSnapshot> {
     const { runId } = command.parameters as unknown as WorldGateResultParameters;
     if (!Number.isInteger(runId) || runId <= 0) throw new Error('WORLD_GATE_RUN_ID_INVALID');
 
-    const client = new WorldGitHubClient();
-    const run = await client.getWorkflowRun(runId);
+    const run = await this.client.getWorkflowRun(runId);
     if (run.event !== 'workflow_dispatch') throw new Error('WORLD_GATE_RUN_EVENT_NOT_ALLOWED');
-    if (run.head_branch !== client.branch) throw new Error('WORLD_GATE_RUN_BRANCH_MISMATCH');
-    if (!run.path.endsWith(`/${client.workflow}`)) throw new Error('WORLD_GATE_RUN_WORKFLOW_MISMATCH');
+    if (run.head_branch !== this.client.branch) throw new Error('WORLD_GATE_RUN_BRANCH_MISMATCH');
+    if (!run.path.endsWith(`/${this.client.workflow}`)) throw new Error('WORLD_GATE_RUN_WORKFLOW_MISMATCH');
 
-    const artifacts = run.status === 'completed' ? await client.getWorkflowArtifacts(runId) : [];
+    const artifacts = run.status === 'completed' ? await this.client.getWorkflowArtifacts(runId) : [];
     return {
       system: 'WORLD',
-      repository: client.repository,
-      branch: client.branch,
-      workflow: client.workflow,
+      repository: this.client.repository,
+      branch: this.client.branch,
+      workflow: this.client.workflow,
       runId,
       runUrl: run.html_url,
       status: run.status,
