@@ -22,6 +22,7 @@ import { ProviderRegistryModule } from './modules/provider-registry/provider-reg
 import { GovernedRuntimeModule } from './modules/governed-runtime/governed-runtime.module';
 import { AgentWorkforceModule } from './modules/agent-workforce/agent-workforce.module';
 import { OperatorBridgeModule } from './modules/operator-bridge/operator-bridge.module';
+import { CommandBusModule } from './modules/command-bus/command-bus.module';
 
 /**
  * Seit Sprint 2 gibt es keine `TenantMiddleware` mehr. Authentifizierung
@@ -55,6 +56,7 @@ import { OperatorBridgeModule } from './modules/operator-bridge/operator-bridge.
     GovernedRuntimeModule,
     AgentWorkforceModule,
     OperatorBridgeModule,
+    CommandBusModule,
   ],
 })
 export class AppModule {}
