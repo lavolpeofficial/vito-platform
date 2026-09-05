@@ -43,8 +43,8 @@ export interface WorldGateManifest {
   triggeredAt: string;
 }
 
-export interface WorldWorkflowRun extends WorkflowRun {}
-export interface WorldWorkflowArtifact extends WorkflowArtifact {}
+export type WorldWorkflowRun = WorkflowRun;
+export type WorldWorkflowArtifact = WorkflowArtifact;
 
 export class WorldGitHubClient {
   constructor(
@@ -111,15 +111,12 @@ export class WorldGitHubClient {
   }
 
   private async request(url: string, init: RequestInit = {}): Promise<Response> {
-    const response = await fetch(url, {
-      ...init,
-      headers: {
-        accept: 'application/vnd.github+json',
-        authorization: `Bearer ${this.token}`,
-        'x-github-api-version': '2022-11-28',
-        ...(init.headers ?? {}),
-      },
-    });
+    const headers = new Headers(init.headers);
+    headers.set('accept', 'application/vnd.github+json');
+    headers.set('authorization', `Bearer ${this.token}`);
+    headers.set('x-github-api-version', '2022-11-28');
+
+    const response = await fetch(url, { ...init, headers });
     if (!response.ok) throw new Error(`WORLD_GITHUB_HTTP_${response.status}`);
     return response;
   }
