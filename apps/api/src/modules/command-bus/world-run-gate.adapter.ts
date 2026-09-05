@@ -24,6 +24,8 @@ export interface WorldRunGateResult {
 @Injectable()
 export class WorldRunGateAdapter implements CommandHandler<WorldRunGateResult> {
   readonly commandType = 'WORLD.RUN_GATE';
+  readonly target = 'WORLD';
+  readonly requiredApprovalLevel = 'L3' as const;
 
   async execute(command: VitoCommand): Promise<WorldRunGateResult> {
     const { gate } = command.parameters as unknown as WorldRunGateParameters;
