@@ -1,6 +1,20 @@
 import { Injectable } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { AuditService } from '../audit/audit.service';
 import type { CommandHandler, CommandResult, VitoCommand } from './command-bus.types';
+
+export interface CommandDispatchRequest {
+  commandType: string;
+  parameters: Record<string, unknown>;
+}
+
+export interface CommandActorContext {
+  organizationId: string;
+  userId: string | null;
+  role: UserRole | null;
+  authenticationMethod: 'jwt' | 'insecure-header';
+}
 
 @Injectable()
 export class CommandBusService {
@@ -15,49 +29,67 @@ export class CommandBusService {
     this.handlers.set(handler.commandType, handler);
   }
 
-  async dispatch(command: VitoCommand): Promise<CommandResult> {
-    const handler = this.handlers.get(command.commandType);
+  async dispatchRequest(request: CommandDispatchRequest, actor: CommandActorContext): Promise<CommandResult> {
+    const handler = this.handlers.get(request.commandType);
+    const command: VitoCommand = {
+      commandId: randomUUID(),
+      commandType: request.commandType,
+      organizationId: actor.organizationId,
+      requestedBy: actor.userId ?? 'anonymous',
+      target: handler?.target ?? 'UNRESOLVED',
+      parameters: request.parameters,
+      approvalLevel: handler?.requiredApprovalLevel ?? 'L5',
+      correlationId: randomUUID(),
+      timestamp: new Date().toISOString(),
+    };
+
+    if (actor.authenticationMethod !== 'jwt' || !actor.userId || !actor.role) {
+      return this.reject(command, 'JWT_AUTH_REQUIRED');
+    }
+
     if (!handler) {
-      await this.audit.record({
-        organizationId: command.organizationId,
-        actorType: 'SYSTEM',
-        actorId: command.requestedBy,
-        action: 'COMMAND.REJECTED',
-        entityType: 'COMMAND',
-        entityId: command.commandId,
-        metadata: { commandType: command.commandType, correlationId: command.correlationId, reason: 'HANDLER_NOT_FOUND' },
-      });
-      return this.result(command, 'REJECTED', undefined, 'HANDLER_NOT_FOUND');
+      return this.reject(command, 'HANDLER_NOT_FOUND');
     }
 
-    if (!['L0', 'L1', 'L2', 'L3'].includes(command.approvalLevel)) {
-      await this.audit.record({
-        organizationId: command.organizationId,
-        actorType: 'SYSTEM',
-        actorId: command.requestedBy,
-        action: 'COMMAND.REJECTED',
-        entityType: 'COMMAND',
-        entityId: command.commandId,
-        metadata: { commandType: command.commandType, correlationId: command.correlationId, approvalLevel: command.approvalLevel, reason: 'APPROVAL_REQUIRED' },
-      });
-      return this.result(command, 'REJECTED', undefined, 'APPROVAL_REQUIRED');
+    if (!this.isRoleAuthorized(actor.role, handler.requiredApprovalLevel)) {
+      return this.reject(command, 'COMMAND_POLICY_DENIED');
     }
 
+    if (handler.requiredApprovalLevel === 'L4' || handler.requiredApprovalLevel === 'L5') {
+      return this.reject(command, 'APPROVAL_WORKFLOW_REQUIRED');
+    }
+
+    return this.dispatchResolved(command, handler);
+  }
+
+  private isRoleAuthorized(role: UserRole, level: VitoCommand['approvalLevel']): boolean {
+    if (level === 'L0') return true;
+    if (level === 'L1') return role !== UserRole.VIEWER;
+    if (level === 'L2' || level === 'L3') return role === UserRole.OWNER || role === UserRole.ADMIN;
+    return role === UserRole.OWNER;
+  }
+
+  private async dispatchResolved(command: VitoCommand, handler: CommandHandler): Promise<CommandResult> {
     await this.audit.record({
       organizationId: command.organizationId,
-      actorType: 'SYSTEM',
+      actorType: 'USER',
       actorId: command.requestedBy,
       action: 'COMMAND.STARTED',
       entityType: 'COMMAND',
       entityId: command.commandId,
-      metadata: { commandType: command.commandType, target: command.target, correlationId: command.correlationId, approvalLevel: command.approvalLevel },
+      metadata: {
+        commandType: command.commandType,
+        target: command.target,
+        correlationId: command.correlationId,
+        approvalLevel: command.approvalLevel,
+      },
     });
 
     try {
       const data = await handler.execute(command);
       await this.audit.record({
         organizationId: command.organizationId,
-        actorType: 'SYSTEM',
+        actorType: 'USER',
         actorId: command.requestedBy,
         action: 'COMMAND.SUCCEEDED',
         entityType: 'COMMAND',
@@ -69,7 +101,7 @@ export class CommandBusService {
       const reason = error instanceof Error ? error.message : 'COMMAND_FAILED';
       await this.audit.record({
         organizationId: command.organizationId,
-        actorType: 'SYSTEM',
+        actorType: 'USER',
         actorId: command.requestedBy,
         action: 'COMMAND.FAILED',
         entityType: 'COMMAND',
@@ -80,7 +112,34 @@ export class CommandBusService {
     }
   }
 
+  private async reject(command: VitoCommand, reason: string): Promise<CommandResult> {
+    await this.audit.record({
+      organizationId: command.organizationId,
+      actorType: command.requestedBy === 'anonymous' ? 'SYSTEM' : 'USER',
+      actorId: command.requestedBy,
+      action: 'COMMAND.REJECTED',
+      entityType: 'COMMAND',
+      entityId: command.commandId,
+      metadata: {
+        commandType: command.commandType,
+        target: command.target,
+        correlationId: command.correlationId,
+        approvalLevel: command.approvalLevel,
+        reason,
+      },
+    });
+    return this.result(command, 'REJECTED', undefined, reason);
+  }
+
   private result(command: VitoCommand, status: CommandResult['status'], data?: unknown, reason?: string): CommandResult {
-    return { commandId: command.commandId, commandType: command.commandType, correlationId: command.correlationId, status, data, reason, completedAt: new Date().toISOString() };
+    return {
+      commandId: command.commandId,
+      commandType: command.commandType,
+      correlationId: command.correlationId,
+      status,
+      data,
+      reason,
+      completedAt: new Date().toISOString(),
+    };
   }
 }

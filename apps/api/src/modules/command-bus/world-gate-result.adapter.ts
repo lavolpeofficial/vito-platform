@@ -29,6 +29,8 @@ export interface WorldGateResultSnapshot {
 @Injectable()
 export class WorldGateResultAdapter implements CommandHandler<WorldGateResultSnapshot> {
   readonly commandType = 'WORLD.GET_GATE_RESULT';
+  readonly target = 'WORLD';
+  readonly requiredApprovalLevel = 'L0' as const;
 
   async execute(command: VitoCommand): Promise<WorldGateResultSnapshot> {
     const { runId } = command.parameters as unknown as WorldGateResultParameters;
