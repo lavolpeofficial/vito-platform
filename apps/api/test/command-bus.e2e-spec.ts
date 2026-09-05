@@ -12,6 +12,8 @@ process.env.ALLOW_INSECURE_TENANT_HEADER = 'false';
 process.env.ENABLE_SWAGGER = 'false';
 process.env.OPERATOR_BRIDGE_EXPOSURE = process.env.OPERATOR_BRIDGE_EXPOSURE ?? 'internal';
 process.env.SENSITIVE_PAYLOAD_TTL_HOURS = process.env.SENSITIVE_PAYLOAD_TTL_HOURS ?? '72';
+process.env.GOVERNED_WORKSPACE_ROOT =
+  process.env.GOVERNED_WORKSPACE_ROOT ?? '/tmp/vito-command-bus-e2e-workspaces';
 
 describe('JARVIS Command Bus authorization boundary', () => {
   let app: NestExpressApplication;
