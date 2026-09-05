@@ -86,7 +86,7 @@ jobs:
           JWT_SECRET: ci-only-command-bus-jwt-secret
           OPERATOR_BRIDGE_EXPOSURE: internal
           SENSITIVE_PAYLOAD_TTL_HOURS: "72"
-        run: pnpm --filter @vito/api test:e2e --runInBand --runTestsByPath "$PWD/test/command-bus.e2e-spec.ts"
+        run: pnpm --filter @vito/api test:e2e --runInBand --runTestsByPath test/command-bus.e2e-spec.ts
 
       - name: Build API
         run: pnpm build
