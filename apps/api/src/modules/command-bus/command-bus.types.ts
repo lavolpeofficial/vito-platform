@@ -24,5 +24,7 @@ export interface CommandResult<TData = unknown> {
 
 export interface CommandHandler<TData = unknown> {
   readonly commandType: string;
+  readonly target: string;
+  readonly requiredApprovalLevel: ApprovalLevel;
   execute(command: VitoCommand): Promise<TData>;
 }
