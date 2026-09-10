@@ -16,8 +16,11 @@ import { PrismaLearningMaturityRepository } from './prisma-learning-maturity.rep
 import { PrismaLearningRetrievalRepository } from './prisma-learning-retrieval.repository';
 import { PrismaOutcomeRepository } from './prisma-outcome.repository';
 import { PrismaReflectionRepository } from './prisma-reflection.repository';
+import { PrismaSkillCandidateRepository } from './prisma-skill-candidate.repository';
 import { REFLECTION_REPOSITORY } from './reflection.types';
 import { ReflectionService } from './reflection.service';
+import { SKILL_CANDIDATE_REPOSITORY } from './skill-candidate.types';
+import { SkillCandidateService } from './skill-candidate.service';
 
 @Module({
   imports: [AuditModule],
@@ -34,6 +37,8 @@ import { ReflectionService } from './reflection.service';
     FailurePatternService,
     PrismaLearningRetrievalRepository,
     LearningRetrievalService,
+    PrismaSkillCandidateRepository,
+    SkillCandidateService,
     {
       provide: EXPERIENCE_REPOSITORY,
       useExisting: PrismaExperienceRepository,
@@ -58,6 +63,10 @@ import { ReflectionService } from './reflection.service';
       provide: LEARNING_RETRIEVAL_REPOSITORY,
       useExisting: PrismaLearningRetrievalRepository,
     },
+    {
+      provide: SKILL_CANDIDATE_REPOSITORY,
+      useExisting: PrismaSkillCandidateRepository,
+    },
   ],
   exports: [
     ExperienceStoreService,
@@ -66,6 +75,7 @@ import { ReflectionService } from './reflection.service';
     LearningMaturityService,
     FailurePatternService,
     LearningRetrievalService,
+    SkillCandidateService,
   ],
 })
 export class LearningModule {}
