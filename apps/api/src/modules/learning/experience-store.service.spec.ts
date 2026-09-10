@@ -40,7 +40,7 @@ function repository(overrides: Partial<ExperienceRepository> = {}): jest.Mocked<
       feedback: value.feedback ?? null,
       lesson: value.lesson ?? null,
       reusablePattern: value.reusablePattern ?? null,
-      status: value.status ?? 'OBSERVED',
+      status: 'OBSERVED' as const,
       createdAt: new Date('2026-09-10T18:30:00Z'),
       updatedAt: new Date('2026-09-10T18:30:00Z'),
     })),
@@ -59,6 +59,7 @@ describe('ExperienceStoreService', () => {
     const result = await service.record(input);
 
     expect(result.organizationId).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    expect(result.status).toBe('OBSERVED');
     expect(repo.agentBelongsToOrganization).toHaveBeenCalledWith(
       'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       input.agentId,
