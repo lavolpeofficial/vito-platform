@@ -31,7 +31,11 @@ export interface RecordSkillCandidateInput {
 }
 
 export interface SkillCandidateRepository {
-  outcomesBelongToOrganization(organizationId: string, outcomeIds: readonly string[]): Promise<boolean>;
+  outcomesBelongToExperience(
+    organizationId: string,
+    experienceId: string,
+    outcomeIds: readonly string[],
+  ): Promise<boolean>;
   create(
     organizationId: string,
     approvedByUserId: string,

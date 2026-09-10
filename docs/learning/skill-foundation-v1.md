@@ -21,11 +21,15 @@ A skill candidate may be recorded only when all of the following are true:
 2. the source `LearningCandidate` is ACTIVE and has reached PATTERN or POLICY maturity;
 3. source learning confidence is at least 0.70;
 4. the proposed skill confidence is at least 0.70;
-5. at least two distinct persisted objective Outcomes support it;
+5. at least two distinct persisted objective Outcomes from the source LearningCandidate's Experience support it;
 6. the request is made in an authenticated JWT user context;
 7. an explicit governance `approvalRef` is supplied.
 
 The 0.70 threshold is the deterministic v1 minimum. It is intentionally simple and may later become organization policy rather than hard-coded configuration.
+
+## Evidence grounding
+
+Supporting Outcome IDs are validated against both the authenticated organization and the exact Experience referenced by the source LearningCandidate. Outcomes from another Experience in the same tenant are not accepted as supporting evidence. This prevents unrelated evidence from being used to justify skill reuse.
 
 ## Persistence
 
@@ -45,7 +49,7 @@ The lifecycle values are `RECORDED`, `REJECTED`, and `RETIRED`. There is deliber
 
 ## Audit
 
-Successful recording emits `LEARNING_SKILL_CANDIDATE_RECORDED` with the source candidate, evidence IDs, confidence, approval reference and `executable: false`.
+Successful recording emits `LEARNING_SKILL_CANDIDATE_RECORDED` with the source candidate, source Experience, evidence IDs, confidence, approval reference and `executable: false`.
 
 ## Future boundary
 

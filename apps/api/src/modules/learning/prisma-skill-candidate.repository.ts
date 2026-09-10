@@ -31,13 +31,18 @@ type SkillCandidateRow = {
 export class PrismaSkillCandidateRepository implements SkillCandidateRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async outcomesBelongToOrganization(organizationId: string, outcomeIds: readonly string[]): Promise<boolean> {
+  async outcomesBelongToExperience(
+    organizationId: string,
+    experienceId: string,
+    outcomeIds: readonly string[],
+  ): Promise<boolean> {
     const ids = [...new Set(outcomeIds)];
     if (ids.length === 0) return false;
     const rows = await this.prisma.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
       SELECT COUNT(*)::bigint AS count
       FROM "experience_outcomes"
       WHERE "organization_id" = ${organizationId}
+        AND "experience_id" = ${experienceId}
         AND "id" IN (${Prisma.join(ids)})
     `);
     return Number(rows[0]?.count ?? 0n) === ids.length;

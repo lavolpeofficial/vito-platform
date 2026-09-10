@@ -9,6 +9,7 @@ import { RecordSkillCandidateInput, SkillCandidateRepository } from './skill-can
 const organizationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const userId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const learningCandidateId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const experienceId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 const outcomeIds = [
   'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
   'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
@@ -32,7 +33,7 @@ function learningCandidate(
   return {
     id: learningCandidateId,
     organizationId,
-    experienceId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    experienceId,
     reflectionId: '11111111-1111-4111-8111-111111111111',
     statement: 'Reuse this governed research procedure.',
     applicability: { workflow: 'research' },
@@ -61,7 +62,7 @@ function build(options: { jwt?: boolean; maturity?: LearningCandidateRecord['mat
     get: jest.fn().mockResolvedValue(learningCandidate(options.maturity ?? 'PATTERN', options.confidence === undefined ? 0.85 : options.confidence)),
   } as unknown as jest.Mocked<LearningMaturityService>;
   const repository: jest.Mocked<SkillCandidateRepository> = {
-    outcomesBelongToOrganization: jest.fn().mockResolvedValue(options.outcomesValid ?? true),
+    outcomesBelongToExperience: jest.fn().mockResolvedValue(options.outcomesValid ?? true),
     create: jest.fn().mockImplementation(async (orgId, approvedByUserId, candidateInput) => ({
       id: '22222222-2222-4222-8222-222222222222',
       organizationId: orgId,
@@ -91,12 +92,17 @@ describe('SkillCandidateService', () => {
     const { service, repository, audit } = build();
     const result = await service.record(input);
     expect(result.status).toBe('RECORDED');
-    expect(repository.outcomesBelongToOrganization).toHaveBeenCalledWith(organizationId, outcomeIds);
+    expect(repository.outcomesBelongToExperience).toHaveBeenCalledWith(
+      organizationId,
+      experienceId,
+      outcomeIds,
+    );
     expect(repository.create).toHaveBeenCalledWith(organizationId, userId, expect.objectContaining({ approvalRef: input.approvalRef }));
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
       action: 'LEARNING_SKILL_CANDIDATE_RECORDED',
       actorType: 'USER',
       actorId: userId,
+      metadata: expect.objectContaining({ sourceExperienceId: experienceId }),
     }));
   });
 
@@ -111,10 +117,17 @@ describe('SkillCandidateService', () => {
     await expect(build({ confidence: 0.69 }).service.record(input)).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('requires at least two distinct objective outcomes from the same tenant', async () => {
+  it('requires at least two distinct objective outcomes from the source experience', async () => {
     await expect(build().service.record({ ...input, supportingOutcomeIds: [outcomeIds[0], outcomeIds[0]] }))
       .rejects.toBeInstanceOf(BadRequestException);
-    await expect(build({ outcomesValid: false }).service.record(input)).rejects.toBeInstanceOf(BadRequestException);
+    const { service, repository } = build({ outcomesValid: false });
+    await expect(service.record(input)).rejects.toBeInstanceOf(BadRequestException);
+    expect(repository.outcomesBelongToExperience).toHaveBeenCalledWith(
+      organizationId,
+      experienceId,
+      outcomeIds,
+    );
+    expect(repository.create).not.toHaveBeenCalled();
   });
 
   it('does not expose another tenant skill candidate', async () => {
