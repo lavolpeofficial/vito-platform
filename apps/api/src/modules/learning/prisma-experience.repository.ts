@@ -68,7 +68,7 @@ export class PrismaExperienceRepository implements ExperienceRepository {
         ${input.feedback == null ? null : JSON.stringify(input.feedback)}::jsonb,
         ${input.lesson ?? null},
         ${input.reusablePattern == null ? null : JSON.stringify(input.reusablePattern)}::jsonb,
-        ${input.status ?? 'OBSERVED'}
+        'OBSERVED'
       )
       RETURNING *
     `);
