@@ -2,9 +2,9 @@
 -- Durable, tenant-scoped Experience Store. Learning promotion remains a later governed phase.
 
 CREATE TABLE "experiences" (
-  "id" UUID NOT NULL,
-  "organization_id" UUID NOT NULL,
-  "agent_id" UUID NOT NULL,
+  "id" TEXT NOT NULL,
+  "organization_id" TEXT NOT NULL,
+  "agent_id" TEXT NOT NULL,
   "goal" TEXT NOT NULL,
   "context" JSONB NOT NULL DEFAULT '{}'::jsonb,
   "observation" JSONB NOT NULL DEFAULT '{}'::jsonb,
