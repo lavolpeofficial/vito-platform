@@ -46,8 +46,10 @@ export class SkillCandidateService {
     if (outcomeIds.length < 2) {
       throw new BadRequestException('Skill candidate requires at least two distinct objective outcomes.');
     }
-    if (!(await this.repository.outcomesBelongToOrganization(organizationId, outcomeIds))) {
-      throw new BadRequestException('All supporting outcomes must belong to the authenticated organization.');
+    if (!(await this.repository.outcomesBelongToExperience(organizationId, candidate.experienceId, outcomeIds))) {
+      throw new BadRequestException(
+        'All supporting outcomes must belong to the source learning candidate experience.',
+      );
     }
 
     const skill = await this.repository.create(organizationId, userId, {
@@ -68,6 +70,7 @@ export class SkillCandidateService {
       entityId: skill.id,
       metadata: {
         learningCandidateId: skill.learningCandidateId,
+        sourceExperienceId: candidate.experienceId,
         supportingOutcomeIds: skill.supportingOutcomeIds,
         confidence: skill.confidence,
         approvalRef: skill.approvalRef,
