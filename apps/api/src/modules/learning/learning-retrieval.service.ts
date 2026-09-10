@@ -15,7 +15,7 @@ export class LearningRetrievalService {
     private readonly repository: LearningRetrievalRepository,
   ) {}
 
-  retrieve(query: LearningRetrievalQuery): Promise<readonly RetrievedLearningItem[]> {
+  async retrieve(query: LearningRetrievalQuery): Promise<readonly RetrievedLearningItem[]> {
     const organizationId = this.tenantContext.getOrThrow();
     if (!query.query?.trim()) throw new BadRequestException('query is required.');
     if (query.limit != null && (query.limit < 1 || query.limit > 50)) {
