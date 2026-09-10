@@ -38,7 +38,6 @@ export interface RecordExperienceInput {
   readonly feedback?: Readonly<Record<string, unknown>> | null;
   readonly lesson?: string | null;
   readonly reusablePattern?: Readonly<Record<string, unknown>> | null;
-  readonly status?: ExperienceStatus;
 }
 
 export interface ExperienceSearchQuery {
