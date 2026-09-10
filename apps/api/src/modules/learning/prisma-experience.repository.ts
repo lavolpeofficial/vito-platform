@@ -39,8 +39,8 @@ export class PrismaExperienceRepository implements ExperienceRepository {
       SELECT EXISTS (
         SELECT 1
         FROM "digital_employees"
-        WHERE "id" = ${agentId}::uuid
-          AND "organizationId" = ${organizationId}::uuid
+        WHERE "id" = ${agentId}
+          AND "organizationId" = ${organizationId}
       ) AS "exists"
     `);
     return rows[0]?.exists === true;
@@ -54,9 +54,9 @@ export class PrismaExperienceRepository implements ExperienceRepository {
         "decision", "action", "result", "success_score", "confidence", "feedback",
         "lesson", "reusable_pattern", "status"
       ) VALUES (
-        ${id}::uuid,
-        ${organizationId}::uuid,
-        ${input.agentId}::uuid,
+        ${id},
+        ${organizationId},
+        ${input.agentId},
         ${input.goal},
         ${JSON.stringify(input.context)}::jsonb,
         ${JSON.stringify(input.observation)}::jsonb,
@@ -79,8 +79,8 @@ export class PrismaExperienceRepository implements ExperienceRepository {
     const rows = await this.prisma.$queryRaw<ExperienceRow[]>(Prisma.sql`
       SELECT *
       FROM "experiences"
-      WHERE "organization_id" = ${organizationId}::uuid
-        AND "id" = ${experienceId}::uuid
+      WHERE "organization_id" = ${organizationId}
+        AND "id" = ${experienceId}
       LIMIT 1
     `);
     return rows[0] ? mapRow(rows[0]) : null;
@@ -89,7 +89,7 @@ export class PrismaExperienceRepository implements ExperienceRepository {
   async search(organizationId: string, query: ExperienceSearchQuery): Promise<readonly ExperienceRecord[]> {
     const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
     const agentClause = query.agentId
-      ? Prisma.sql`AND "agent_id" = ${query.agentId}::uuid`
+      ? Prisma.sql`AND "agent_id" = ${query.agentId}`
       : Prisma.empty;
     const statusClause = query.statuses?.length
       ? Prisma.sql`AND "status" IN (${Prisma.join(query.statuses)})`
@@ -97,7 +97,7 @@ export class PrismaExperienceRepository implements ExperienceRepository {
     const rows = await this.prisma.$queryRaw<ExperienceRow[]>(Prisma.sql`
       SELECT *
       FROM "experiences"
-      WHERE "organization_id" = ${organizationId}::uuid
+      WHERE "organization_id" = ${organizationId}
       ${agentClause}
       ${statusClause}
       ORDER BY "created_at" DESC
