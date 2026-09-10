@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   probe:
-    runs-on: [self-hosted, linux, x64, aoe-governance]
+    runs-on: [self-hosted, linux, x64, aoe-heavy]
     timeout-minutes: 5
     steps:
       - name: Identify runner
