@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { TenantContext } from '../../common/tenant/tenant-context';
+import { WorkflowAgentRunnerService } from './workflow-agent-runner.service';
 import { WorkflowAgentRuntimeService } from './workflow-agent-runtime.service';
 
 @ApiTags('workflow-agent-runtime')
@@ -11,6 +12,7 @@ import { WorkflowAgentRuntimeService } from './workflow-agent-runtime.service';
 export class WorkflowAgentRuntimeController {
   constructor(
     private readonly service: WorkflowAgentRuntimeService,
+    private readonly runner: WorkflowAgentRunnerService,
     private readonly tenantContext: TenantContext,
   ) {}
 
@@ -21,5 +23,16 @@ export class WorkflowAgentRuntimeController {
   executeCurrent(@Param('workflowRunId') workflowRunId: string) {
     const organizationId = this.tenantContext.getOrThrow();
     return this.service.executeCurrentStep(organizationId, workflowRunId);
+  }
+
+  @Post(':workflowRunId/execute-until-boundary')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description: 'Executes sequential agent-capable workflow steps with a hard budget until a governed boundary is reached.',
+  })
+  executeUntilBoundary(@Param('workflowRunId') workflowRunId: string) {
+    const organizationId = this.tenantContext.getOrThrow();
+    return this.runner.executeUntilBoundary(organizationId, workflowRunId);
   }
 }
