@@ -17,6 +17,11 @@ import {
 import { CloudExecutionProfileRegistry } from '../cloud-governed-execution/cloud-execution-profile.registry';
 import { LearningRetrievalService } from '../learning/learning-retrieval.service';
 import type { RetrievedLearningItem } from '../learning/learning-retrieval.types';
+import { RuntimeExperienceCaptureService } from '../learning/runtime-experience-capture.service';
+import {
+  PersistedWorkflowExecutionIdentity,
+  WorkflowExecutionIdentityService,
+} from './workflow-execution-identity.service';
 
 const MAX_PROMPT_BYTES = 512 * 1024;
 const MAX_DEFAULT_ARGS = 64;
@@ -51,6 +56,8 @@ export class AgentWorkforceService {
     private readonly providerRouter: ProviderRouterService,
     private readonly governedRuntime: GovernedRuntimeService,
     private readonly learningRetrieval: LearningRetrievalService,
+    private readonly workflowIdentity: WorkflowExecutionIdentityService,
+    private readonly experienceCapture: RuntimeExperienceCaptureService,
     profileRegistry?: CloudExecutionProfileRegistry,
   ) {
     // Absent registry (e.g. tests) === no cloud profiles bound => any
@@ -60,12 +67,19 @@ export class AgentWorkforceService {
 
   async dispatch(input: DispatchAgentTaskInput) {
     this.validateInput(input);
-    const correlationId = input.correlationId ?? randomUUID();
+
+    const persistedIdentity = await this.workflowIdentity.resolve(
+      input.organizationId,
+      input.workflowRunId,
+      input.workflowStepRunId,
+    );
+    const correlationId = persistedIdentity?.correlationId ?? input.correlationId ?? randomUUID();
+    const assuranceLevel = persistedIdentity?.assuranceLevel ?? input.assuranceLevel;
 
     const routing = await this.providerRouter.route({
       organizationId: input.organizationId,
       capability: input.capabilityCode,
-      assuranceLevel: input.assuranceLevel,
+      assuranceLevel,
       workflowRunId: input.workflowRunId,
       workflowStepRunId: input.workflowStepRunId,
       independenceContext: input.independenceContext,
@@ -127,13 +141,69 @@ export class AgentWorkforceService {
       executionBudget: input.executionBudget,
     });
 
+    const experience = persistedIdentity
+      ? await this.captureRuntimeExperience({
+          identity: persistedIdentity,
+          capabilityCode: input.capabilityCode,
+          learningContextCount: learningContext.length,
+          routingDecisionId: routing.routingDecisionId,
+          selectedProviderId: provider.id,
+          selectedProviderCode: provider.providerCode,
+          execution,
+        })
+      : null;
+
     return Object.freeze({
       routingDecisionId: routing.routingDecisionId,
       selectedProviderId: provider.id,
       selectedProviderCode: provider.providerCode,
       correlationId,
       learningContextCount: learningContext.length,
+      experienceId: experience?.id ?? null,
       execution,
+    });
+  }
+
+  private async captureRuntimeExperience(input: {
+    readonly identity: PersistedWorkflowExecutionIdentity;
+    readonly capabilityCode: string;
+    readonly learningContextCount: number;
+    readonly routingDecisionId: string;
+    readonly selectedProviderId: string;
+    readonly selectedProviderCode: string;
+    readonly execution: unknown;
+  }) {
+    const { identity } = input;
+    return this.experienceCapture.tryRecord({
+      organizationId: identity.organizationId,
+      agentId: identity.agentId,
+      source: 'AGENT_WORKFORCE',
+      goal: `Execute ${input.capabilityCode} for ${identity.stepType} workflow step.`,
+      context: {
+        workflowRunId: identity.workflowRunId,
+        workflowStepRunId: identity.workflowStepRunId,
+        taskId: identity.taskId,
+        stepType: identity.stepType,
+        attemptNumber: identity.attemptNumber,
+        correlationId: identity.correlationId,
+        capabilityCode: input.capabilityCode,
+      },
+      observation: {
+        priorLearningItemsRetrieved: input.learningContextCount,
+      },
+      decision: {
+        routingDecisionId: input.routingDecisionId,
+        selectedProviderId: input.selectedProviderId,
+        selectedProviderCode: input.selectedProviderCode,
+      },
+      action: {
+        capabilityCode: input.capabilityCode,
+        providerId: input.selectedProviderId,
+        providerCode: input.selectedProviderCode,
+      },
+      result: executionSummary(input.execution),
+      successScore: null,
+      confidence: null,
     });
   }
 
@@ -247,4 +317,27 @@ export class AgentWorkforceService {
     }
     return null;
   }
+}
+
+function executionSummary(execution: unknown): Readonly<Record<string, unknown>> {
+  if (!execution || typeof execution !== 'object' || Array.isArray(execution)) {
+    return { status: 'UNKNOWN' };
+  }
+  const source = execution as Record<string, unknown>;
+  const summary: Record<string, unknown> = {};
+  for (const key of [
+    'invocationId',
+    'executionId',
+    'status',
+    'durationMs',
+    'outputReference',
+    'policyDecisionReference',
+    'workspaceDisposition',
+  ]) {
+    const value = source[key];
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      summary[key] = value;
+    }
+  }
+  return summary;
 }
