@@ -1,3 +1,5 @@
+import type { RetrievedLearningItem } from '../learning/learning-retrieval.types';
+
 export type ApprovalLevel = 'L0' | 'L1' | 'L2' | 'L3' | 'L4' | 'L5';
 
 export interface VitoCommand<TParameters = Readonly<Record<string, unknown>>> {
@@ -10,6 +12,7 @@ export interface VitoCommand<TParameters = Readonly<Record<string, unknown>>> {
   approvalLevel: ApprovalLevel;
   correlationId: string;
   timestamp: string;
+  learningContext?: readonly RetrievedLearningItem[];
 }
 
 export interface CommandResult<TData = unknown> {
