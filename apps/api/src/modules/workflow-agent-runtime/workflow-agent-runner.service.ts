@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { WorkflowVerificationService } from '../workflow-verification/workflow-verification.service';
 import { WorkflowAgentRuntimeService } from './workflow-agent-runtime.service';
 
 const MAX_AUTONOMOUS_STEPS = 8;
@@ -7,7 +8,10 @@ type StepExecution = Awaited<ReturnType<WorkflowAgentRuntimeService['executeCurr
 
 @Injectable()
 export class WorkflowAgentRunnerService {
-  constructor(private readonly runtime: WorkflowAgentRuntimeService) {}
+  constructor(
+    private readonly runtime: WorkflowAgentRuntimeService,
+    private readonly verification?: WorkflowVerificationService,
+  ) {}
 
   async executeUntilBoundary(organizationId: string, workflowRunId: string) {
     const executions: StepExecution[] = [];
@@ -15,6 +19,13 @@ export class WorkflowAgentRunnerService {
     for (let index = 0; index < MAX_AUTONOMOUS_STEPS; index += 1) {
       const execution = await this.runtime.executeCurrentStep(organizationId, workflowRunId);
       executions.push(execution);
+
+      if (
+        this.verification &&
+        (execution.disposition === 'TRANSITIONED' || execution.disposition === 'EXECUTION_BLOCKED')
+      ) {
+        await this.verification.tryVerifyStep(organizationId, workflowRunId, execution.workflowStepRunId);
+      }
 
       if (execution.disposition !== 'TRANSITIONED') {
         return Object.freeze({
