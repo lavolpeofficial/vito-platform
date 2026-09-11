@@ -11,14 +11,11 @@ import {
   WorkflowRunStatus,
   WorkflowStepStatus,
   EngineeringStepType,
+  AgentExecutionStatus,
 } from '@vito/contracts';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { randomUUID } from 'crypto';
-
-// ---------------------------------------------------------------------------
-// Input / Result types
-// ---------------------------------------------------------------------------
 
 export interface CreateWorkflowRunInput {
   organizationId: string;
@@ -35,32 +32,18 @@ export interface CompleteStepInput {
   workflowRunId: string;
   workflowStepRunId: string;
   stepStatus: 'SUCCEEDED' | 'FAILED';
+  providerStatus?: AgentExecutionStatus;
   verdict?: string;
   humanApproved?: boolean;
   metadata?: Record<string, unknown>;
 }
 
-// ---------------------------------------------------------------------------
-// Service
-// ---------------------------------------------------------------------------
-
-/**
- * Workflow Runtime Service (EO-01.2).
- *
- * Durable, resumable, tenant-scoped and auditable orchestration of the
- * engineering workflow. Uses the EO-01.1 pure state machine as the sole
- * transition authority.
- */
 @Injectable()
 export class WorkflowRuntimeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
   ) {}
-
-  // -------------------------------------------------------------------------
-  // Create
-  // -------------------------------------------------------------------------
 
   async createRun(input: CreateWorkflowRunInput) {
     const correlationId = input.correlationId ?? randomUUID();
@@ -102,10 +85,6 @@ export class WorkflowRuntimeService {
       return run;
     });
   }
-
-  // -------------------------------------------------------------------------
-  // Start
-  // -------------------------------------------------------------------------
 
   async startRun(organizationId: string, workflowRunId: string) {
     return this.prisma.$transaction(async (tx) => {
@@ -175,22 +154,12 @@ export class WorkflowRuntimeService {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // Complete Step (the core transition)
-  // -------------------------------------------------------------------------
-
   async completeStep(input: CompleteStepInput) {
-    // ── Pre-validation reads (outside transaction) ───────────────────────
-    // Rejection audits must be durable. Writing them inside $transaction
-    // and then throwing causes a rollback that deletes the audit row.
-    // Therefore terminal/stale rejections happen before $transaction.
-
     const run = await this.prisma.workflowRun.findFirst({
       where: { id: input.workflowRunId, organizationId: input.organizationId },
     });
     if (!run) throw new NotFoundException('WorkflowRun nicht gefunden.');
 
-    // Terminal runs cannot accept completions
     if (run.status === 'COMPLETED' || run.status === 'FAILED' || run.status === 'CANCELLED') {
       await this.auditService.record({
         organizationId: input.organizationId,
@@ -217,14 +186,10 @@ export class WorkflowRuntimeService {
     });
     if (!stepRun) throw new NotFoundException('WorkflowStepRun nicht gefunden.');
 
-    // Idempotency: if step already terminal, return current state without re-processing.
-    // This must precede the stale check: a completed step is idempotent regardless
-    // of whether the run's currentStepType has since advanced.
     if (stepRun.status === 'SUCCEEDED' || stepRun.status === 'FAILED' || stepRun.status === 'SKIPPED' || stepRun.status === 'CANCELLED') {
       return { run, stepRun, outcome: null, idempotent: true };
     }
 
-    // Stale check (pre-validation fast path with durable audit)
     if (run.currentStepType && run.currentStepType !== stepRun.stepType) {
       await this.auditService.record({
         organizationId: input.organizationId,
@@ -245,23 +210,16 @@ export class WorkflowRuntimeService {
       );
     }
 
-    // ── Transactional mutation path ──────────────────────────────────────
-    // Re-validates inside the transaction to close the TOCTOU window.
-    // Uses a conditional updateMany (status='READY' guard) as the atomic
-    // concurrency lock: only one concurrent completion can win.
     return this.prisma.$transaction(async (tx) => {
-      // Re-read run inside transaction for fresh state
       const freshRun = await tx.workflowRun.findFirst({
         where: { id: input.workflowRunId, organizationId: input.organizationId },
       });
       if (!freshRun) throw new NotFoundException('WorkflowRun nicht gefunden.');
 
-      // If run became terminal between pre-validation and transaction
       if (freshRun.status === 'COMPLETED' || freshRun.status === 'FAILED' || freshRun.status === 'CANCELLED') {
         return { run: freshRun, stepRun, outcome: null, idempotent: true };
       }
 
-      // Re-read step inside transaction for fresh state
       const freshStep = await tx.workflowStepRun.findFirst({
         where: {
           id: input.workflowStepRunId,
@@ -271,21 +229,23 @@ export class WorkflowRuntimeService {
       });
       if (!freshStep) throw new NotFoundException('WorkflowStepRun nicht gefunden.');
 
-      // Idempotency: if step already terminal, no-op
       if (freshStep.status === 'SUCCEEDED' || freshStep.status === 'FAILED' || freshStep.status === 'SKIPPED' || freshStep.status === 'CANCELLED') {
         return { run: freshRun, stepRun: freshStep, outcome: null, idempotent: true };
       }
 
-      // Stale check inside transaction (step may have been advanced by concurrent winner)
       if (freshRun.currentStepType && freshRun.currentStepType !== freshStep.stepType) {
         return { run: freshRun, stepRun: freshStep, outcome: null, idempotent: true };
       }
 
-      // ── Atomic concurrency guard ───────────────────────────────────────
-      // updateMany with status='READY' in WHERE: at the DB level only one
-      // concurrent transaction can transition this row from READY.
       const now = new Date();
-      const targetStatus = input.stepStatus === 'SUCCEEDED' ? 'SUCCEEDED' : 'FAILED';
+      const providerBlocked =
+        input.providerStatus === AgentExecutionStatus.QUOTA_BLOCKED ||
+        input.providerStatus === AgentExecutionStatus.POLICY_BLOCKED;
+      const targetStatus = providerBlocked
+        ? 'WAITING'
+        : input.stepStatus === 'SUCCEEDED'
+          ? 'SUCCEEDED'
+          : 'FAILED';
 
       const claimResult = await tx.workflowStepRun.updateMany({
         where: {
@@ -294,21 +254,20 @@ export class WorkflowRuntimeService {
         },
         data: {
           status: targetStatus,
-          finishedAt: now,
+          finishedAt: providerBlocked ? null : now,
           metadata: input.metadata ? (input.metadata as Prisma.InputJsonValue) : undefined,
         },
       });
 
       if (claimResult.count === 0) {
-        // Another concurrent request already completed this step
         return { run: freshRun, stepRun: freshStep, outcome: null, idempotent: true };
       }
 
-      // ── State machine + persistence ────────────────────────────────────
       const completedStep = freshStep.stepType as EngineeringStepType;
       const stateMachineInput: StateMachineInput = {
         completedStep,
         stepStatus: input.stepStatus,
+        providerStatus: input.providerStatus,
         correctionLoopCount: freshRun.correctionLoopCount,
         retryPolicy: {
           maxCorrectionLoops: freshRun.maxCorrectionLoops,
@@ -320,7 +279,6 @@ export class WorkflowRuntimeService {
 
       const outcome = nextEngineeringStep(stateMachineInput);
 
-      // Determine new run state and correction loop increment
       let runUpdate: Prisma.WorkflowRunUpdateInput = {};
       let newStep: any = null;
       let auditAction = '';
@@ -383,9 +341,10 @@ export class WorkflowRuntimeService {
 
         case 'BLOCKED': {
           const blockReason = outcome.reason as BlockReason;
+          const providerBlock = blockReason.type === 'PROVIDER_BLOCKED';
           runUpdate = {
             status: 'BLOCKED',
-            currentStepType: null,
+            currentStepType: providerBlock ? completedStep : null,
             blockReasonCode: blockReason.type,
           };
 
@@ -453,10 +412,6 @@ export class WorkflowRuntimeService {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // Reload (resume after restart)
-  // -------------------------------------------------------------------------
-
   async reloadRun(organizationId: string, workflowRunId: string) {
     const run = await this.prisma.workflowRun.findFirst({
       where: { id: workflowRunId, organizationId },
@@ -476,12 +431,10 @@ export class WorkflowRuntimeService {
     });
     if (!run) throw new NotFoundException('WorkflowRun nicht gefunden.');
 
-    // Only non-terminal runs can be resumed
     if (run.status === 'COMPLETED' || run.status === 'FAILED' || run.status === 'CANCELLED') {
       throw new ConflictException(`WorkflowRun ist terminal (Status: ${run.status}) und kann nicht fortgesetzt werden.`);
     }
 
-    // Already running — no-op but audit
     if (run.status === 'RUNNING') {
       await this.prisma.$transaction(async (tx) => {
         await this.auditService.record(
@@ -503,13 +456,30 @@ export class WorkflowRuntimeService {
       return run;
     }
 
-    // BLOCKED: set back to RUNNING, preserving step and loop state
     if (run.status === 'BLOCKED') {
       return this.prisma.$transaction(async (tx) => {
         const updated = await tx.workflowRun.update({
           where: { id: workflowRunId },
-          data: { status: 'RUNNING' },
+          data: {
+            status: 'RUNNING',
+            blockReasonCode: null,
+          },
         });
+
+        if (run.blockReasonCode === 'PROVIDER_BLOCKED' && run.currentStepType) {
+          await tx.workflowStepRun.updateMany({
+            where: {
+              organizationId,
+              workflowRunId,
+              stepType: run.currentStepType,
+              status: 'WAITING',
+            },
+            data: {
+              status: 'READY',
+              finishedAt: null,
+            },
+          });
+        }
 
         await this.auditService.record(
           {
@@ -531,7 +501,6 @@ export class WorkflowRuntimeService {
       });
     }
 
-    // WAITING_FOR_HUMAN: set back to RUNNING, preserving step and loop state
     if (run.status === 'WAITING_FOR_HUMAN') {
       return this.prisma.$transaction(async (tx) => {
         const updated = await tx.workflowRun.update({
@@ -561,10 +530,6 @@ export class WorkflowRuntimeService {
 
     throw new ConflictException(`WorkflowRun kann nicht fortgesetzt werden (Status: ${run.status}).`);
   }
-
-  // -------------------------------------------------------------------------
-  // Queries (tenant-scoped)
-  // -------------------------------------------------------------------------
 
   async findRunById(organizationId: string, workflowRunId: string) {
     const run = await this.prisma.workflowRun.findFirst({
