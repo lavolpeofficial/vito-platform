@@ -25,6 +25,7 @@ import { WorkflowAgentRuntimeModule } from './modules/workflow-agent-runtime/wor
 import { OperatorBridgeModule } from './modules/operator-bridge/operator-bridge.module';
 import { CommandBusModule } from './modules/command-bus/command-bus.module';
 import { LearningModule } from './modules/learning/learning.module';
+import { CustosModule } from './modules/custos/custos.module';
 
 /**
  * Seit Sprint 2 gibt es keine `TenantMiddleware` mehr. Authentifizierung
@@ -55,6 +56,7 @@ import { LearningModule } from './modules/learning/learning.module';
     AoeImportModule,
     WorkflowRuntimeModule,
     ProviderRegistryModule,
+    CustosModule,
     GovernedRuntimeModule,
     AgentWorkforceModule,
     WorkflowAgentRuntimeModule,
