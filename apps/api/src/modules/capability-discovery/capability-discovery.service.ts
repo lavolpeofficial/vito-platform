@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { EngineeringCapability } from '@vito/contracts';
 import { PrismaService } from '../../prisma/prisma.service';
-import { isEngineeringCapability } from '@vito/contracts';
 
 export type CapabilityAvailability = 'AVAILABLE' | 'REGISTERED_UNROUTABLE' | 'CANDIDATE_ONLY' | 'MISSING';
 
@@ -11,6 +11,8 @@ interface SkillCandidateRow {
   status: string;
   confidence: number;
 }
+
+const OFFICIAL_ENGINEERING_CAPABILITIES = new Set<string>(Object.values(EngineeringCapability));
 
 @Injectable()
 export class CapabilityDiscoveryService {
@@ -54,7 +56,7 @@ export class CapabilityDiscoveryService {
       `,
     ]);
 
-    const officialEngineeringCapability = isEngineeringCapability(code);
+    const officialEngineeringCapability = OFFICIAL_ENGINEERING_CAPABILITIES.has(code);
     const executableProviderCount = providerBindings.length;
     const assignedDigitalEmployeeCount = registered?.digitalEmployees.length ?? 0;
 
