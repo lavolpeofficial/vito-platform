@@ -19,6 +19,7 @@ import { PrismaReflectionRepository } from './prisma-reflection.repository';
 import { PrismaSkillCandidateRepository } from './prisma-skill-candidate.repository';
 import { REFLECTION_REPOSITORY } from './reflection.types';
 import { ReflectionService } from './reflection.service';
+import { RuntimeExperienceCaptureService } from './runtime-experience-capture.service';
 import { SKILL_CANDIDATE_REPOSITORY } from './skill-candidate.types';
 import { SkillCandidateService } from './skill-candidate.service';
 
@@ -27,6 +28,7 @@ import { SkillCandidateService } from './skill-candidate.service';
   providers: [
     PrismaExperienceRepository,
     ExperienceStoreService,
+    RuntimeExperienceCaptureService,
     PrismaOutcomeRepository,
     OutcomeEvaluationService,
     PrismaReflectionRepository,
@@ -70,6 +72,7 @@ import { SkillCandidateService } from './skill-candidate.service';
   ],
   exports: [
     ExperienceStoreService,
+    RuntimeExperienceCaptureService,
     OutcomeEvaluationService,
     ReflectionService,
     LearningMaturityService,

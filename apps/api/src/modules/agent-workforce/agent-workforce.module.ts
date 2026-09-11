@@ -6,6 +6,7 @@ import { CloudGovernedExecutionModule } from '../cloud-governed-execution/cloud-
 import { LearningModule } from '../learning/learning.module';
 import { AgentWorkforceController } from './agent-workforce.controller';
 import { AgentWorkforceService } from './agent-workforce.service';
+import { WorkflowExecutionIdentityService } from './workflow-execution-identity.service';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { AgentWorkforceService } from './agent-workforce.service';
     LearningModule,
   ],
   controllers: [AgentWorkforceController],
-  providers: [AgentWorkforceService],
+  providers: [AgentWorkforceService, WorkflowExecutionIdentityService],
   exports: [AgentWorkforceService],
 })
 export class AgentWorkforceModule {}
