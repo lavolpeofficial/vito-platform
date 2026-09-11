@@ -1,27 +1,36 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { EngineeringCapability } from '@vito/contracts';
 import { WorkflowExecutionIdentityService } from './workflow-execution-identity.service';
 
 describe('WorkflowExecutionIdentityService', () => {
   const findUniqueStep = jest.fn();
   const findTask = jest.fn();
   const findDigitalEmployee = jest.fn();
+  const resolveAndBind = jest.fn();
   const prisma = {
     workflowStepRun: { findUnique: findUniqueStep },
     task: { findFirst: findTask },
     digitalEmployee: { findFirst: findDigitalEmployee },
   } as any;
 
-  const service = new WorkflowExecutionIdentityService(prisma);
+  const service = new WorkflowExecutionIdentityService(
+    prisma,
+    { resolveAndBind } as any,
+  );
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    resolveAndBind.mockResolvedValue({ capabilityCode: EngineeringCapability.CODE_BUILD });
+  });
 
   it('preserves synthetic non-workflow correlation IDs as a compatibility path', async () => {
     findUniqueStep.mockResolvedValue(null);
     await expect(service.resolve('org-1', 'synthetic-run', 'synthetic-step')).resolves.toBeNull();
     expect(findTask).not.toHaveBeenCalled();
+    expect(resolveAndBind).not.toHaveBeenCalled();
   });
 
-  it('resolves a persisted workflow to its server-owned DigitalEmployee identity', async () => {
+  it('resolves a persisted workflow to server-owned DigitalEmployee and capability identity', async () => {
     findUniqueStep.mockResolvedValue({
       id: 'step-1',
       organizationId: 'org-1',
@@ -46,10 +55,12 @@ describe('WorkflowExecutionIdentityService', () => {
       taskId: 'task-1',
       agentId: 'agent-1',
       stepType: 'BUILD',
+      capabilityCode: EngineeringCapability.CODE_BUILD,
       attemptNumber: 2,
       assuranceLevel: 'AL-4',
       correlationId: 'corr-persisted',
     });
+    expect(resolveAndBind).toHaveBeenCalledWith('org-1', 'run-1', 'BUILD');
     expect(findTask).toHaveBeenCalledWith({
       where: { id: 'task-1', organizationId: 'org-1' },
       select: { id: true, assignedDigitalEmployeeId: true },
@@ -60,7 +71,7 @@ describe('WorkflowExecutionIdentityService', () => {
     });
   });
 
-  it('rejects a persisted workflow step from another tenant', async () => {
+  it('rejects a persisted workflow step from another tenant before plan resolution', async () => {
     findUniqueStep.mockResolvedValue({
       id: 'step-foreign',
       organizationId: 'org-2',
@@ -77,6 +88,7 @@ describe('WorkflowExecutionIdentityService', () => {
     });
     await expect(service.resolve('org-1', 'run-foreign', 'step-foreign'))
       .rejects.toBeInstanceOf(NotFoundException);
+    expect(resolveAndBind).not.toHaveBeenCalled();
   });
 
   it('rejects mismatched run/step identity and persisted workflows without a DigitalEmployee task assignment', async () => {

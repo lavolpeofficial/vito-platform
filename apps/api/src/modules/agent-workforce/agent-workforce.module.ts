@@ -7,6 +7,7 @@ import { LearningModule } from '../learning/learning.module';
 import { AgentWorkforceController } from './agent-workforce.controller';
 import { AgentWorkforceService } from './agent-workforce.service';
 import { WorkflowExecutionIdentityService } from './workflow-execution-identity.service';
+import { WorkflowExecutionPlanService } from './workflow-execution-plan.service';
 
 @Module({
   imports: [
@@ -16,7 +17,11 @@ import { WorkflowExecutionIdentityService } from './workflow-execution-identity.
     LearningModule,
   ],
   controllers: [AgentWorkforceController],
-  providers: [AgentWorkforceService, WorkflowExecutionIdentityService],
-  exports: [AgentWorkforceService],
+  providers: [
+    AgentWorkforceService,
+    WorkflowExecutionIdentityService,
+    WorkflowExecutionPlanService,
+  ],
+  exports: [AgentWorkforceService, WorkflowExecutionPlanService],
 })
 export class AgentWorkforceModule {}

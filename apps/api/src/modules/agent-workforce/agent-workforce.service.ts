@@ -44,9 +44,12 @@ export interface DispatchAgentTaskInput {
 
 /**
  * Server-side bridge from "VITO needs a capability" to a governed provider
- * invocation. Callers choose the capability and task, never the executable or
- * provider. Provider selection stays with ProviderRouterService; executable
+ * invocation. Provider selection stays with ProviderRouterService; executable
  * identity and credential authority are re-proven inside governed invocation.
+ *
+ * For persisted WorkflowStepRun identities the capability is also server-owned:
+ * caller capability input is ignored in favor of the immutable execution-plan
+ * binding derived from the persisted step type.
  */
 @Injectable()
 export class AgentWorkforceService {
@@ -60,8 +63,6 @@ export class AgentWorkforceService {
     private readonly experienceCapture: RuntimeExperienceCaptureService,
     profileRegistry?: CloudExecutionProfileRegistry,
   ) {
-    // Absent registry (e.g. tests) === no cloud profiles bound => any
-    // cloud-governed dispatch candidate fails closed.
     this.profileRegistry = profileRegistry ?? new CloudExecutionProfileRegistry([]);
   }
 
@@ -75,10 +76,11 @@ export class AgentWorkforceService {
     );
     const correlationId = persistedIdentity?.correlationId ?? input.correlationId ?? randomUUID();
     const assuranceLevel = persistedIdentity?.assuranceLevel ?? input.assuranceLevel;
+    const capabilityCode = persistedIdentity?.capabilityCode ?? input.capabilityCode;
 
     const routing = await this.providerRouter.route({
       organizationId: input.organizationId,
-      capability: input.capabilityCode,
+      capability: capabilityCode,
       assuranceLevel,
       workflowRunId: input.workflowRunId,
       workflowStepRunId: input.workflowStepRunId,
@@ -112,14 +114,14 @@ export class AgentWorkforceService {
 
     const commandAlias = this.providerCommandAlias(provider.metadata);
     const defaultArgs = this.providerDefaultArgs(provider.metadata);
-    const learningContext = await this.retrieveLearningContext(input);
+    const learningContext = await this.retrieveLearningContext(input.prompt, capabilityCode);
     const prompt = this.enrichPromptWithLearning(input.prompt, learningContext);
 
     const execution = await this.governedRuntime.executeWorkspaceFileOperation({
       trustOrigin: TRUSTED_RUNTIME_ORIGIN,
       organizationId: input.organizationId,
       providerId: provider.id,
-      capabilityCode: input.capabilityCode,
+      capabilityCode,
       requestedAction: 'RUN_COMMAND',
       command: commandAlias,
       governedInputPayload: {
@@ -144,7 +146,7 @@ export class AgentWorkforceService {
     const experience = persistedIdentity
       ? await this.captureRuntimeExperience({
           identity: persistedIdentity,
-          capabilityCode: input.capabilityCode,
+          capabilityCode,
           learningContextCount: learningContext.length,
           routingDecisionId: routing.routingDecisionId,
           selectedProviderId: provider.id,
@@ -158,6 +160,7 @@ export class AgentWorkforceService {
       selectedProviderId: provider.id,
       selectedProviderCode: provider.providerCode,
       correlationId,
+      capabilityCode,
       learningContextCount: learningContext.length,
       experienceId: experience?.id ?? null,
       execution,
@@ -208,16 +211,15 @@ export class AgentWorkforceService {
   }
 
   private async retrieveLearningContext(
-    input: DispatchAgentTaskInput,
+    prompt: string,
+    capabilityCode: string,
   ): Promise<readonly RetrievedLearningItem[]> {
     try {
       return await this.learningRetrieval.retrieve({
-        query: `${input.capabilityCode} ${input.prompt}`.slice(0, MAX_LEARNING_QUERY_CHARS),
+        query: `${capabilityCode} ${prompt}`.slice(0, MAX_LEARNING_QUERY_CHARS),
         limit: AGENT_LEARNING_LIMIT,
       });
     } catch {
-      // Learning is advisory. An unavailable/missing request-scoped learning
-      // context must not become a new execution single point of failure.
       return [];
     }
   }
@@ -289,17 +291,6 @@ export class AgentWorkforceService {
     return Object.freeze(args);
   }
 
-  /**
-   * Server-owned dispatch tier gate (OB-002D). The tier is NEVER a caller
-   * field. Fail closed (null) when the provider/tier combination is
-   * ambiguous or misconfigured:
-   *  - LOCAL_TOOL  → LOCAL_ISOLATED only with NO cloud profile bound
-   *    (an enabled cloud profile on a local-tool provider is a server config
-   *     error that must deny, not silently downgrade);
-   *  - CLOUD_LLM   → CLOUD_GOVERNED only when an enabled server-owned profile
-   *    binds the provider (no profile ⇒ no cloud dispatch);
-   *  - anything else → null.
-   */
   private detectDispatchTier(provider: {
     readonly providerType: ProviderType;
     readonly providerCode: string;

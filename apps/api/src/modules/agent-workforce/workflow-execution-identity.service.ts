@@ -1,5 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { EngineeringStepType } from '@vito/contracts';
 import { PrismaService } from '../../prisma/prisma.service';
+import { WorkflowExecutionPlanService } from './workflow-execution-plan.service';
 
 export interface PersistedWorkflowExecutionIdentity {
   readonly organizationId: string;
@@ -8,6 +10,7 @@ export interface PersistedWorkflowExecutionIdentity {
   readonly taskId: string;
   readonly agentId: string;
   readonly stepType: string;
+  readonly capabilityCode: string;
   readonly attemptNumber: number;
   readonly assuranceLevel: string;
   readonly correlationId: string;
@@ -15,7 +18,10 @@ export interface PersistedWorkflowExecutionIdentity {
 
 @Injectable()
 export class WorkflowExecutionIdentityService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly executionPlan: WorkflowExecutionPlanService,
+  ) {}
 
   async resolve(
     organizationId: string,
@@ -59,6 +65,12 @@ export class WorkflowExecutionIdentityService {
     });
     if (!agent) throw new NotFoundException('Assigned DigitalEmployee not found.');
 
+    const planEntry = await this.executionPlan.resolveAndBind(
+      organizationId,
+      workflowRunId,
+      step.stepType as EngineeringStepType,
+    );
+
     return Object.freeze({
       organizationId,
       workflowRunId,
@@ -66,6 +78,7 @@ export class WorkflowExecutionIdentityService {
       taskId: task.id,
       agentId: agent.id,
       stepType: step.stepType,
+      capabilityCode: planEntry.capabilityCode,
       attemptNumber: step.attemptNumber,
       assuranceLevel: step.workflowRun.assuranceLevel,
       correlationId: step.workflowRun.correlationId,
