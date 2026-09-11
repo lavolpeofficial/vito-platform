@@ -1,19 +1,32 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PrismaExperienceRepository } from './prisma-experience.repository';
+import { PrismaLearningMaturityRepository } from './prisma-learning-maturity.repository';
 import { PrismaLearningRetrievalRepository } from './prisma-learning-retrieval.repository';
 import { PrismaOutcomeRepository } from './prisma-outcome.repository';
+import { PrismaReflectionRepository } from './prisma-reflection.repository';
 import { RuntimeExperienceCaptureService } from './runtime-experience-capture.service';
 import { RuntimeOutcomeEvaluationService } from './runtime-outcome-evaluation.service';
+import { RuntimeReflectionLearningService } from './runtime-reflection-learning.service';
 
 describe('Runtime learning loop · PostgreSQL proof', () => {
   const prisma = new PrismaService();
   const audit = { record: jest.fn().mockResolvedValue(undefined) } as any;
   const experiences = new PrismaExperienceRepository(prisma);
   const outcomes = new PrismaOutcomeRepository(prisma);
+  const reflections = new PrismaReflectionRepository(prisma);
+  const maturity = new PrismaLearningMaturityRepository(prisma);
   const retrieval = new PrismaLearningRetrievalRepository(prisma);
   const capture = new RuntimeExperienceCaptureService(audit, experiences);
   const evaluate = new RuntimeOutcomeEvaluationService(audit, outcomes);
+  const learn = new RuntimeReflectionLearningService(
+    prisma,
+    audit,
+    experiences,
+    outcomes,
+    reflections,
+    maturity,
+  );
 
   const suffix = randomUUID().slice(0, 8);
   const organizationId = randomUUID();
@@ -52,7 +65,7 @@ describe('Runtime learning loop · PostgreSQL proof', () => {
     await prisma.$disconnect();
   });
 
-  it('persists Experience → objective Outcome → EVALUATED state → tenant-scoped retrieval', async () => {
+  it('persists Experience → Outcome → Reflection → Learning Observation → tenant-scoped retrieval', async () => {
     const experience = await capture.record({
       organizationId,
       agentId,
@@ -95,26 +108,54 @@ describe('Runtime learning loop · PostgreSQL proof', () => {
     const evaluatedExperience = await experiences.getById(organizationId, experience.id);
     expect(evaluatedExperience?.status).toBe('EVALUATED');
 
+    const learned = await learn.process({ organizationId, experienceId: experience.id });
+    expect(learned.disposition).toBe('LEARNING_OBSERVATION_RECORDED');
+    expect(learned.reflection).toEqual(
+      expect.objectContaining({
+        experienceId: experience.id,
+        evidenceOutcomeIds: [outcome.id],
+        confidence: 1,
+      }),
+    );
+    expect(learned.reflection?.assumptions).toEqual([]);
+    expect(learned.candidate).toEqual(
+      expect.objectContaining({
+        experienceId: experience.id,
+        maturity: 'OBSERVATION',
+        confidence: 1,
+      }),
+    );
+
+    const reflectedExperience = await experiences.getById(organizationId, experience.id);
+    expect(reflectedExperience?.status).toBe('REFLECTED');
+
+    const replay = await learn.process({ organizationId, experienceId: experience.id });
+    expect(replay.reflection?.id).toBe(learned.reflection?.id);
+    expect(replay.candidate?.id).toBe(learned.candidate?.id);
+
     const nextRunLearning = await retrieval.retrieve(organizationId, {
-      query: 'release verification',
+      query: 'release_verification',
       limit: 8,
     });
     expect(nextRunLearning).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          kind: 'EXPERIENCE',
-          sourceId: experience.id,
-          maturity: 'EVALUATED',
+          kind: 'LEARNING_CANDIDATE',
+          sourceId: learned.candidate?.id,
+          maturity: 'OBSERVATION',
         }),
       ]),
     );
 
     const foreignTenantLearning = await retrieval.retrieve(foreignOrganizationId, {
-      query: 'release verification',
+      query: 'release_verification',
       limit: 8,
     });
     expect(foreignTenantLearning).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ sourceId: experience.id })]),
+      expect.arrayContaining([
+        expect.objectContaining({ sourceId: experience.id }),
+        expect.objectContaining({ sourceId: learned.candidate?.id }),
+      ]),
     );
   });
 });

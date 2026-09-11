@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AgentWorkforceService } from '../agent-workforce/agent-workforce.service';
 import { WorkflowExecutionPlanService } from '../agent-workforce/workflow-execution-plan.service';
 import { RuntimeOutcomeEvaluationService } from '../learning/runtime-outcome-evaluation.service';
+import { RuntimeReflectionLearningService } from '../learning/runtime-reflection-learning.service';
 import { WorkflowRuntimeService } from '../workflow-runtime/workflow-runtime.service';
 
 const MAX_TASK_CONTEXT_CHARS = 32_000;
@@ -16,6 +17,7 @@ export class WorkflowAgentRuntimeService {
     private readonly executionPlan: WorkflowExecutionPlanService,
     private readonly workflowRuntime: WorkflowRuntimeService,
     private readonly runtimeOutcome?: RuntimeOutcomeEvaluationService,
+    private readonly runtimeReflectionLearning?: RuntimeReflectionLearningService,
   ) {}
 
   async executeCurrentStep(organizationId: string, workflowRunId: string) {
@@ -163,7 +165,7 @@ export class WorkflowAgentRuntimeService {
     transitionKind: string | null;
   }) {
     if (!this.runtimeOutcome || !input.experienceId) return null;
-    return this.runtimeOutcome.tryRecord({
+    const outcome = await this.runtimeOutcome.tryRecord({
       organizationId: input.organizationId,
       experienceId: input.experienceId,
       workflowRunId: input.workflowRunId,
@@ -173,6 +175,13 @@ export class WorkflowAgentRuntimeService {
       executionStatus: input.executionStatus,
       transitionKind: input.transitionKind,
     });
+    if (outcome && this.runtimeReflectionLearning) {
+      await this.runtimeReflectionLearning.tryProcess({
+        organizationId: input.organizationId,
+        experienceId: input.experienceId,
+      });
+    }
+    return outcome;
   }
 
   private buildPrompt(stepType: string, title: string, description: string | null): string {

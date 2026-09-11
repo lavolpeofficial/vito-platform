@@ -21,6 +21,7 @@ import { REFLECTION_REPOSITORY } from './reflection.types';
 import { ReflectionService } from './reflection.service';
 import { RuntimeExperienceCaptureService } from './runtime-experience-capture.service';
 import { RuntimeOutcomeEvaluationService } from './runtime-outcome-evaluation.service';
+import { RuntimeReflectionLearningService } from './runtime-reflection-learning.service';
 import { SKILL_CANDIDATE_REPOSITORY } from './skill-candidate.types';
 import { SkillCandidateService } from './skill-candidate.service';
 
@@ -37,6 +38,7 @@ import { SkillCandidateService } from './skill-candidate.service';
     ReflectionService,
     PrismaLearningMaturityRepository,
     LearningMaturityService,
+    RuntimeReflectionLearningService,
     PrismaFailurePatternRepository,
     FailurePatternService,
     PrismaLearningRetrievalRepository,
@@ -77,6 +79,7 @@ import { SkillCandidateService } from './skill-candidate.service';
     RuntimeExperienceCaptureService,
     OutcomeEvaluationService,
     RuntimeOutcomeEvaluationService,
+    RuntimeReflectionLearningService,
     ReflectionService,
     LearningMaturityService,
     FailurePatternService,
