@@ -3,6 +3,7 @@ import { AgentExecutionStatus, EngineeringStepType } from '@vito/contracts';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AgentWorkforceService } from '../agent-workforce/agent-workforce.service';
 import { WorkflowExecutionPlanService } from '../agent-workforce/workflow-execution-plan.service';
+import { RuntimeOutcomeEvaluationService } from '../learning/runtime-outcome-evaluation.service';
 import { WorkflowRuntimeService } from '../workflow-runtime/workflow-runtime.service';
 
 const MAX_TASK_CONTEXT_CHARS = 32_000;
@@ -14,6 +15,7 @@ export class WorkflowAgentRuntimeService {
     private readonly agentWorkforce: AgentWorkforceService,
     private readonly executionPlan: WorkflowExecutionPlanService,
     private readonly workflowRuntime: WorkflowRuntimeService,
+    private readonly runtimeOutcome?: RuntimeOutcomeEvaluationService,
   ) {}
 
   async executeCurrentStep(organizationId: string, workflowRunId: string) {
@@ -44,15 +46,9 @@ export class WorkflowAgentRuntimeService {
         status: 'READY',
       },
       orderBy: { startedAt: 'desc' },
-      select: {
-        id: true,
-        stepType: true,
-        attemptNumber: true,
-      },
+      select: { id: true, stepType: true, attemptNumber: true },
     });
-    if (!step) {
-      throw new ConflictException('No READY current workflow step found.');
-    }
+    if (!step) throw new ConflictException('No READY current workflow step found.');
 
     const capabilityCode = this.executionPlan.capabilityForStep(step.stepType as EngineeringStepType);
     if (!capabilityCode) {
@@ -65,17 +61,10 @@ export class WorkflowAgentRuntimeService {
       });
     }
 
-    if (!run.taskId) {
-      throw new ConflictException('Agent-executable workflow requires a task identity.');
-    }
+    if (!run.taskId) throw new ConflictException('Agent-executable workflow requires a task identity.');
     const task = await this.prisma.task.findFirst({
       where: { id: run.taskId, organizationId },
-      select: {
-        id: true,
-        title: true,
-        description: true,
-        assignedDigitalEmployeeId: true,
-      },
+      select: { id: true, title: true, description: true, assignedDigitalEmployeeId: true },
     });
     if (!task) throw new NotFoundException('Workflow task not found.');
     if (!task.assignedDigitalEmployeeId) {
@@ -96,6 +85,16 @@ export class WorkflowAgentRuntimeService {
     const executionStatus = dispatch.execution.status as AgentExecutionStatus;
     const completionStatus = this.toWorkflowCompletionStatus(executionStatus);
     if (!completionStatus) {
+      const outcomeEvaluation = await this.recordOutcome({
+        organizationId,
+        experienceId: dispatch.experienceId,
+        workflowRunId,
+        workflowStepRunId: step.id,
+        stepType: step.stepType,
+        capabilityCode,
+        executionStatus,
+        transitionKind: null,
+      });
       return Object.freeze({
         disposition:
           executionStatus === AgentExecutionStatus.POLICY_BLOCKED ||
@@ -109,6 +108,7 @@ export class WorkflowAgentRuntimeService {
         executionStatus,
         dispatch,
         transition: null,
+        outcomeEvaluation,
       });
     }
 
@@ -128,6 +128,17 @@ export class WorkflowAgentRuntimeService {
       },
     });
 
+    const outcomeEvaluation = await this.recordOutcome({
+      organizationId,
+      experienceId: dispatch.experienceId,
+      workflowRunId,
+      workflowStepRunId: step.id,
+      stepType: step.stepType,
+      capabilityCode,
+      executionStatus,
+      transitionKind: transition.outcome?.kind ?? null,
+    });
+
     return Object.freeze({
       disposition: 'TRANSITIONED' as const,
       workflowRunId,
@@ -137,32 +148,49 @@ export class WorkflowAgentRuntimeService {
       executionStatus,
       dispatch,
       transition,
+      outcomeEvaluation,
+    });
+  }
+
+  private async recordOutcome(input: {
+    organizationId: string;
+    experienceId: string | null;
+    workflowRunId: string;
+    workflowStepRunId: string;
+    stepType: string;
+    capabilityCode: string;
+    executionStatus: string;
+    transitionKind: string | null;
+  }) {
+    if (!this.runtimeOutcome || !input.experienceId) return null;
+    return this.runtimeOutcome.tryRecord({
+      organizationId: input.organizationId,
+      experienceId: input.experienceId,
+      workflowRunId: input.workflowRunId,
+      workflowStepRunId: input.workflowStepRunId,
+      stepType: input.stepType,
+      capabilityCode: input.capabilityCode,
+      executionStatus: input.executionStatus,
+      transitionKind: input.transitionKind,
     });
   }
 
   private buildPrompt(stepType: string, title: string, description: string | null): string {
-    const context = [
+    return [
       `Execute the persisted VITO engineering workflow step: ${stepType}.`,
       `Task title: ${title}`,
       description ? `Task description: ${description}` : null,
       'Operate only within this workflow step and return bounded execution evidence.',
-    ]
-      .filter((value): value is string => Boolean(value))
-      .join('\n');
-    return context.slice(0, MAX_TASK_CONTEXT_CHARS);
+    ].filter((value): value is string => Boolean(value)).join('\n').slice(0, MAX_TASK_CONTEXT_CHARS);
   }
 
-  private toWorkflowCompletionStatus(
-    status: AgentExecutionStatus,
-  ): 'SUCCEEDED' | 'FAILED' | null {
+  private toWorkflowCompletionStatus(status: AgentExecutionStatus): 'SUCCEEDED' | 'FAILED' | null {
     if (status === AgentExecutionStatus.SUCCEEDED) return 'SUCCEEDED';
     if (
       status === AgentExecutionStatus.FAILED ||
       status === AgentExecutionStatus.TIMED_OUT ||
       status === AgentExecutionStatus.CANCELLED
-    ) {
-      return 'FAILED';
-    }
+    ) return 'FAILED';
     return null;
   }
 }
