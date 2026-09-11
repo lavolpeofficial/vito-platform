@@ -63,6 +63,7 @@ describe('WorkflowAgentRuntimeService', () => {
       executionStatus: AgentExecutionStatus.SUCCEEDED, transitionKind: 'NEXT_STEP',
     }));
     expect(result.disposition).toBe('TRANSITIONED');
+    if (result.disposition !== 'TRANSITIONED') throw new Error('expected transitioned result');
     expect(result.outcomeEvaluation).toEqual(expect.objectContaining({ id: 'outcome-1' }));
   });
 
