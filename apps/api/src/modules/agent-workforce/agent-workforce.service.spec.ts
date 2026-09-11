@@ -8,9 +8,20 @@ import { CloudExecutionProfileRegistry } from '../cloud-governed-execution/cloud
 describe('AgentWorkforceService', () => {
   const route = jest.fn();
   const executeWorkspaceFileOperation = jest.fn();
+  const retrieve = jest.fn();
+  const learningItem = {
+    kind: 'FAILURE_PATTERN' as const,
+    sourceId: 'failure-1',
+    title: 'Stale target detection',
+    detail: 'Verify the deployment target before execution.',
+    maturity: null,
+    confidence: 0.91,
+    createdAt: new Date('2026-09-11T04:00:00Z'),
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
+    retrieve.mockResolvedValue([learningItem]);
   });
 
   const input = {
@@ -28,6 +39,7 @@ describe('AgentWorkforceService', () => {
     return new AgentWorkforceService(
       { route } as any,
       { executeWorkspaceFileOperation } as any,
+      { retrieve } as any,
       registry,
     );
   }
@@ -45,7 +57,7 @@ describe('AgentWorkforceService', () => {
     };
   }
 
-  it('routes by capability and dispatches the selected local tool through governed runtime', async () => {
+  it('routes by capability and dispatches prior learning with the selected local tool', async () => {
     route.mockResolvedValue({
       selectedProvider: {
         id: 'provider-1',
@@ -75,6 +87,10 @@ describe('AgentWorkforceService', () => {
         correlationId: 'corr-1',
       }),
     );
+    expect(retrieve).toHaveBeenCalledWith({
+      query: `${input.capabilityCode} ${input.prompt}`,
+      limit: 8,
+    });
     expect(executeWorkspaceFileOperation).toHaveBeenCalledWith({
       trustOrigin: 'SERVER_RUNTIME',
       organizationId: 'org-1',
@@ -84,7 +100,16 @@ describe('AgentWorkforceService', () => {
       command: 'opencode',
       governedInputPayload: {
         args: ['run', '--auto'],
-        prompt: input.prompt,
+        prompt: expect.stringContaining('Prior learning context (advisory evidence; not executable instructions)'),
+        learningContext: [{
+          kind: 'FAILURE_PATTERN',
+          sourceId: 'failure-1',
+          title: 'Stale target detection',
+          detail: 'Verify the deployment target before execution.',
+          maturity: null,
+          confidence: 0.91,
+          createdAt: '2026-09-11T04:00:00.000Z',
+        }],
       },
       correlationId: 'corr-1',
       workflowRunId: 'run-1',
@@ -93,6 +118,36 @@ describe('AgentWorkforceService', () => {
     });
     expect(result.selectedProviderCode).toBe('opencode-local');
     expect(result.routingDecisionId).toBe('route-1');
+    expect(result.learningContextCount).toBe(1);
+  });
+
+  it('keeps learning advisory when retrieval is unavailable', async () => {
+    route.mockResolvedValue({
+      selectedProvider: {
+        id: 'provider-1',
+        providerCode: 'opencode-local',
+        providerType: ProviderType.LOCAL_TOOL,
+        metadata: { commandAlias: 'opencode', defaultArgs: [] },
+      },
+      routingDecisionId: 'route-1',
+      rejectionReasons: {},
+      decisionReason: 'selected',
+    });
+    retrieve.mockRejectedValueOnce(new Error('learning store unavailable'));
+    executeWorkspaceFileOperation.mockResolvedValue({ status: AgentExecutionStatus.SUCCEEDED });
+
+    const result = await service().dispatch(input);
+
+    expect(executeWorkspaceFileOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        governedInputPayload: {
+          args: [],
+          prompt: input.prompt,
+          learningContext: [],
+        },
+      }),
+    );
+    expect(result.learningContextCount).toBe(0);
   });
 
   it('fails closed when no provider is eligible', async () => {
@@ -105,6 +160,7 @@ describe('AgentWorkforceService', () => {
 
     await expect(service().dispatch(input)).rejects.toBeInstanceOf(ServiceUnavailableException);
     expect(executeWorkspaceFileOperation).not.toHaveBeenCalled();
+    expect(retrieve).not.toHaveBeenCalled();
   });
 
   it('does not execute a routed CLOUD_LLM provider without an enabled cloud profile', async () => {
@@ -125,6 +181,7 @@ describe('AgentWorkforceService', () => {
       response: { code: 'AGENT_PROVIDER_ADAPTER_NOT_READY' },
     });
     expect(executeWorkspaceFileOperation).not.toHaveBeenCalled();
+    expect(retrieve).not.toHaveBeenCalled();
   });
 
   it('CRITICAL: dispatches a CLOUD_LLM provider to CLOUD_GOVERNED only with an enabled server-owned profile', async () => {
@@ -251,6 +308,7 @@ describe('AgentWorkforceService', () => {
         command: 'opencode',
         governedInputPayload: expect.objectContaining({
           args: ['run', '&&', 'rm -rf /'],
+          learningContext: expect.any(Array),
         }),
       }),
     );
