@@ -63,6 +63,32 @@ export class RuntimeExperienceCaptureService {
 
     return experience;
   }
+
+  async tryRecord(input: RuntimeExperienceCaptureInput): Promise<ExperienceRecord | null> {
+    try {
+      return await this.record(input);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'RUNTIME_EXPERIENCE_CAPTURE_FAILED';
+      try {
+        await this.audit.record({
+          organizationId: input.organizationId,
+          actorType: 'DIGITAL_EMPLOYEE',
+          actorId: input.agentId,
+          action: 'LEARNING_RUNTIME_EXPERIENCE_CAPTURE_FAILED',
+          entityType: 'WorkflowStepRun',
+          entityId:
+            typeof input.context.workflowStepRunId === 'string'
+              ? input.context.workflowStepRunId
+              : null,
+          metadata: { source: input.source, reason },
+        });
+      } catch {
+        // The already-completed governed execution remains authoritative even
+        // if both learning persistence and its secondary audit write fail.
+      }
+      return null;
+    }
+  }
 }
 
 function validateRuntimeInput(input: RuntimeExperienceCaptureInput): void {
