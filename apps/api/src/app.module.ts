@@ -21,6 +21,7 @@ import { WorkflowRuntimeModule } from './modules/workflow-runtime/workflow-runti
 import { ProviderRegistryModule } from './modules/provider-registry/provider-registry.module';
 import { GovernedRuntimeModule } from './modules/governed-runtime/governed-runtime.module';
 import { AgentWorkforceModule } from './modules/agent-workforce/agent-workforce.module';
+import { WorkflowAgentRuntimeModule } from './modules/workflow-agent-runtime/workflow-agent-runtime.module';
 import { OperatorBridgeModule } from './modules/operator-bridge/operator-bridge.module';
 import { CommandBusModule } from './modules/command-bus/command-bus.module';
 import { LearningModule } from './modules/learning/learning.module';
@@ -56,6 +57,7 @@ import { LearningModule } from './modules/learning/learning.module';
     ProviderRegistryModule,
     GovernedRuntimeModule,
     AgentWorkforceModule,
+    WorkflowAgentRuntimeModule,
     OperatorBridgeModule,
     CommandBusModule,
     LearningModule,
