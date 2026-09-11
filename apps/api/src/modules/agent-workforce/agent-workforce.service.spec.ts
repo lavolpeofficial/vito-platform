@@ -9,6 +9,8 @@ describe('AgentWorkforceService', () => {
   const route = jest.fn();
   const executeWorkspaceFileOperation = jest.fn();
   const retrieve = jest.fn();
+  const resolveWorkflowIdentity = jest.fn();
+  const tryRecordExperience = jest.fn();
   const learningItem = {
     kind: 'FAILURE_PATTERN' as const,
     sourceId: 'failure-1',
@@ -22,6 +24,8 @@ describe('AgentWorkforceService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     retrieve.mockResolvedValue([learningItem]);
+    resolveWorkflowIdentity.mockResolvedValue(null);
+    tryRecordExperience.mockResolvedValue(null);
   });
 
   const input = {
@@ -40,6 +44,8 @@ describe('AgentWorkforceService', () => {
       { route } as any,
       { executeWorkspaceFileOperation } as any,
       { retrieve } as any,
+      { resolve: resolveWorkflowIdentity } as any,
+      { tryRecord: tryRecordExperience } as any,
       registry,
     );
   }
@@ -76,6 +82,7 @@ describe('AgentWorkforceService', () => {
 
     const result = await service().dispatch(input);
 
+    expect(resolveWorkflowIdentity).toHaveBeenCalledWith('org-1', 'run-1', 'step-1');
     expect(route).toHaveBeenCalledWith(
       expect.objectContaining({
         organizationId: 'org-1',
@@ -119,6 +126,71 @@ describe('AgentWorkforceService', () => {
     expect(result.selectedProviderCode).toBe('opencode-local');
     expect(result.routingDecisionId).toBe('route-1');
     expect(result.learningContextCount).toBe(1);
+    expect(result.experienceId).toBeNull();
+    expect(tryRecordExperience).not.toHaveBeenCalled();
+  });
+
+  it('uses authoritative persisted workflow identity and captures an objective-score-neutral experience', async () => {
+    resolveWorkflowIdentity.mockResolvedValueOnce({
+      organizationId: 'org-1',
+      workflowRunId: 'run-1',
+      workflowStepRunId: 'step-1',
+      taskId: 'task-1',
+      agentId: 'agent-1',
+      stepType: 'BUILD',
+      attemptNumber: 2,
+      assuranceLevel: 'AL-5',
+      correlationId: 'persisted-corr',
+    });
+    route.mockResolvedValue({
+      selectedProvider: {
+        id: 'provider-1',
+        providerCode: 'opencode-local',
+        providerType: ProviderType.LOCAL_TOOL,
+        metadata: { commandAlias: 'opencode', defaultArgs: [] },
+      },
+      routingDecisionId: 'route-1',
+      rejectionReasons: {},
+      decisionReason: 'selected',
+    });
+    executeWorkspaceFileOperation.mockResolvedValue({
+      invocationId: 'inv-1',
+      executionId: 'exec-1',
+      status: AgentExecutionStatus.SUCCEEDED,
+      stdout: 'must not enter learning store',
+    });
+    tryRecordExperience.mockResolvedValueOnce({ id: 'experience-1' });
+
+    const result = await service().dispatch({ ...input, assuranceLevel: 'caller-al', correlationId: 'caller-corr' });
+
+    expect(route).toHaveBeenCalledWith(expect.objectContaining({
+      assuranceLevel: 'AL-5',
+      correlationId: 'persisted-corr',
+    }));
+    expect(executeWorkspaceFileOperation).toHaveBeenCalledWith(expect.objectContaining({
+      correlationId: 'persisted-corr',
+    }));
+    expect(tryRecordExperience).toHaveBeenCalledWith(expect.objectContaining({
+      organizationId: 'org-1',
+      agentId: 'agent-1',
+      source: 'AGENT_WORKFORCE',
+      successScore: null,
+      confidence: null,
+      context: expect.objectContaining({
+        workflowRunId: 'run-1',
+        workflowStepRunId: 'step-1',
+        taskId: 'task-1',
+        stepType: 'BUILD',
+        attemptNumber: 2,
+        correlationId: 'persisted-corr',
+      }),
+      result: {
+        invocationId: 'inv-1',
+        executionId: 'exec-1',
+        status: AgentExecutionStatus.SUCCEEDED,
+      },
+    }));
+    expect(result.experienceId).toBe('experience-1');
   });
 
   it('keeps learning advisory when retrieval is unavailable', async () => {
