@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { AuditService } from '../audit/audit.service';
+import { LearningRetrievalService } from '../learning/learning-retrieval.service';
+import type { RetrievedLearningItem } from '../learning/learning-retrieval.types';
 import type { CommandHandler, CommandResult, VitoCommand } from './command-bus.types';
 
 export interface CommandDispatchRequest {
@@ -16,11 +18,17 @@ export interface CommandActorContext {
   authenticationMethod: 'jwt' | 'insecure-header';
 }
 
+const RUNTIME_LEARNING_LIMIT = 8;
+const MAX_LEARNING_QUERY_LENGTH = 512;
+
 @Injectable()
 export class CommandBusService {
   private readonly handlers = new Map<string, CommandHandler>();
 
-  constructor(private readonly audit: AuditService) {}
+  constructor(
+    private readonly audit: AuditService,
+    private readonly learningRetrieval: LearningRetrievalService,
+  ) {}
 
   register(handler: CommandHandler): void {
     if (this.handlers.has(handler.commandType)) {
@@ -72,6 +80,9 @@ export class CommandBusService {
   }
 
   private async dispatchResolved(command: VitoCommand, handler: CommandHandler): Promise<CommandResult> {
+    const learningContext = await this.retrieveLearningContext(command);
+    const enrichedCommand: VitoCommand = { ...command, learningContext };
+
     await this.audit.record({
       organizationId: command.organizationId,
       actorType: 'USER',
@@ -84,11 +95,13 @@ export class CommandBusService {
         target: command.target,
         correlationId: command.correlationId,
         approvalLevel: command.approvalLevel,
+        learningItemCount: learningContext.length,
+        learningKinds: [...new Set(learningContext.map((item) => item.kind))],
       },
     });
 
     try {
-      const data = await handler.execute(command);
+      const data = await handler.execute(enrichedCommand);
       await this.audit.record({
         organizationId: command.organizationId,
         actorType: 'USER',
@@ -112,6 +125,53 @@ export class CommandBusService {
       });
       return this.result(command, 'FAILED', undefined, reason);
     }
+  }
+
+  private async retrieveLearningContext(command: VitoCommand): Promise<readonly RetrievedLearningItem[]> {
+    try {
+      return await this.learningRetrieval.retrieve({
+        query: this.learningQuery(command),
+        limit: RUNTIME_LEARNING_LIMIT,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'LEARNING_RETRIEVAL_FAILED';
+      await this.audit.record({
+        organizationId: command.organizationId,
+        actorType: 'USER',
+        actorId: command.requestedBy,
+        action: 'COMMAND.LEARNING_RETRIEVAL_FAILED',
+        entityType: 'COMMAND',
+        entityId: command.commandId,
+        metadata: {
+          commandType: command.commandType,
+          correlationId: command.correlationId,
+          reason,
+        },
+      });
+      return [];
+    }
+  }
+
+  private learningQuery(command: VitoCommand): string {
+    const parameterTerms = Object.entries(command.parameters)
+      .slice(0, 20)
+      .flatMap(([key, value]) => {
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+          return [`${key} ${String(value)}`];
+        }
+        if (Array.isArray(value)) {
+          const primitives = value
+            .filter((item) => ['string', 'number', 'boolean'].includes(typeof item))
+            .slice(0, 10)
+            .map(String);
+          return primitives.length > 0 ? [`${key} ${primitives.join(' ')}`] : [];
+        }
+        return [];
+      });
+
+    return [command.commandType, command.target, ...parameterTerms]
+      .join(' ')
+      .slice(0, MAX_LEARNING_QUERY_LENGTH);
   }
 
   private async reject(command: VitoCommand, reason: string): Promise<CommandResult> {
