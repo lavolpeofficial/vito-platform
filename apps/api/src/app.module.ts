@@ -26,6 +26,7 @@ import { OperatorBridgeModule } from './modules/operator-bridge/operator-bridge.
 import { CommandBusModule } from './modules/command-bus/command-bus.module';
 import { LearningModule } from './modules/learning/learning.module';
 import { CustosModule } from './modules/custos/custos.module';
+import { GoalPlannerModule } from './modules/goal-planner/goal-planner.module';
 
 /**
  * Seit Sprint 2 gibt es keine `TenantMiddleware` mehr. Authentifizierung
@@ -63,6 +64,7 @@ import { CustosModule } from './modules/custos/custos.module';
     OperatorBridgeModule,
     CommandBusModule,
     LearningModule,
+    GoalPlannerModule,
   ],
 })
 export class AppModule {}
