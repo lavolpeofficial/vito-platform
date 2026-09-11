@@ -11,6 +11,8 @@ const contentsPayload = (manifest: Record<string, unknown>) => ({
 const clientWithToken = () =>
   new WorldGitHubClient(new ServerCredentialResolver(new Map([['github.world.actions', 'test-token']])));
 
+const correlationId = '0f5f9ef0-34d8-4d8f-8c02-bb965c2cf16a';
+
 describe('WorldRunGateAdapter', () => {
   const command: VitoCommand = {
     commandId: 'cmd-g35',
@@ -20,13 +22,13 @@ describe('WorldRunGateAdapter', () => {
     target: 'WORLD',
     parameters: { gate: 'G35' },
     approvalLevel: 'L3',
-    correlationId: 'corr-g35',
+    correlationId,
     timestamp: new Date().toISOString(),
   };
 
   afterEach(() => jest.restoreAllMocks());
 
-  it('dispatches the governed gate and returns its correlated workflow run', async () => {
+  it('dispatches the governed gate with the command correlation UUID and resolves that exact run', async () => {
     const now = new Date().toISOString();
     const fetchMock = jest
       .spyOn(global, 'fetch')
@@ -47,6 +49,7 @@ describe('WorldRunGateAdapter', () => {
           workflow_runs: [{
             id: 12345,
             name: 'WORLD Remote Governed Gate',
+            display_title: `WORLD ${correlationId}`,
             path: '.github/workflows/world-remote-gate.yml',
             event: 'workflow_dispatch',
             status: 'queued',
@@ -64,10 +67,15 @@ describe('WorldRunGateAdapter', () => {
 
     expect(result.dispatch).toBe('ACCEPTED');
     expect(result.gate).toBe('G35');
+    expect(result.correlationId).toBe(correlationId);
     expect(result.runId).toBe(12345);
     expect(result.headSha).toBe('head-sha');
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: 'POST' });
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({
+      ref: 'case/global-resilience-harvest-v0.1-agent',
+      inputs: { correlationId },
+    });
   });
 
   it('fails closed when the requested gate differs from the WORLD manifest', async () => {
