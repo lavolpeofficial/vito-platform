@@ -79,16 +79,25 @@ describe('WorkflowAgentRuntimeService', () => {
     }));
   });
 
-  it('records blocked execution evidence without falsely completing the workflow step', async () => {
+  it('propagates provider blocking into WorkflowRuntime without falsely failing the step', async () => {
     dispatch.mockResolvedValue({
       routingDecisionId: 'route-1', selectedProviderId: 'provider-1', selectedProviderCode: 'local-builder',
       experienceId: 'exp-3', execution: { status: AgentExecutionStatus.POLICY_BLOCKED },
     });
+    completeStep.mockResolvedValueOnce({ idempotent: false, outcome: { kind: 'BLOCKED' } });
+
     const result = await service.executeCurrentStep('org-1', 'run-1');
+
     expect(result.disposition).toBe('EXECUTION_BLOCKED');
-    expect(completeStep).not.toHaveBeenCalled();
+    expect(completeStep).toHaveBeenCalledWith(expect.objectContaining({
+      workflowRunId: 'run-1', workflowStepRunId: 'step-1',
+      stepStatus: 'FAILED', providerStatus: AgentExecutionStatus.POLICY_BLOCKED,
+      metadata: expect.objectContaining({
+        experienceId: 'exp-3', executionStatus: AgentExecutionStatus.POLICY_BLOCKED,
+      }),
+    }));
     expect(tryRecordOutcome).toHaveBeenCalledWith(expect.objectContaining({
-      experienceId: 'exp-3', executionStatus: AgentExecutionStatus.POLICY_BLOCKED, transitionKind: null,
+      experienceId: 'exp-3', executionStatus: AgentExecutionStatus.POLICY_BLOCKED, transitionKind: 'BLOCKED',
     }));
   });
 
