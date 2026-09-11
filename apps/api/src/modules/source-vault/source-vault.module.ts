@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { KnowledgeHarvesterController } from './knowledge-harvester.controller';
+import { KnowledgeHarvesterService } from './knowledge-harvester.service';
 import { SourceExtractionController } from './source-extraction.controller';
 import { SourceExtractionService } from './source-extraction.service';
 import { SourceVaultController } from './source-vault.controller';
@@ -10,10 +12,11 @@ import { S3ObjectStorageAdapter } from './storage/s3-object-storage.adapter';
 
 @Module({
   imports: [AuditModule],
-  controllers: [SourceVaultController, SourceExtractionController],
+  controllers: [SourceVaultController, SourceExtractionController, KnowledgeHarvesterController],
   providers: [
     SourceVaultService,
     SourceExtractionService,
+    KnowledgeHarvesterService,
     LocalObjectStorageAdapter,
     S3ObjectStorageAdapter,
     {
@@ -37,6 +40,6 @@ import { S3ObjectStorageAdapter } from './storage/s3-object-storage.adapter';
       },
     },
   ],
-  exports: [SourceVaultService, SourceExtractionService, ObjectStoragePort],
+  exports: [SourceVaultService, SourceExtractionService, KnowledgeHarvesterService, ObjectStoragePort],
 })
 export class SourceVaultModule {}
