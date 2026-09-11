@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, type PrismaPromise } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -65,7 +65,7 @@ export class MemoryService {
   async search(organizationId: string, query: string, limit = 8, scopes?: readonly { scope: MemoryScope; scopeId?: string | null }[]) {
     const safeQuery = query.trim().slice(0, 512);
     if (!safeQuery) throw new BadRequestException('query is required.');
-    const safeLimit = Math.max(1, Math.min(20, limit));
+    const safeLimit = Math.max(1, Math.min(20, Number.isFinite(limit) ? limit : 8));
     const scopeClauses = scopes?.length
       ? Prisma.sql`AND (${Prisma.join(scopes.map((item) => item.scope === 'GLOBAL' || item.scope === 'ORGANIZATION'
           ? Prisma.sql`("scope" = ${item.scope} AND "scopeId" IS NULL)`
