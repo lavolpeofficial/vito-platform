@@ -86,6 +86,50 @@ export class WorkflowAgentRuntimeService {
 
     const executionStatus = dispatch.execution.status as AgentExecutionStatus;
     const completionStatus = this.toWorkflowCompletionStatus(executionStatus);
+    const providerBlocked =
+      executionStatus === AgentExecutionStatus.POLICY_BLOCKED ||
+      executionStatus === AgentExecutionStatus.QUOTA_BLOCKED;
+
+    if (providerBlocked) {
+      const transition = await this.workflowRuntime.completeStep({
+        organizationId,
+        workflowRunId,
+        workflowStepRunId: step.id,
+        stepStatus: 'FAILED',
+        providerStatus: executionStatus,
+        metadata: {
+          source: 'WORKFLOW_AGENT_RUNTIME',
+          capabilityCode,
+          routingDecisionId: dispatch.routingDecisionId,
+          selectedProviderId: dispatch.selectedProviderId,
+          selectedProviderCode: dispatch.selectedProviderCode,
+          experienceId: dispatch.experienceId,
+          executionStatus,
+        },
+      });
+      const outcomeEvaluation = await this.recordOutcome({
+        organizationId,
+        experienceId: dispatch.experienceId,
+        workflowRunId,
+        workflowStepRunId: step.id,
+        stepType: step.stepType,
+        capabilityCode,
+        executionStatus,
+        transitionKind: transition.outcome?.kind ?? null,
+      });
+      return Object.freeze({
+        disposition: 'EXECUTION_BLOCKED' as const,
+        workflowRunId,
+        workflowStepRunId: step.id,
+        stepType: step.stepType,
+        capabilityCode,
+        executionStatus,
+        dispatch,
+        transition,
+        outcomeEvaluation,
+      });
+    }
+
     if (!completionStatus) {
       const outcomeEvaluation = await this.recordOutcome({
         organizationId,
@@ -98,11 +142,7 @@ export class WorkflowAgentRuntimeService {
         transitionKind: null,
       });
       return Object.freeze({
-        disposition:
-          executionStatus === AgentExecutionStatus.POLICY_BLOCKED ||
-          executionStatus === AgentExecutionStatus.QUOTA_BLOCKED
-            ? ('EXECUTION_BLOCKED' as const)
-            : ('EXECUTION_INCOMPLETE' as const),
+        disposition: 'EXECUTION_INCOMPLETE' as const,
         workflowRunId,
         workflowStepRunId: step.id,
         stepType: step.stepType,
