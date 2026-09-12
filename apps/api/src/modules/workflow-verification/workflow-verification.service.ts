@@ -13,7 +13,7 @@ type VerificationDecision = Readonly<{
   reason: string;
 }>;
 
-type VerificationRow = {
+export type VerificationRow = {
   id: string;
   organizationId: string;
   workflowRunId: string;
@@ -31,6 +31,31 @@ export class WorkflowVerificationService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
   ) {}
+
+  async listForRun(
+    organizationId: string,
+    workflowRunId: string,
+    options: Readonly<{ status?: WorkflowVerificationStatus; limit?: number }> = {},
+  ): Promise<readonly VerificationRow[]> {
+    const run = await this.prisma.workflowRun.findFirst({
+      where: { id: workflowRunId, organizationId },
+      select: { id: true },
+    });
+    if (!run) throw new NotFoundException('WorkflowRun not found.');
+
+    const limit = options.limit ?? 100;
+    const statusClause = options.status ? Prisma.sql`AND "status" = ${options.status}` : Prisma.empty;
+    const rows = await this.prisma.$queryRaw<VerificationRow[]>(Prisma.sql`
+      SELECT "id", "organizationId", "workflowRunId", "workflowStepRunId", "stepType", "ruleCode", "status", "evidence", "createdAt"
+      FROM "workflow_verifications"
+      WHERE "organizationId" = ${organizationId}
+        AND "workflowRunId" = ${workflowRunId}
+        ${statusClause}
+      ORDER BY "createdAt" ASC, "id" ASC
+      LIMIT ${limit}
+    `);
+    return Object.freeze(rows.map((row) => Object.freeze(row)));
+  }
 
   async verifyStep(organizationId: string, workflowRunId: string, workflowStepRunId: string) {
     const run = await this.prisma.workflowRun.findFirst({
