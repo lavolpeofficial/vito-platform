@@ -3,7 +3,7 @@ import test from 'node:test';
 import { isNavigationItemActive, navigationItems } from '../lib/navigation.ts';
 
 test('defines each planned control-center module exactly once', () => {
-  assert.deepEqual(navigationItems.map(({ href }) => href), ['/operations', '/source-vault', '/planning', '/workflows', '/workforce', '/governance', '/audit']);
+  assert.deepEqual(navigationItems.map(({ href }) => href), ['/operations', '/source-vault', '/planning', '/workflows', '/workforce', '/governance', '/memory', '/audit']);
   assert.equal(new Set(navigationItems.map(({ href }) => href)).size, navigationItems.length);
 });
 
@@ -14,5 +14,6 @@ test('marks a module and its nested routes active without matching sibling prefi
   assert.equal(isNavigationItemActive('/operations', '/source-vault'), false);
   assert.equal(isNavigationItemActive('/planning/drafts/123', '/planning'), true);
   assert.equal(isNavigationItemActive('/governance/reviews/123', '/governance'), true);
+  assert.equal(isNavigationItemActive('/memory/entries/123', '/memory'), true);
   assert.equal(isNavigationItemActive('/audit/events/123', '/audit'), true);
 });
