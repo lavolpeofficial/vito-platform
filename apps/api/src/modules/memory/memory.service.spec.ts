@@ -42,4 +42,29 @@ describe('MemoryService', () => {
     await service.retrieveRuntimeContext('org-1', 'release verification', 'agent-1', 'run-1');
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
   });
+
+  it('builds a bounded OR lexical query so full goals can match partial memory evidence', async () => {
+    prisma.$queryRaw.mockResolvedValueOnce([]);
+
+    await service.search(
+      'org-1',
+      'Harden the release validation path while preserving governed test evidence.',
+      5,
+      [{ scope: 'ORGANIZATION' }],
+    );
+
+    const sql = prisma.$queryRaw.mock.calls[0][0] as { values?: unknown[] };
+    const lexicalQuery = sql.values?.find(
+      (value): value is string => typeof value === 'string' && value.includes(' | '),
+    );
+    expect(lexicalQuery).toContain('release');
+    expect(lexicalQuery).toContain('validation');
+    expect(lexicalQuery).toContain('test');
+    expect(lexicalQuery).toContain(' | ');
+  });
+
+  it('rejects punctuation-only queries instead of constructing an empty tsquery', async () => {
+    await expect(service.search('org-1', '--- !!!', 8)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
 });
