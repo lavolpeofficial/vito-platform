@@ -1,5 +1,10 @@
 import { BadRequestException, PayloadTooLargeException } from '@nestjs/common';
-import { decodeOpenXml, readOpenXmlZipEntries, unzipOpenXmlEntry } from './openxml-zip';
+import {
+  decodeOpenXml,
+  readOpenXmlZipEntries,
+  unzipOpenXmlEntry,
+  type OpenXmlZipEntry,
+} from './openxml-zip';
 
 const MAX_SLIDES = 256;
 const MAX_SLIDE_CHARS = 24_000;
@@ -22,14 +27,16 @@ export interface PptxKnowledgeEnvelope {
   }>;
 }
 
+type NumberedSlideEntry = Readonly<{ entry: OpenXmlZipEntry; slideNumber: number }>;
+
 export function extractPptxKnowledgeSlides(buffer: Buffer): PptxKnowledgeEnvelope {
   const entries = readOpenXmlZipEntries(buffer);
   const slideEntries = [...entries.values()]
-    .map((entry) => {
+    .map((entry): NumberedSlideEntry | null => {
       const match = /^ppt\/slides\/slide(\d+)\.xml$/.exec(entry.name);
       return match ? { entry, slideNumber: Number.parseInt(match[1], 10) } : null;
     })
-    .filter((value): value is { entry: ReturnType<typeof entries.get> extends infer T ? Exclude<T, undefined> : never; slideNumber: number } => value !== null)
+    .filter((value): value is NumberedSlideEntry => value !== null)
     .sort((a, b) => a.slideNumber - b.slideNumber);
 
   if (slideEntries.length === 0) {
