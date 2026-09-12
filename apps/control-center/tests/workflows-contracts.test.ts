@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseWorkflowSnapshot } from '../lib/workflows/contracts.ts';
+import { parseHumanReleaseApprovalResult, parseWorkflowSnapshot } from '../lib/workflows/contracts.ts';
 
 const BASE = {
   workflowRunId: 'run-1', organizationId: 'org-1', correlationId: 'corr-1', status: 'RUNNING', currentStepType: 'PLAN', boundary: 'ACTIVE', nextAction: 'EXECUTE_CURRENT_STEP', blockReasonCode: null, failureReasonCode: null,
@@ -17,9 +17,23 @@ test('accepts bounded read-only workflow observer snapshots', () => {
   assert.equal(parsed.steps[0]?.status, 'READY');
 });
 
+test('accepts server-owned explicit human release action', () => {
+  const parsed = parseWorkflowSnapshot({ ...BASE, currentStepType: 'HUMAN_RELEASE_GATE', nextAction: 'APPROVE_HUMAN_RELEASE' });
+  assert.ok(parsed);
+  assert.equal(parsed.nextAction, 'APPROVE_HUMAN_RELEASE');
+});
+
 test('rejects authority escalation and unknown next actions', () => {
   assert.equal(parseWorkflowSnapshot({ ...BASE, authority: 'WRITE' }), null);
   assert.equal(parseWorkflowSnapshot({ ...BASE, nextAction: 'APPROVE_RELEASE' }), null);
+});
+
+test('accepts only a non-executing explicit human approval response', () => {
+  const valid = { disposition: 'HUMAN_RELEASE_APPROVED', workflowRunId: 'run-1', workflowStepRunId: 'step-gate', approvedByUserId: 'user-1', nextStep: 'RELEASE_EXECUTION', executionTriggered: false, authority: 'HUMAN_EXPLICIT' };
+  assert.ok(parseHumanReleaseApprovalResult(valid));
+  assert.equal(parseHumanReleaseApprovalResult({ ...valid, executionTriggered: true }), null);
+  assert.equal(parseHumanReleaseApprovalResult({ ...valid, authority: 'SYSTEM' }), null);
+  assert.equal(parseHumanReleaseApprovalResult({ ...valid, nextStep: 'REMOTE_VERIFY' }), null);
 });
 
 test('rejects unbounded timelines', () => {
