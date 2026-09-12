@@ -40,6 +40,19 @@ angebunden.
 - pnpm ≥ 9 (`npm install -g pnpm`)
 - Docker + Docker Compose (für PostgreSQL)
 
+## VITO Control Center
+
+Die interne Next.js-Anwendung liegt in `apps/control-center`. Shell v1 stellt
+die gemeinsame Navigation und stabile Routen für Operations, SOURCE VAULT,
+Workflows sowie Agents & Capabilities bereit. Authentifizierung, Tenant-Kontext
+und API-Zugriff sind bewusst noch nicht Bestandteil dieser Ausbaustufe.
+
+```bash
+pnpm --filter @vito/control-center dev
+```
+
+Das Control Center läuft lokal unter `http://localhost:3001`.
+
 ## Installation
 
 ```bash

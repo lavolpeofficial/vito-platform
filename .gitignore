@@ -10,6 +10,8 @@ node_modules/
 # Build output
 dist/
 coverage/
+**/.next/
+*.tsbuildinfo
 
 # Prisma
 prisma/dev.db

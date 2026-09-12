@@ -8,9 +8,11 @@ onlyBuiltDependencies:
   - "@prisma/engines"
   - "@scarf/scarf"
   - "prisma"
+  - "sharp"
 allowBuilds:
   '@nestjs/core': true
   '@prisma/client': true
   '@prisma/engines': true
   '@scarf/scarf': true
   prisma: true
+  sharp: true
