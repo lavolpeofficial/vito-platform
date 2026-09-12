@@ -6,6 +6,7 @@ import { FAILURE_PATTERN_REPOSITORY } from './failure-pattern.types';
 import { FailurePatternService } from './failure-pattern.service';
 import { LEARNING_MATURITY_REPOSITORY } from './learning-maturity.types';
 import { LearningMaturityService } from './learning-maturity.service';
+import { LearningObservabilityController } from './learning-observability.controller';
 import { LEARNING_RETRIEVAL_REPOSITORY } from './learning-retrieval.types';
 import { LearningRetrievalService } from './learning-retrieval.service';
 import { OUTCOME_REPOSITORY } from './outcome-evaluation.types';
@@ -27,6 +28,7 @@ import { SkillCandidateService } from './skill-candidate.service';
 
 @Module({
   imports: [AuditModule],
+  controllers: [LearningObservabilityController],
   providers: [
     PrismaExperienceRepository,
     ExperienceStoreService,
