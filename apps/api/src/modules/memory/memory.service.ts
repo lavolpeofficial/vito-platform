@@ -24,6 +24,10 @@ export interface MemoryEntry {
   updatedAt: Date;
 }
 
+const MAX_MEMORY_QUERY_CHARS = 512;
+const MAX_MEMORY_QUERY_TERMS = 16;
+const MIN_MEMORY_QUERY_TERM_CHARS = 3;
+
 @Injectable()
 export class MemoryService {
   constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
@@ -63,8 +67,10 @@ export class MemoryService {
   }
 
   async search(organizationId: string, query: string, limit = 8, scopes?: readonly { scope: MemoryScope; scopeId?: string | null }[]) {
-    const safeQuery = query.trim().slice(0, 512);
+    const safeQuery = query.trim().slice(0, MAX_MEMORY_QUERY_CHARS);
     if (!safeQuery) throw new BadRequestException('query is required.');
+    const lexicalQuery = buildLexicalMemoryQuery(safeQuery);
+    if (!lexicalQuery) throw new BadRequestException('query must contain searchable terms.');
     const safeLimit = Math.max(1, Math.min(20, Number.isFinite(limit) ? limit : 8));
     const scopeClauses = scopes?.length
       ? Prisma.sql`AND (${Prisma.join(scopes.map((item) => item.scope === 'GLOBAL' || item.scope === 'ORGANIZATION'
@@ -72,13 +78,18 @@ export class MemoryService {
           : Prisma.sql`("scope" = ${item.scope} AND "scopeId" = ${item.scopeId ?? null})`), ' OR ')})`
       : Prisma.empty;
 
+    // Runtime and planning callers submit full prompts/goals, not keyword-only queries.
+    // plainto_tsquery combines terms with AND and therefore silently misses useful
+    // memories when even one prompt term is absent. Build a bounded, sanitized OR
+    // tsquery instead: PostgreSQL remains the retrieval engine, ranking stays
+    // deterministic, and tenant/scope filters remain authoritative.
     return this.prisma.$queryRaw<MemoryEntry[]>(Prisma.sql`
       SELECT * FROM memory_entries
       WHERE "organizationId" = ${organizationId}
         AND "status" = 'ACTIVE'
         ${scopeClauses}
-        AND to_tsvector('simple', coalesce("title", '') || ' ' || coalesce("content", '')) @@ plainto_tsquery('simple', ${safeQuery})
-      ORDER BY ts_rank(to_tsvector('simple', coalesce("title", '') || ' ' || coalesce("content", '')), plainto_tsquery('simple', ${safeQuery})) DESC,
+        AND to_tsvector('simple', coalesce("title", '') || ' ' || coalesce("content", '')) @@ to_tsquery('simple', ${lexicalQuery})
+      ORDER BY ts_rank(to_tsvector('simple', coalesce("title", '') || ' ' || coalesce("content", '')), to_tsquery('simple', ${lexicalQuery})) DESC,
                "createdAt" DESC
       LIMIT ${safeLimit}
     `);
@@ -93,6 +104,21 @@ export class MemoryService {
     if (workflowRunId) scopes.push({ scope: 'WORKFLOW', scopeId: workflowRunId });
     return this.search(organizationId, query, 8, scopes);
   }
+}
+
+function buildLexicalMemoryQuery(query: string): string {
+  const terms = query
+    .toLocaleLowerCase()
+    .match(/[\p{L}\p{N}_]+/gu) ?? [];
+  const uniqueTerms: string[] = [];
+  const seen = new Set<string>();
+  for (const term of terms) {
+    if (term.length < MIN_MEMORY_QUERY_TERM_CHARS || seen.has(term)) continue;
+    seen.add(term);
+    uniqueTerms.push(term);
+    if (uniqueTerms.length >= MAX_MEMORY_QUERY_TERMS) break;
+  }
+  return uniqueTerms.join(' | ');
 }
 
 function validateScope(scope: MemoryScope, scopeId: string | null) {
