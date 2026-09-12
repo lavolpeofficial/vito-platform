@@ -30,6 +30,7 @@ import { GoalPlannerModule } from './modules/goal-planner/goal-planner.module';
 import { MemoryModule } from './modules/memory/memory.module';
 import { CapabilityDiscoveryModule } from './modules/capability-discovery/capability-discovery.module';
 import { SkillPromotionModule } from './modules/skill-promotion/skill-promotion.module';
+import { WorkflowObserverModule } from './modules/workflow-observer/workflow-observer.module';
 
 /**
  * Seit Sprint 2 gibt es keine `TenantMiddleware` mehr. Authentifizierung
@@ -71,6 +72,7 @@ import { SkillPromotionModule } from './modules/skill-promotion/skill-promotion.
     MemoryModule,
     CapabilityDiscoveryModule,
     SkillPromotionModule,
+    WorkflowObserverModule,
   ],
 })
 export class AppModule {}
