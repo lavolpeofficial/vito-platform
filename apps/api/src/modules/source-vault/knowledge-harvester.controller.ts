@@ -48,6 +48,14 @@ export class KnowledgeHarvesterController {
     return this.service.harvestXlsxSource(this.tenantContext.getOrThrow(), sourceId);
   }
 
+  @Post('sources/:sourceId/harvest-pptx')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: 'Harvests bounded PPTX slide text with slide provenance.' })
+  harvestPptx(@Param('sourceId') sourceId: string) {
+    return this.service.harvestPptxSource(this.tenantContext.getOrThrow(), sourceId);
+  }
+
   @Get('search')
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER, UserRole.VIEWER)
   @ApiOkResponse({ description: 'Tenant-scoped PostgreSQL full-text retrieval over harvested knowledge.' })

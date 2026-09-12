@@ -5,8 +5,9 @@ import { KnowledgeHarvesterService } from './knowledge-harvester.service';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
-export type KnowledgeHarvesterKind = 'TEXT' | 'DOCX' | 'XLSX';
+export type KnowledgeHarvesterKind = 'TEXT' | 'DOCX' | 'XLSX' | 'PPTX';
 
 export type HarvestDispatchSource = Readonly<{
   sourceType: SourceType;
@@ -23,6 +24,9 @@ export function resolveKnowledgeHarvester(source: HarvestDispatchSource): Knowle
   }
   if (source.sourceType === SourceType.SPREADSHEET && mime === XLSX_MIME && filename.endsWith('.xlsx')) {
     return 'XLSX';
+  }
+  if (source.sourceType === SourceType.PRESENTATION && mime === PPTX_MIME && filename.endsWith('.pptx')) {
+    return 'PPTX';
   }
   if (
     mime.startsWith('text/') ||
@@ -55,6 +59,7 @@ export class KnowledgeHarvestDispatcherService {
     const selected = resolveKnowledgeHarvester(source);
     if (selected === 'DOCX') return this.harvester.harvestDocxSource(organizationId, sourcePk);
     if (selected === 'XLSX') return this.harvester.harvestXlsxSource(organizationId, sourcePk);
+    if (selected === 'PPTX') return this.harvester.harvestPptxSource(organizationId, sourcePk);
     return this.harvester.harvestTextSource(organizationId, sourcePk);
   }
 }

@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { extractDocxText, type DocxParagraph } from './extraction/docx-extractor';
+import { extractPptxKnowledgeSlides, type PptxKnowledgeSlide } from './extraction/pptx-knowledge-extractor';
 import { extractXlsxKnowledgeRows, type XlsxKnowledgeRow } from './extraction/xlsx-knowledge-extractor';
 import { sha256Hex } from './source-hash';
 import { ObjectStoragePort } from './storage/object-storage.port';
@@ -11,14 +12,16 @@ import { ObjectStoragePort } from './storage/object-storage.port';
 const MAX_SOURCE_BYTES = 1_048_576;
 const MAX_DOCX_SOURCE_BYTES = 8 * 1024 * 1024;
 const MAX_XLSX_SOURCE_BYTES = 16 * 1024 * 1024;
+const MAX_PPTX_SOURCE_BYTES = 16 * 1024 * 1024;
 const MAX_TOTAL_CHARS = 524_288;
 const MAX_UNIT_CHARS = 3_000;
 const MAX_UNITS = 256;
 const SEARCH_LIMIT_MAX = 20;
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
-type KnowledgeLocatorType = 'SECTION' | 'CELL_RANGE';
+type KnowledgeLocatorType = 'SECTION' | 'CELL_RANGE' | 'SLIDE';
 
 export type HarvestedTextUnit = Readonly<{
   content: string;
@@ -77,6 +80,19 @@ export function segmentXlsxRows(rows: readonly XlsxKnowledgeRow[]): readonly Har
       throw new PayloadTooLargeException(`Harvest text exceeds ${MAX_TOTAL_CHARS} characters.`);
     }
     appendBoundedUnitChunks(units, row.text, 'CELL_RANGE', row.cellRange);
+  }
+  return Object.freeze(units);
+}
+
+export function segmentPptxSlides(slides: readonly PptxKnowledgeSlide[]): readonly HarvestedTextUnit[] {
+  const units: HarvestedTextUnit[] = [];
+  let totalChars = 0;
+  for (const slide of slides) {
+    totalChars += slide.text.length;
+    if (totalChars > MAX_TOTAL_CHARS) {
+      throw new PayloadTooLargeException(`Harvest text exceeds ${MAX_TOTAL_CHARS} characters.`);
+    }
+    appendBoundedUnitChunks(units, slide.text, 'SLIDE', slide.locatorValue);
   }
   return Object.freeze(units);
 }
@@ -202,6 +218,37 @@ export class KnowledgeHarvesterService {
     });
   }
 
+  async harvestPptxSource(organizationId: string, sourcePk: string) {
+    const source = await this.prisma.source.findFirst({
+      where: { id: sourcePk, organizationId },
+      select: { id: true, sourceId: true, sourceType: true, originalFilename: true, mimeType: true, storageUri: true, sha256: true, metadata: true },
+    });
+    if (!source) throw new NotFoundException('Source not found.');
+    const mime = this.normalizedMime(source.mimeType);
+    if (source.sourceType !== 'PRESENTATION' || mime !== PPTX_MIME || !source.originalFilename.toLowerCase().endsWith('.pptx')) {
+      throw new BadRequestException('PPTX harvester accepts only PRESENTATION sources registered as .pptx OpenXML presentations.');
+    }
+
+    const buffer = await this.objectStorage.get(source.storageUri);
+    if (buffer.byteLength > MAX_PPTX_SOURCE_BYTES) throw new PayloadTooLargeException(`PPTX source exceeds ${MAX_PPTX_SOURCE_BYTES} bytes.`);
+    this.assertSourceHash(buffer, source.sha256, 'PPTX harvest');
+    const extraction = extractPptxKnowledgeSlides(buffer);
+    const units = segmentPptxSlides(extraction.slides);
+    if (units.length === 0) throw new BadRequestException('PPTX contains no harvestable slide text.');
+
+    const unitCount = await this.persistUnits({
+      organizationId, source, units, harvester: 'vito-pptx-knowledge-harvester', version: '1', sourceFormat: 'PPTX',
+      extractionMetadata: {
+        adapter: extraction.adapter, adapterVersion: extraction.adapterVersion,
+        slides: extraction.totals.slides, characters: extraction.totals.characters,
+      },
+    });
+    return Object.freeze({
+      sourceId: source.sourceId, knowledgeUnits: unitCount, unitType: 'TEXT_FRAGMENT' as const,
+      sourceFormat: 'PPTX' as const, slidesExtracted: extraction.totals.slides, semanticEnrichment: false,
+    });
+  }
+
   async search(organizationId: string, query: string, requestedLimit?: number) {
     const normalized = query.trim();
     if (!normalized) throw new BadRequestException('Knowledge search query is required.');
@@ -224,7 +271,7 @@ export class KnowledgeHarvesterService {
     units: readonly HarvestedTextUnit[];
     harvester: string;
     version: string;
-    sourceFormat: 'TEXT' | 'DOCX' | 'XLSX';
+    sourceFormat: 'TEXT' | 'DOCX' | 'XLSX' | 'PPTX';
     extractionMetadata?: Record<string, unknown>;
   }): Promise<number> {
     return this.prisma.$transaction(async (tx) => {
