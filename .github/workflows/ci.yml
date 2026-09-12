@@ -40,6 +40,38 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Initialize bounded runner workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$RUNNER_TEMP/vito-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cache="$RUNNER_TEMP/vito-ci-cache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          for stale in "$RUNNER_TEMP"/vito-ci-*; do
+            [ -e "$stale" ] || continue
+            [ "$stale" = "$current" ] && continue
+            [ "$stale" = "$cache" ] && continue
+            rm -rf -- "$stale"
+          done
+
+          mkdir -p "$current" "$cache" "$cache/corepack"
+          {
+            echo "VITO_CI_TEMP=$current"
+            echo "VITO_CI_CACHE=$cache"
+            echo "TMPDIR=$current"
+            echo "TMP=$current"
+            echo "TEMP=$current"
+            echo "XDG_CACHE_HOME=$cache"
+            echo "COREPACK_HOME=$cache/corepack"
+          } >> "$GITHUB_ENV"
+
+          df -h "$RUNNER_TEMP"
+          available_kb="$(df -Pk "$RUNNER_TEMP" | awk 'NR==2 {print $4}')"
+          if [ "$available_kb" -lt 1048576 ]; then
+            echo "Runner has less than 1 GiB free after bounded VITO temp cleanup." >&2
+            exit 1
+          fi
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -59,7 +91,7 @@ jobs:
           export PATH="$PNPM_HOME:$PATH"
           echo "$PNPM_HOME" >> "$GITHUB_PATH"
           command -v pnpm
-          pnpm --version
+          test "$(pnpm --version)" = "11.17.0"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -101,3 +133,9 @@ jobs:
 
       - name: Build API
         run: pnpm build
+
+      - name: Clean bounded runner workspace
+        if: always()
+        shell: bash
+        run: |
+          rm -rf -- "${VITO_CI_TEMP:-}" "${VITO_CI_CACHE:-}"
