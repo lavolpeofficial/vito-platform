@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { EngineeringStepType } from '@vito/contracts';
 import { WorkflowExecutionPlanService } from '../agent-workforce/workflow-execution-plan.service';
+import { MemoryService, type MemoryEntry } from '../memory/memory.service';
 import { KnowledgeHarvesterService } from '../source-vault/knowledge-harvester.service';
 
 const PRIMARY_ENGINEERING_PATH: readonly EngineeringStepType[] = Object.freeze([
@@ -15,12 +16,15 @@ const PRIMARY_ENGINEERING_PATH: readonly EngineeringStepType[] = Object.freeze([
   EngineeringStepType.RELEASE_EXECUTION,
   EngineeringStepType.REMOTE_VERIFY,
 ]);
+const MAX_MEMORY_EVIDENCE_ITEMS = 5;
+const MAX_MEMORY_EVIDENCE_CONTENT_CHARS = 2_000;
 
 @Injectable()
 export class GoalPlannerService {
   constructor(
     private readonly executionPlan: WorkflowExecutionPlanService,
     private readonly knowledge: KnowledgeHarvesterService,
+    @Optional() private readonly memory?: MemoryService,
   ) {}
 
   async planEngineeringGoal(
@@ -34,6 +38,7 @@ export class GoalPlannerService {
     }
 
     const knowledgeEvidence = await this.knowledge.search(organizationId, normalizedGoal, 5).catch(() => []);
+    const memoryEvidence = await this.retrievePlanningMemory(organizationId, normalizedGoal);
     const steps = PRIMARY_ENGINEERING_PATH.map((stepType, index) => {
       const capabilityCode = this.executionPlan.capabilityForStep(stepType);
       return Object.freeze({
@@ -73,8 +78,40 @@ export class GoalPlannerService {
         content: item.content,
         rank: item.rank,
       }))),
+      memoryEvidence,
       executable: false,
       nextAction: 'CREATE_GOVERNED_WORKFLOW_FROM_APPROVED_PLAN' as const,
+    });
+  }
+
+  private async retrievePlanningMemory(
+    organizationId: string,
+    goal: string,
+  ): Promise<readonly Readonly<Record<string, unknown>>[]> {
+    if (!this.memory) return [];
+    try {
+      const entries = await this.memory.search(
+        organizationId,
+        goal.slice(0, 512),
+        MAX_MEMORY_EVIDENCE_ITEMS,
+        [{ scope: 'GLOBAL' }, { scope: 'ORGANIZATION' }],
+      );
+      return Object.freeze(entries.slice(0, MAX_MEMORY_EVIDENCE_ITEMS).map((entry) => this.toPlanningEvidence(entry)));
+    } catch {
+      return [];
+    }
+  }
+
+  private toPlanningEvidence(entry: MemoryEntry): Readonly<Record<string, unknown>> {
+    return Object.freeze({
+      memoryEntryId: entry.id,
+      kind: entry.kind,
+      scope: entry.scope,
+      title: entry.title.slice(0, 256),
+      content: entry.content.slice(0, MAX_MEMORY_EVIDENCE_CONTENT_CHARS),
+      sourceType: entry.sourceType.slice(0, 256),
+      sourceRef: entry.sourceRef?.slice(0, 256) ?? null,
+      confidence: entry.confidence,
     });
   }
 }
