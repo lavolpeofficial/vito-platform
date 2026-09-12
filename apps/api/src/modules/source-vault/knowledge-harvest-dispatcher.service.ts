@@ -6,8 +6,9 @@ import { KnowledgeHarvesterService } from './knowledge-harvester.service';
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+const PDF_MIME = 'application/pdf';
 
-export type KnowledgeHarvesterKind = 'TEXT' | 'DOCX' | 'XLSX' | 'PPTX';
+export type KnowledgeHarvesterKind = 'TEXT' | 'DOCX' | 'XLSX' | 'PPTX' | 'PDF';
 
 export type HarvestDispatchSource = Readonly<{
   sourceType: SourceType;
@@ -27,6 +28,9 @@ export function resolveKnowledgeHarvester(source: HarvestDispatchSource): Knowle
   }
   if (source.sourceType === SourceType.PRESENTATION && mime === PPTX_MIME && filename.endsWith('.pptx')) {
     return 'PPTX';
+  }
+  if (source.sourceType === SourceType.DOCUMENT && mime === PDF_MIME && filename.endsWith('.pdf')) {
+    return 'PDF';
   }
   if (
     mime.startsWith('text/') ||
@@ -60,6 +64,7 @@ export class KnowledgeHarvestDispatcherService {
     if (selected === 'DOCX') return this.harvester.harvestDocxSource(organizationId, sourcePk);
     if (selected === 'XLSX') return this.harvester.harvestXlsxSource(organizationId, sourcePk);
     if (selected === 'PPTX') return this.harvester.harvestPptxSource(organizationId, sourcePk);
+    if (selected === 'PDF') return this.harvester.harvestPdfSource(organizationId, sourcePk);
     return this.harvester.harvestTextSource(organizationId, sourcePk);
   }
 }

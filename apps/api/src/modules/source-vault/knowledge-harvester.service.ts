@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { extractDocxText, type DocxParagraph } from './extraction/docx-extractor';
+import { extractPdfKnowledgePages, type PdfKnowledgePage } from './extraction/pdf-knowledge-extractor';
 import { extractPptxKnowledgeSlides, type PptxKnowledgeSlide } from './extraction/pptx-knowledge-extractor';
 import { extractXlsxKnowledgeRows, type XlsxKnowledgeRow } from './extraction/xlsx-knowledge-extractor';
 import { sha256Hex } from './source-hash';
@@ -13,6 +14,7 @@ const MAX_SOURCE_BYTES = 1_048_576;
 const MAX_DOCX_SOURCE_BYTES = 8 * 1024 * 1024;
 const MAX_XLSX_SOURCE_BYTES = 16 * 1024 * 1024;
 const MAX_PPTX_SOURCE_BYTES = 16 * 1024 * 1024;
+const MAX_PDF_SOURCE_BYTES = 16 * 1024 * 1024;
 const MAX_TOTAL_CHARS = 524_288;
 const MAX_UNIT_CHARS = 3_000;
 const MAX_UNITS = 256;
@@ -20,8 +22,9 @@ const SEARCH_LIMIT_MAX = 20;
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+const PDF_MIME = 'application/pdf';
 
-type KnowledgeLocatorType = 'SECTION' | 'CELL_RANGE' | 'SLIDE';
+type KnowledgeLocatorType = 'SECTION' | 'CELL_RANGE' | 'SLIDE' | 'PAGE';
 
 export type HarvestedTextUnit = Readonly<{
   content: string;
@@ -49,12 +52,9 @@ export function segmentHarvestText(input: string): readonly HarvestedTextUnit[] 
   if (normalized.length > MAX_TOTAL_CHARS) {
     throw new PayloadTooLargeException(`Harvest text exceeds ${MAX_TOTAL_CHARS} characters.`);
   }
-
   const units: HarvestedTextUnit[] = [];
   const blocks = normalized.split(/\n{2,}/).map((value) => value.trim()).filter(Boolean);
-  for (const block of blocks) {
-    appendBoundedUnitChunks(units, block, 'SECTION', `section:${units.length + 1}`);
-  }
+  for (const block of blocks) appendBoundedUnitChunks(units, block, 'SECTION', `section:${units.length + 1}`);
   return Object.freeze(units);
 }
 
@@ -63,9 +63,7 @@ export function segmentDocxParagraphs(paragraphs: readonly DocxParagraph[]): rea
   let totalChars = 0;
   for (const paragraph of paragraphs) {
     totalChars += paragraph.text.length;
-    if (totalChars > MAX_TOTAL_CHARS) {
-      throw new PayloadTooLargeException(`Harvest text exceeds ${MAX_TOTAL_CHARS} characters.`);
-    }
+    if (totalChars > MAX_TOTAL_CHARS) throw new PayloadTooLargeException(`Harvest text exceeds ${MAX_TOTAL_CHARS} characters.`);
     appendBoundedUnitChunks(units, paragraph.text, 'SECTION', paragraph.locatorValue);
   }
   return Object.freeze(units);
@@ -76,9 +74,7 @@ export function segmentXlsxRows(rows: readonly XlsxKnowledgeRow[]): readonly Har
   let totalChars = 0;
   for (const row of rows) {
     totalChars += row.text.length;
-    if (totalChars > MAX_TOTAL_CHARS) {
-      throw new PayloadTooLargeException(`Harvest text exceeds ${MAX_TOTAL_CHARS} characters.`);
-    }
+    if (totalChars > MAX_TOTAL_CHARS) throw new PayloadTooLargeException(`Harvest text exceeds ${MAX_TOTAL_CHARS} characters.`);
     appendBoundedUnitChunks(units, row.text, 'CELL_RANGE', row.cellRange);
   }
   return Object.freeze(units);
@@ -89,29 +85,31 @@ export function segmentPptxSlides(slides: readonly PptxKnowledgeSlide[]): readon
   let totalChars = 0;
   for (const slide of slides) {
     totalChars += slide.text.length;
-    if (totalChars > MAX_TOTAL_CHARS) {
-      throw new PayloadTooLargeException(`Harvest text exceeds ${MAX_TOTAL_CHARS} characters.`);
-    }
+    if (totalChars > MAX_TOTAL_CHARS) throw new PayloadTooLargeException(`Harvest text exceeds ${MAX_TOTAL_CHARS} characters.`);
     appendBoundedUnitChunks(units, slide.text, 'SLIDE', slide.locatorValue);
   }
   return Object.freeze(units);
 }
 
-function appendBoundedUnitChunks(
-  units: HarvestedTextUnit[],
-  input: string,
-  locatorType: KnowledgeLocatorType,
-  locator: string,
-): void {
+export function segmentPdfPages(pages: readonly PdfKnowledgePage[]): readonly HarvestedTextUnit[] {
+  const units: HarvestedTextUnit[] = [];
+  let totalChars = 0;
+  for (const page of pages) {
+    totalChars += page.text.length;
+    if (totalChars > MAX_TOTAL_CHARS) throw new PayloadTooLargeException(`Harvest text exceeds ${MAX_TOTAL_CHARS} characters.`);
+    appendBoundedUnitChunks(units, page.text, 'PAGE', page.locatorValue);
+  }
+  return Object.freeze(units);
+}
+
+function appendBoundedUnitChunks(units: HarvestedTextUnit[], input: string, locatorType: KnowledgeLocatorType, locator: string): void {
   const value = input.trim();
   if (!value) return;
   let part = 0;
   for (let offset = 0; offset < value.length; offset += MAX_UNIT_CHARS) {
     const content = value.slice(offset, offset + MAX_UNIT_CHARS).trim();
     if (!content) continue;
-    if (units.length >= MAX_UNITS) {
-      throw new PayloadTooLargeException(`Harvest exceeds ${MAX_UNITS} knowledge units.`);
-    }
+    if (units.length >= MAX_UNITS) throw new PayloadTooLargeException(`Harvest exceeds ${MAX_UNITS} knowledge units.`);
     part += 1;
     units.push(Object.freeze({
       content,
@@ -136,117 +134,74 @@ export class KnowledgeHarvesterService {
       select: { id: true, sourceId: true, mimeType: true, storageUri: true, sha256: true, metadata: true },
     });
     if (!source) throw new NotFoundException('Source not found.');
-    if (!this.isSupportedTextMime(source.mimeType)) {
-      throw new BadRequestException(`Knowledge Harvester v1 does not support MIME type ${source.mimeType}.`);
-    }
-
+    if (!this.isSupportedTextMime(source.mimeType)) throw new BadRequestException(`Knowledge Harvester v1 does not support MIME type ${source.mimeType}.`);
     const buffer = await this.objectStorage.get(source.storageUri);
-    if (buffer.byteLength > MAX_SOURCE_BYTES) {
-      throw new PayloadTooLargeException(`Source exceeds ${MAX_SOURCE_BYTES} bytes for Knowledge Harvester v1.`);
-    }
+    if (buffer.byteLength > MAX_SOURCE_BYTES) throw new PayloadTooLargeException(`Source exceeds ${MAX_SOURCE_BYTES} bytes for Knowledge Harvester v1.`);
     this.assertSourceHash(buffer, source.sha256, 'harvest');
     const units = segmentHarvestText(this.decodeText(buffer, source.mimeType));
     if (units.length === 0) throw new BadRequestException('Source contains no harvestable text.');
-
-    const unitCount = await this.persistUnits({
-      organizationId, source, units, harvester: 'vito-knowledge-harvester', version: '1', sourceFormat: 'TEXT',
-    });
+    const unitCount = await this.persistUnits({ organizationId, source, units, harvester: 'vito-knowledge-harvester', version: '1', sourceFormat: 'TEXT' });
     return Object.freeze({ sourceId: source.sourceId, knowledgeUnits: unitCount, unitType: 'TEXT_FRAGMENT' as const, semanticEnrichment: false });
   }
 
   async harvestDocxSource(organizationId: string, sourcePk: string) {
-    const source = await this.prisma.source.findFirst({
-      where: { id: sourcePk, organizationId },
-      select: { id: true, sourceId: true, sourceType: true, originalFilename: true, mimeType: true, storageUri: true, sha256: true, metadata: true },
-    });
+    const source = await this.prisma.source.findFirst({ where: { id: sourcePk, organizationId }, select: { id: true, sourceId: true, sourceType: true, originalFilename: true, mimeType: true, storageUri: true, sha256: true, metadata: true } });
     if (!source) throw new NotFoundException('Source not found.');
     const mime = this.normalizedMime(source.mimeType);
-    if (source.sourceType !== 'DOCUMENT' || mime !== DOCX_MIME || !source.originalFilename.toLowerCase().endsWith('.docx')) {
-      throw new BadRequestException('DOCX harvester accepts only DOCUMENT sources registered as .docx OpenXML documents.');
-    }
-
+    if (source.sourceType !== 'DOCUMENT' || mime !== DOCX_MIME || !source.originalFilename.toLowerCase().endsWith('.docx')) throw new BadRequestException('DOCX harvester accepts only DOCUMENT sources registered as .docx OpenXML documents.');
     const buffer = await this.objectStorage.get(source.storageUri);
     if (buffer.byteLength > MAX_DOCX_SOURCE_BYTES) throw new PayloadTooLargeException(`DOCX source exceeds ${MAX_DOCX_SOURCE_BYTES} bytes.`);
     this.assertSourceHash(buffer, source.sha256, 'DOCX harvest');
     const extraction = extractDocxText(buffer);
     const units = segmentDocxParagraphs(extraction.paragraphs);
     if (units.length === 0) throw new BadRequestException('DOCX contains no harvestable text.');
-
-    const unitCount = await this.persistUnits({
-      organizationId, source, units, harvester: 'vito-docx-knowledge-harvester', version: '1', sourceFormat: 'DOCX',
-      extractionMetadata: {
-        adapter: extraction.adapter, adapterVersion: extraction.adapterVersion, includedParts: extraction.includedParts,
-        paragraphs: extraction.totals.paragraphs, characters: extraction.totals.characters,
-      },
-    });
-    return Object.freeze({
-      sourceId: source.sourceId, knowledgeUnits: unitCount, unitType: 'TEXT_FRAGMENT' as const,
-      sourceFormat: 'DOCX' as const, paragraphsExtracted: extraction.totals.paragraphs, semanticEnrichment: false,
-    });
+    const unitCount = await this.persistUnits({ organizationId, source, units, harvester: 'vito-docx-knowledge-harvester', version: '1', sourceFormat: 'DOCX', extractionMetadata: { adapter: extraction.adapter, adapterVersion: extraction.adapterVersion, includedParts: extraction.includedParts, paragraphs: extraction.totals.paragraphs, characters: extraction.totals.characters } });
+    return Object.freeze({ sourceId: source.sourceId, knowledgeUnits: unitCount, unitType: 'TEXT_FRAGMENT' as const, sourceFormat: 'DOCX' as const, paragraphsExtracted: extraction.totals.paragraphs, semanticEnrichment: false });
   }
 
   async harvestXlsxSource(organizationId: string, sourcePk: string) {
-    const source = await this.prisma.source.findFirst({
-      where: { id: sourcePk, organizationId },
-      select: { id: true, sourceId: true, sourceType: true, originalFilename: true, mimeType: true, storageUri: true, sha256: true, metadata: true },
-    });
+    const source = await this.prisma.source.findFirst({ where: { id: sourcePk, organizationId }, select: { id: true, sourceId: true, sourceType: true, originalFilename: true, mimeType: true, storageUri: true, sha256: true, metadata: true } });
     if (!source) throw new NotFoundException('Source not found.');
     const mime = this.normalizedMime(source.mimeType);
-    if (source.sourceType !== 'SPREADSHEET' || mime !== XLSX_MIME || !source.originalFilename.toLowerCase().endsWith('.xlsx')) {
-      throw new BadRequestException('XLSX harvester accepts only SPREADSHEET sources registered as .xlsx OpenXML workbooks.');
-    }
-
+    if (source.sourceType !== 'SPREADSHEET' || mime !== XLSX_MIME || !source.originalFilename.toLowerCase().endsWith('.xlsx')) throw new BadRequestException('XLSX harvester accepts only SPREADSHEET sources registered as .xlsx OpenXML workbooks.');
     const buffer = await this.objectStorage.get(source.storageUri);
     if (buffer.byteLength > MAX_XLSX_SOURCE_BYTES) throw new PayloadTooLargeException(`XLSX source exceeds ${MAX_XLSX_SOURCE_BYTES} bytes.`);
     this.assertSourceHash(buffer, source.sha256, 'XLSX harvest');
     const extraction = extractXlsxKnowledgeRows(buffer);
     const units = segmentXlsxRows(extraction.rows);
     if (units.length === 0) throw new BadRequestException('XLSX contains no harvestable cell values.');
-
-    const unitCount = await this.persistUnits({
-      organizationId, source, units, harvester: 'vito-xlsx-knowledge-harvester', version: '1', sourceFormat: 'XLSX',
-      extractionMetadata: {
-        adapter: extraction.adapter, adapterVersion: extraction.adapterVersion, sheets: extraction.totals.sheets,
-        rows: extraction.totals.rows, cells: extraction.totals.cells, characters: extraction.totals.characters,
-        formulaEvaluation: 'NOT_PERFORMED',
-      },
-    });
-    return Object.freeze({
-      sourceId: source.sourceId, knowledgeUnits: unitCount, unitType: 'TEXT_FRAGMENT' as const,
-      sourceFormat: 'XLSX' as const, rowsExtracted: extraction.totals.rows, cellsExtracted: extraction.totals.cells,
-      formulaEvaluation: false, semanticEnrichment: false,
-    });
+    const unitCount = await this.persistUnits({ organizationId, source, units, harvester: 'vito-xlsx-knowledge-harvester', version: '1', sourceFormat: 'XLSX', extractionMetadata: { adapter: extraction.adapter, adapterVersion: extraction.adapterVersion, sheets: extraction.totals.sheets, rows: extraction.totals.rows, cells: extraction.totals.cells, characters: extraction.totals.characters, formulaEvaluation: 'NOT_PERFORMED' } });
+    return Object.freeze({ sourceId: source.sourceId, knowledgeUnits: unitCount, unitType: 'TEXT_FRAGMENT' as const, sourceFormat: 'XLSX' as const, rowsExtracted: extraction.totals.rows, cellsExtracted: extraction.totals.cells, formulaEvaluation: false, semanticEnrichment: false });
   }
 
   async harvestPptxSource(organizationId: string, sourcePk: string) {
-    const source = await this.prisma.source.findFirst({
-      where: { id: sourcePk, organizationId },
-      select: { id: true, sourceId: true, sourceType: true, originalFilename: true, mimeType: true, storageUri: true, sha256: true, metadata: true },
-    });
+    const source = await this.prisma.source.findFirst({ where: { id: sourcePk, organizationId }, select: { id: true, sourceId: true, sourceType: true, originalFilename: true, mimeType: true, storageUri: true, sha256: true, metadata: true } });
     if (!source) throw new NotFoundException('Source not found.');
     const mime = this.normalizedMime(source.mimeType);
-    if (source.sourceType !== 'PRESENTATION' || mime !== PPTX_MIME || !source.originalFilename.toLowerCase().endsWith('.pptx')) {
-      throw new BadRequestException('PPTX harvester accepts only PRESENTATION sources registered as .pptx OpenXML presentations.');
-    }
-
+    if (source.sourceType !== 'PRESENTATION' || mime !== PPTX_MIME || !source.originalFilename.toLowerCase().endsWith('.pptx')) throw new BadRequestException('PPTX harvester accepts only PRESENTATION sources registered as .pptx OpenXML presentations.');
     const buffer = await this.objectStorage.get(source.storageUri);
     if (buffer.byteLength > MAX_PPTX_SOURCE_BYTES) throw new PayloadTooLargeException(`PPTX source exceeds ${MAX_PPTX_SOURCE_BYTES} bytes.`);
     this.assertSourceHash(buffer, source.sha256, 'PPTX harvest');
     const extraction = extractPptxKnowledgeSlides(buffer);
     const units = segmentPptxSlides(extraction.slides);
     if (units.length === 0) throw new BadRequestException('PPTX contains no harvestable slide text.');
+    const unitCount = await this.persistUnits({ organizationId, source, units, harvester: 'vito-pptx-knowledge-harvester', version: '1', sourceFormat: 'PPTX', extractionMetadata: { adapter: extraction.adapter, adapterVersion: extraction.adapterVersion, slides: extraction.totals.slides, characters: extraction.totals.characters } });
+    return Object.freeze({ sourceId: source.sourceId, knowledgeUnits: unitCount, unitType: 'TEXT_FRAGMENT' as const, sourceFormat: 'PPTX' as const, slidesExtracted: extraction.totals.slides, semanticEnrichment: false });
+  }
 
-    const unitCount = await this.persistUnits({
-      organizationId, source, units, harvester: 'vito-pptx-knowledge-harvester', version: '1', sourceFormat: 'PPTX',
-      extractionMetadata: {
-        adapter: extraction.adapter, adapterVersion: extraction.adapterVersion,
-        slides: extraction.totals.slides, characters: extraction.totals.characters,
-      },
-    });
-    return Object.freeze({
-      sourceId: source.sourceId, knowledgeUnits: unitCount, unitType: 'TEXT_FRAGMENT' as const,
-      sourceFormat: 'PPTX' as const, slidesExtracted: extraction.totals.slides, semanticEnrichment: false,
-    });
+  async harvestPdfSource(organizationId: string, sourcePk: string) {
+    const source = await this.prisma.source.findFirst({ where: { id: sourcePk, organizationId }, select: { id: true, sourceId: true, sourceType: true, originalFilename: true, mimeType: true, storageUri: true, sha256: true, metadata: true } });
+    if (!source) throw new NotFoundException('Source not found.');
+    const mime = this.normalizedMime(source.mimeType);
+    if (source.sourceType !== 'DOCUMENT' || mime !== PDF_MIME || !source.originalFilename.toLowerCase().endsWith('.pdf')) throw new BadRequestException('PDF harvester accepts only DOCUMENT sources registered as .pdf documents.');
+    const buffer = await this.objectStorage.get(source.storageUri);
+    if (buffer.byteLength > MAX_PDF_SOURCE_BYTES) throw new PayloadTooLargeException(`PDF source exceeds ${MAX_PDF_SOURCE_BYTES} bytes.`);
+    this.assertSourceHash(buffer, source.sha256, 'PDF harvest');
+    const extraction = await extractPdfKnowledgePages(buffer);
+    const units = segmentPdfPages(extraction.pages);
+    if (units.length === 0) throw new BadRequestException('PDF contains no harvestable text. OCR is not performed.');
+    const unitCount = await this.persistUnits({ organizationId, source, units, harvester: 'vito-pdf-knowledge-harvester', version: '1', sourceFormat: 'PDF', extractionMetadata: { adapter: extraction.adapter, adapterVersion: extraction.adapterVersion, pages: extraction.totals.pages, characters: extraction.totals.characters, ocr: 'NOT_PERFORMED' } });
+    return Object.freeze({ sourceId: source.sourceId, knowledgeUnits: unitCount, unitType: 'TEXT_FRAGMENT' as const, sourceFormat: 'PDF' as const, pagesExtracted: extraction.totals.pages, ocr: false, semanticEnrichment: false });
   }
 
   async search(organizationId: string, query: string, requestedLimit?: number) {
@@ -271,7 +226,7 @@ export class KnowledgeHarvesterService {
     units: readonly HarvestedTextUnit[];
     harvester: string;
     version: string;
-    sourceFormat: 'TEXT' | 'DOCX' | 'XLSX' | 'PPTX';
+    sourceFormat: 'TEXT' | 'DOCX' | 'XLSX' | 'PPTX' | 'PDF';
     extractionMetadata?: Record<string, unknown>;
   }): Promise<number> {
     return this.prisma.$transaction(async (tx) => {
@@ -289,29 +244,15 @@ export class KnowledgeHarvesterService {
             "locatorType" = EXCLUDED."locatorType", "locatorValue" = EXCLUDED."locatorValue", "metadata" = EXCLUDED."metadata"
         `);
       }
-
       const rows = await tx.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
         SELECT COUNT(*)::bigint AS count FROM "knowledge_units"
         WHERE "organizationId" = ${input.organizationId} AND "sourceId" = ${input.source.id}
       `);
       const unitCount = Number(rows[0]?.count ?? 0n);
-      const previousMetadata = input.source.metadata && typeof input.source.metadata === 'object' && !Array.isArray(input.source.metadata)
-        ? input.source.metadata as Record<string, unknown> : {};
-      const metadata = JSON.parse(JSON.stringify({
-        ...previousMetadata,
-        harvest: {
-          harvester: input.harvester, version: input.version, sourceFormat: input.sourceFormat,
-          unitType: 'TEXT_FRAGMENT', unitCount, semanticEnrichment: 'NOT_PERFORMED',
-          ...(input.extractionMetadata ? { extraction: input.extractionMetadata } : {}),
-        },
-      })) as Prisma.InputJsonValue;
-
+      const previousMetadata = input.source.metadata && typeof input.source.metadata === 'object' && !Array.isArray(input.source.metadata) ? input.source.metadata as Record<string, unknown> : {};
+      const metadata = JSON.parse(JSON.stringify({ ...previousMetadata, harvest: { harvester: input.harvester, version: input.version, sourceFormat: input.sourceFormat, unitType: 'TEXT_FRAGMENT', unitCount, semanticEnrichment: 'NOT_PERFORMED', ...(input.extractionMetadata ? { extraction: input.extractionMetadata } : {}) } })) as Prisma.InputJsonValue;
       await tx.source.update({ where: { id: input.source.id }, data: { metadata } });
-      await this.auditService.record({
-        organizationId: input.organizationId, actorType: 'SYSTEM', action: 'SOURCE_KNOWLEDGE_HARVESTED',
-        entityType: 'Source', entityId: input.source.id,
-        metadata: { sourceId: input.source.sourceId, sourceFormat: input.sourceFormat, unitCount, unitType: 'TEXT_FRAGMENT', semanticEnrichment: false },
-      }, tx);
+      await this.auditService.record({ organizationId: input.organizationId, actorType: 'SYSTEM', action: 'SOURCE_KNOWLEDGE_HARVESTED', entityType: 'Source', entityId: input.source.id, metadata: { sourceId: input.source.sourceId, sourceFormat: input.sourceFormat, unitCount, unitType: 'TEXT_FRAGMENT', semanticEnrichment: false } }, tx);
       return unitCount;
     });
   }
@@ -319,16 +260,13 @@ export class KnowledgeHarvesterService {
   private assertSourceHash(buffer: Buffer, expectedHash: string, operation: string): void {
     if (sha256Hex(buffer) !== expectedHash) throw new BadRequestException(`Source integrity verification failed before ${operation}.`);
   }
-
   private normalizedMime(mimeType: string): string {
     return mimeType.toLowerCase().split(';', 1)[0].trim();
   }
-
   private isSupportedTextMime(mimeType: string): boolean {
     const normalized = this.normalizedMime(mimeType);
     return normalized.startsWith('text/') || ['application/json', 'application/ld+json', 'application/xml'].includes(normalized);
   }
-
   private decodeText(buffer: Buffer, mimeType: string): string {
     const normalized = this.normalizedMime(mimeType);
     const raw = buffer.toString('utf8');
