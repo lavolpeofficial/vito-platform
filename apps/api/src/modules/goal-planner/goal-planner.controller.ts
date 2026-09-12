@@ -25,4 +25,15 @@ export class GoalPlannerController {
       dto.assuranceLevel ?? 'AL3',
     );
   }
+
+  @Post('engineering/workflows')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @ApiOkResponse({ description: 'Materializes an explicitly requested governed engineering plan into a CREATED workflow and task without starting execution.' })
+  materializeEngineeringWorkflow(@Body() dto: CreateGoalPlanDto) {
+    return this.service.materializeEngineeringWorkflow(
+      this.tenantContext.getOrThrow(),
+      dto.goal,
+      dto.assuranceLevel ?? 'AL3',
+    );
+  }
 }
