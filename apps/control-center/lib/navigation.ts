@@ -1,8 +1,8 @@
 export type NavigationItem = Readonly<{
-  href: '/operations' | '/source-vault' | '/planning' | '/workflows' | '/workforce' | '/governance';
+  href: '/operations' | '/source-vault' | '/planning' | '/workflows' | '/workforce' | '/governance' | '/audit';
   label: string;
   description: string;
-  icon: 'pulse' | 'vault' | 'planning' | 'workflow' | 'agents' | 'governance';
+  icon: 'pulse' | 'vault' | 'planning' | 'workflow' | 'agents' | 'governance' | 'audit';
 }>;
 
 export const navigationItems: readonly NavigationItem[] = [
@@ -12,6 +12,7 @@ export const navigationItems: readonly NavigationItem[] = [
   { href: '/workflows', label: 'Workflows', description: 'Abläufe, Freigaben und Ausführung', icon: 'workflow' },
   { href: '/workforce', label: 'Agents & Capabilities', description: 'Digitale Mitarbeiter und Befugnisse', icon: 'agents' },
   { href: '/governance', label: 'Governance & Reviews', description: 'Menschliche Freigaben und Review-Grenzen', icon: 'governance' },
+  { href: '/audit', label: 'Audit & Activity', description: 'Unveränderbare operative Evidenz', icon: 'audit' },
 ] as const;
 
 export function isNavigationItemActive(pathname: string, href: NavigationItem['href']): boolean {
