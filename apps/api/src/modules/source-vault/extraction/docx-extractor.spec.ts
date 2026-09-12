@@ -71,7 +71,7 @@ describe('extractDocxText', () => {
         { index: 1, locatorValue: 'paragraph:1', text: 'First & governed\tparagraph' },
         { index: 2, locatorValue: 'paragraph:2', text: 'Second\nline' },
       ],
-      totals: { paragraphs: 2, characters: 39 },
+      totals: { paragraphs: 2, characters: 37 },
     });
   });
 
