@@ -6,7 +6,7 @@ import {
 } from './knowledge-harvest-dispatcher.service';
 
 describe('resolveKnowledgeHarvester', () => {
-  it('routes governed DOCX, XLSX and text formats deterministically', () => {
+  it('routes governed DOCX, XLSX, PPTX and text formats deterministically', () => {
     expect(resolveKnowledgeHarvester({
       sourceType: SourceType.DOCUMENT,
       originalFilename: 'policy.docx',
@@ -18,6 +18,12 @@ describe('resolveKnowledgeHarvester', () => {
       originalFilename: 'metrics.xlsx',
       mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     })).toBe('XLSX');
+
+    expect(resolveKnowledgeHarvester({
+      sourceType: SourceType.PRESENTATION,
+      originalFilename: 'briefing.pptx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    })).toBe('PPTX');
 
     expect(resolveKnowledgeHarvester({
       sourceType: SourceType.DOCUMENT,
@@ -38,26 +44,28 @@ describe('resolveKnowledgeHarvester', () => {
 describe('KnowledgeHarvestDispatcherService', () => {
   it('uses tenant-scoped source metadata and delegates to the selected harvester', async () => {
     const findFirst = jest.fn().mockResolvedValue({
-      sourceType: SourceType.SPREADSHEET,
-      originalFilename: 'metrics.xlsx',
-      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      sourceType: SourceType.PRESENTATION,
+      originalFilename: 'briefing.pptx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     });
     const harvester = {
       harvestTextSource: jest.fn(),
       harvestDocxSource: jest.fn(),
-      harvestXlsxSource: jest.fn().mockResolvedValue({ sourceFormat: 'XLSX' }),
+      harvestXlsxSource: jest.fn(),
+      harvestPptxSource: jest.fn().mockResolvedValue({ sourceFormat: 'PPTX' }),
     };
     const service = new KnowledgeHarvestDispatcherService(
       { source: { findFirst } } as any,
       harvester as any,
     );
 
-    await expect(service.harvestSource('org-1', 'source-1')).resolves.toEqual({ sourceFormat: 'XLSX' });
+    await expect(service.harvestSource('org-1', 'source-1')).resolves.toEqual({ sourceFormat: 'PPTX' });
     expect(findFirst).toHaveBeenCalledWith({
       where: { id: 'source-1', organizationId: 'org-1' },
       select: { sourceType: true, originalFilename: true, mimeType: true },
     });
-    expect(harvester.harvestXlsxSource).toHaveBeenCalledWith('org-1', 'source-1');
+    expect(harvester.harvestPptxSource).toHaveBeenCalledWith('org-1', 'source-1');
+    expect(harvester.harvestXlsxSource).not.toHaveBeenCalled();
     expect(harvester.harvestDocxSource).not.toHaveBeenCalled();
     expect(harvester.harvestTextSource).not.toHaveBeenCalled();
   });
