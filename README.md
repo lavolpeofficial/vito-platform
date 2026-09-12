@@ -52,6 +52,9 @@ pnpm --filter @vito/control-center dev
 ```
 
 Das Control Center läuft lokal unter `http://localhost:3001`.
+Die serverseitige API-Verbindung wird über `VITO_API_BASE_URL` konfiguriert;
+in lokaler Entwicklung ist der Default `http://127.0.0.1:3000`. Das Backend-JWT
+wird ausschließlich in einem `HttpOnly`-/`SameSite=Strict`-Cookie gehalten.
 
 ## Installation
 
