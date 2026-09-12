@@ -56,6 +56,14 @@ export class KnowledgeHarvesterController {
     return this.service.harvestPptxSource(this.tenantContext.getOrThrow(), sourceId);
   }
 
+  @Post('sources/:sourceId/harvest-pdf')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: 'Harvests bounded PDF text-layer content with page provenance; OCR is not performed.' })
+  harvestPdf(@Param('sourceId') sourceId: string) {
+    return this.service.harvestPdfSource(this.tenantContext.getOrThrow(), sourceId);
+  }
+
   @Get('search')
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER, UserRole.VIEWER)
   @ApiOkResponse({ description: 'Tenant-scoped PostgreSQL full-text retrieval over harvested knowledge.' })
