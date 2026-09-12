@@ -162,7 +162,7 @@ export class AgentWorkforceService {
           confidence: item.confidence,
           createdAt: item.createdAt.toISOString(),
         })),
-        memoryContext,
+        ...(memoryContext.length > 0 ? { memoryContext } : {}),
       },
       correlationId,
       workflowRunId: input.workflowRunId,
