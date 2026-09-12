@@ -17,7 +17,6 @@ describe('WorkflowObserverService', () => {
       stepRuns: [{ id: 'step-1', stepType: 'TEST', status: 'READY', attemptNumber: 1, causationId: null, startedAt, finishedAt: null }],
     });
     auditEvent.findMany.mockResolvedValue([{ id: 'event-1', actorType: 'SYSTEM', actorId: null, action: 'WORKFLOW_STEP_ACTIVATED', entityType: 'WorkflowStepRun', entityId: 'step-1', metadata: {}, createdAt: startedAt }]);
-
     const result = await service.observe('org-1', 'run-1');
     expect(workflowRun.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'run-1', organizationId: 'org-1' } }));
     expect(auditEvent.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { organizationId: 'org-1', entityId: { in: ['run-1', 'step-1'] } }, take: 200 }));
@@ -34,6 +33,18 @@ describe('WorkflowObserverService', () => {
     const result = await service.observe('org-1', 'run-gate');
     expect(result.boundary).toBe('ACTIVE');
     expect(result.nextAction).toBe('APPROVE_HUMAN_RELEASE');
+  });
+
+  it('fails closed at RELEASE_EXECUTION because no agent capability owns that step', async () => {
+    workflowRun.findFirst.mockResolvedValue({
+      id: 'run-release', organizationId: 'org-1', correlationId: 'corr-release', status: 'RUNNING', currentStepType: 'RELEASE_EXECUTION',
+      blockReasonCode: null, failureReasonCode: null, correctionLoopCount: 0, maxCorrectionLoops: 3, startedAt: new Date(), completedAt: null,
+      stepRuns: [{ id: 'step-release', stepType: 'RELEASE_EXECUTION', status: 'READY', attemptNumber: 1, causationId: null, startedAt: new Date(), finishedAt: null }],
+    });
+    auditEvent.findMany.mockResolvedValue([]);
+    const result = await service.observe('org-1', 'run-release');
+    expect(result.boundary).toBe('ACTIVE');
+    expect(result.nextAction).toBe('HUMAN_REVIEW_REQUIRED');
   });
 
   it('classifies provider blocks as an explicit resume boundary without mutating the run', async () => {
