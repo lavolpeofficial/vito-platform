@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { TenantContext } from '../../common/tenant/tenant-context';
+import { KnowledgeHarvestDispatcherService } from './knowledge-harvest-dispatcher.service';
 import { KnowledgeHarvesterService } from './knowledge-harvester.service';
 
 @ApiTags('knowledge-harvester')
@@ -11,8 +12,17 @@ import { KnowledgeHarvesterService } from './knowledge-harvester.service';
 export class KnowledgeHarvesterController {
   constructor(
     private readonly service: KnowledgeHarvesterService,
+    private readonly dispatcher: KnowledgeHarvestDispatcherService,
     private readonly tenantContext: TenantContext,
   ) {}
+
+  @Post('sources/:sourceId/harvest')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: 'Selects the governed harvester from persisted source metadata and ingests supported knowledge.' })
+  harvest(@Param('sourceId') sourceId: string) {
+    return this.dispatcher.harvestSource(this.tenantContext.getOrThrow(), sourceId);
+  }
 
   @Post('sources/:sourceId/harvest-text')
   @Roles(UserRole.OWNER, UserRole.ADMIN)
