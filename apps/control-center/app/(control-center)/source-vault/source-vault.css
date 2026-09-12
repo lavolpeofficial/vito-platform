@@ -1,0 +1,53 @@
+.vault-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 28px; }
+.vault-panel { border: 1px solid var(--line); background: var(--surface); padding: 24px; }
+.vault-panel h2 { margin: 10px 0 8px; }
+.vault-muted, .vault-empty-copy { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.vault-form { display: grid; gap: 14px; margin-top: 22px; }
+.vault-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.vault-form label { display: grid; gap: 7px; color: #c2ccc7; font-size: 10px; font-weight: 700; letter-spacing: .04em; }
+.vault-form input, .vault-search-form input { min-width: 0; border: 1px solid var(--line-strong); background: #0b100e; padding: 12px 13px; color: var(--text); font: inherit; font-size: 12px; }
+.vault-form input:focus, .vault-search-form input:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.vault-form input[type="file"] { padding: 10px; color: var(--muted); }
+.vault-search-form { display: grid; grid-template-columns: 1fr auto; margin: 22px 0 16px; }
+.vault-search-form button, .vault-secondary-button { border: 1px solid var(--line-strong); background: transparent; padding: 0 14px; color: var(--text); cursor: pointer; font-size: 10px; font-weight: 700; }
+.vault-search-form button:hover, .vault-secondary-button:hover { border-color: var(--accent); color: var(--accent); }
+.vault-banner { margin-top: 20px; border-left: 2px solid var(--line-strong); padding: 11px 14px; background: var(--surface); font-size: 12px; }
+.vault-banner-success { border-left-color: var(--accent); }
+.vault-banner-error { border-left-color: #ff756d; color: #ffaaa5; }
+.vault-sources { margin-top: 34px; }
+.vault-section-head { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.vault-section-head h2 { margin: 8px 0 0; }
+.vault-source-list { display: grid; gap: 8px; }
+.vault-source-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr) auto; gap: 20px; align-items: center; border: 1px solid var(--line); background: var(--surface); padding: 16px 18px; }
+.vault-source-title { display: flex; gap: 12px; align-items: baseline; min-width: 0; }
+.vault-source-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.vault-source-title span { flex: 0 0 auto; color: #66736e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
+.vault-source-meta { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 7px; color: var(--muted); font-size: 9px; }
+.vault-statuses { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.vault-status { border-left: 1px solid var(--line-strong); padding-left: 8px; }
+.vault-status small, .vault-status strong { display: block; }
+.vault-status small { color: #65736d; font-size: 8px; text-transform: uppercase; }
+.vault-status strong { margin-top: 3px; font-size: 9px; }
+.vault-source-actions { display: grid; justify-items: end; gap: 8px; }
+.vault-source-actions > span { color: #65736d; font-size: 9px; }
+.vault-secondary-button { min-height: 30px; }
+.vault-hit-list { display: grid; gap: 8px; max-height: 390px; overflow: auto; padding-right: 3px; }
+.vault-hit { border: 1px solid var(--line); background: #0b100e; padding: 13px 14px; }
+.vault-hit-meta { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 9px; }
+.vault-hit-meta strong { color: var(--accent); }
+.vault-hit p { margin: 10px 0 8px; color: #ccd5d1; font-size: 11px; line-height: 1.55; }
+.vault-hit small { color: #65736d; font-size: 8px; }
+
+@media (max-width: 1080px) {
+  .vault-grid { grid-template-columns: 1fr; }
+  .vault-source-row { grid-template-columns: 1fr; align-items: start; }
+  .vault-source-actions { justify-items: start; grid-template-columns: 1fr auto; width: 100%; align-items: center; }
+}
+
+@media (max-width: 680px) {
+  .vault-form-row, .vault-statuses { grid-template-columns: 1fr; }
+  .vault-search-form { grid-template-columns: 1fr; gap: 8px; }
+  .vault-search-form button { min-height: 38px; }
+  .vault-source-title { display: grid; gap: 5px; }
+  .vault-source-title span { overflow-wrap: anywhere; }
+}

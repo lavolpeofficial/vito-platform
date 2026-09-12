@@ -14,6 +14,7 @@ type VitoApiClientOptions = Readonly<{
 type RequestOptions = Readonly<{
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   json?: unknown;
+  formData?: FormData;
 }>;
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -51,6 +52,10 @@ export class VitoApiClient {
     return this.request(path, { method: 'POST', json }, parser);
   }
 
+  postFormData<T>(path: VitoApiPath, formData: FormData, parser: ResponseParser<T>): Promise<T> {
+    return this.request(path, { method: 'POST', formData }, parser);
+  }
+
   patch<T>(path: VitoApiPath, json: unknown, parser: ResponseParser<T>): Promise<T> {
     return this.request(path, { method: 'PATCH', json }, parser);
   }
@@ -60,19 +65,21 @@ export class VitoApiClient {
   }
 
   private async request<T>(path: VitoApiPath, options: RequestOptions, parser: ResponseParser<T>): Promise<T> {
+    if (options.json !== undefined && options.formData !== undefined) throw invalidRequest('An API request cannot send JSON and multipart data together.');
     const url = resolveApiUrl(this.baseUrl, path);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     const headers = new Headers({ Accept: 'application/json' });
     if (this.accessToken) headers.set('Authorization', `Bearer ${this.accessToken}`);
     if (options.json !== undefined) headers.set('Content-Type', 'application/json');
+    const body = options.formData ?? (options.json === undefined ? undefined : JSON.stringify(options.json));
 
     let response: Response;
     try {
       response = await this.fetchImplementation(url, {
         method: options.method,
         headers,
-        body: options.json === undefined ? undefined : JSON.stringify(options.json),
+        body,
         cache: 'no-store',
         redirect: 'error',
         signal: controller.signal,
@@ -98,10 +105,10 @@ export class VitoApiClient {
 
     const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
     if (!contentType.includes('application/json')) throw invalidResponse('The VITO API returned a non-JSON response.');
-    const body = await readBoundedText(response);
+    const responseBody = await readBoundedText(response);
     let decoded: unknown;
     try {
-      decoded = JSON.parse(body) as unknown;
+      decoded = JSON.parse(responseBody) as unknown;
     } catch (error) {
       throw invalidResponse('The VITO API returned malformed JSON.', error);
     }
