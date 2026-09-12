@@ -22,6 +22,14 @@ export class KnowledgeHarvesterController {
     return this.service.harvestTextSource(this.tenantContext.getOrThrow(), sourceId);
   }
 
+  @Post('sources/:sourceId/harvest-docx')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: 'Harvests bounded DOCX main-document paragraphs with source provenance.' })
+  harvestDocx(@Param('sourceId') sourceId: string) {
+    return this.service.harvestDocxSource(this.tenantContext.getOrThrow(), sourceId);
+  }
+
   @Get('search')
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER, UserRole.VIEWER)
   @ApiOkResponse({ description: 'Tenant-scoped PostgreSQL full-text retrieval over harvested knowledge.' })
