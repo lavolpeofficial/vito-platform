@@ -1,8 +1,11 @@
-import { BadRequestException, Injectable, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Optional } from '@nestjs/common';
+import { TaskPriority, TaskStatus } from '@prisma/client';
 import { EngineeringStepType } from '@vito/contracts';
 import { WorkflowExecutionPlanService } from '../agent-workforce/workflow-execution-plan.service';
 import { MemoryService, type MemoryEntry } from '../memory/memory.service';
 import { KnowledgeHarvesterService } from '../source-vault/knowledge-harvester.service';
+import { TasksService } from '../tasks/tasks.service';
+import { WorkflowRuntimeService } from '../workflow-runtime/workflow-runtime.service';
 
 const PRIMARY_ENGINEERING_PATH: readonly EngineeringStepType[] = Object.freeze([
   EngineeringStepType.PLAN,
@@ -18,6 +21,7 @@ const PRIMARY_ENGINEERING_PATH: readonly EngineeringStepType[] = Object.freeze([
 ]);
 const MAX_MEMORY_EVIDENCE_ITEMS = 5;
 const MAX_MEMORY_EVIDENCE_CONTENT_CHARS = 2_000;
+const ENGINEERING_WORKFLOW_DEFINITION_CODE = 'ENGINEERING_CHANGE';
 
 @Injectable()
 export class GoalPlannerService {
@@ -25,6 +29,8 @@ export class GoalPlannerService {
     private readonly executionPlan: WorkflowExecutionPlanService,
     private readonly knowledge: KnowledgeHarvesterService,
     @Optional() private readonly memory?: MemoryService,
+    @Optional() private readonly tasks?: TasksService,
+    @Optional() private readonly workflowRuntime?: WorkflowRuntimeService,
   ) {}
 
   async planEngineeringGoal(
@@ -82,6 +88,61 @@ export class GoalPlannerService {
       executable: false,
       nextAction: 'CREATE_GOVERNED_WORKFLOW_FROM_APPROVED_PLAN' as const,
     });
+  }
+
+  async materializeEngineeringWorkflow(
+    organizationId: string,
+    goal: string,
+    assuranceLevel: 'AL1' | 'AL2' | 'AL3' | 'AL4' = 'AL3',
+  ) {
+    if (!this.tasks || !this.workflowRuntime) {
+      throw new ConflictException('Governed workflow materialization is not available.');
+    }
+
+    const plan = await this.planEngineeringGoal(organizationId, goal, assuranceLevel);
+    if (
+      plan.executable !== false ||
+      plan.requiresHumanReleaseApproval !== true ||
+      plan.providerSelection !== 'DEFERRED_TO_PROVIDER_ROUTER' ||
+      plan.nextAction !== 'CREATE_GOVERNED_WORKFLOW_FROM_APPROVED_PLAN'
+    ) {
+      throw new ConflictException('Goal plan does not satisfy governed workflow materialization invariants.');
+    }
+
+    const task = await this.tasks.create(organizationId, {
+      title: plan.goal.slice(0, 200),
+      description: plan.goal,
+      priority: TaskPriority.NORMAL,
+    });
+
+    try {
+      const workflowRun = await this.workflowRuntime.createRun({
+        organizationId,
+        taskId: task.id,
+        workflowDefinitionCode: ENGINEERING_WORKFLOW_DEFINITION_CODE,
+        workflowDefinitionVersion: plan.plannerVersion,
+        assuranceLevel: plan.assuranceLevel,
+        maxCorrectionLoops: plan.correctionLoop.maxLoops,
+      });
+
+      return Object.freeze({
+        plan,
+        task: Object.freeze({
+          id: task.id,
+          title: task.title,
+          status: task.status,
+        }),
+        workflowRun,
+        started: false,
+        executionAuthorityGranted: false,
+        providerSelection: 'DEFERRED_TO_PROVIDER_ROUTER' as const,
+        requiresHumanReleaseApproval: true,
+        nextAction: 'START_GOVERNED_WORKFLOW' as const,
+      });
+    } catch (error) {
+      await this.tasks.update(organizationId, task.id, { status: TaskStatus.CANCELLED }).catch(() => undefined);
+      throw error;
+    }
   }
 
   private async retrievePlanningMemory(
