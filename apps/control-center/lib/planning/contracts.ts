@@ -92,7 +92,7 @@ export function parseGoalWorkflowMaterialization(input: unknown): GoalWorkflowMa
   const task = record(root.task);
   const workflowRun = record(root.workflowRun);
   if (!plan || !task || !text(task.id, 256) || !text(task.title, 200) || !text(task.status, 64)) return null;
-  if (!workflowRun || !text(workflowRun.id, 256) || workflowRun.taskId !== task.id || workflowRun.status !== 'CREATED' || workflowRun.currentStepType !== null || workflowRun.workflowDefinitionCode !== 'ENGINEERING_CHANGE' || workflowRun.workflowDefinitionVersion !== plan.plannerVersion || workflowRun.assuranceLevel !== plan.assuranceLevel || !text(workflowRun.correlationId, 256)) return null;
+  if (!workflowRun || !text(workflowRun.id, 256) || workflowRun.taskId !== task.id || workflowRun.status !== 'CREATED' || workflowRun.currentStepType !== null || workflowRun.workflowDefinitionCode !== 'ENGINEERING_CHANGE' || workflowRun.workflowDefinitionVersion !== plan.plannerVersion || !assurance(workflowRun.assuranceLevel) || workflowRun.assuranceLevel !== plan.assuranceLevel || !text(workflowRun.correlationId, 256)) return null;
   return {
     plan,
     task: { id: task.id, title: task.title, status: task.status },
