@@ -61,7 +61,7 @@ describe('extractPptxKnowledgeSlides', () => {
         { slideNumber: 1, locatorValue: 'slide:1', text: 'Slide 1: Welcome & Context\nSecond point' },
         { slideNumber: 2, locatorValue: 'slide:2', text: 'Slide 2: Decision' },
       ],
-      totals: { slides: 2, characters: 57 },
+      totals: { slides: 2, characters: 56 },
     });
   });
 
