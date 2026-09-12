@@ -42,12 +42,15 @@ function PlanView({ plan }: Readonly<{ plan: GoalPlan }>) {
 function MaterializeWorkflow({ plan }: Readonly<{ plan: GoalPlan }>) {
   const [state, action, pending] = useActionState(materializeGoalWorkflow, initialGoalWorkflowMaterializationState);
   if (state.result) {
+    const cockpitHref = `/workflows?run=${encodeURIComponent(state.result.workflowRun.id)}`;
     return <div className="plan-materialized">
       <div><span>Workflow</span><strong>{state.result.workflowRun.id}</strong></div>
       <div><span>Status</span><strong>{state.result.workflowRun.status}</strong></div>
       <div><span>Task</span><strong>{state.result.task.id}</strong></div>
       <div><span>Next action</span><strong>{state.result.nextAction}</strong></div>
       <p>Der Workflow wurde nur materialisiert. Er wurde nicht gestartet, keine Execution Authority wurde erteilt und der Human Release Gate bleibt erhalten.</p>
+      <a className="plan-cockpit-link" href={cockpitHref}>Workflow im Cockpit öffnen</a>
+      <small className="plan-handoff-note">Das Cockpit lädt denselben serverseitigen Run. Ein Start erfolgt dort weiterhin nur als separate explizite Aktion gemäß Backend-`nextAction`.</small>
     </div>;
   }
   return <form action={action} className="plan-materialize-form">
