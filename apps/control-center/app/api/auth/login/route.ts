@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { getVitoApiBaseUrl } from '@/lib/auth/config';
+import { createPublicVitoApiClient } from '@/lib/api/server';
+import { VitoApiError } from '@/lib/api/error';
 import { parseLoginCredentials, parseLoginResult, parseOrganization, parseSessionLifetime } from '@/lib/auth/contracts';
 import { isSameOriginMutation, publicAuthError } from '@/lib/auth/request';
 import { SESSION_COOKIE_NAME } from '@/lib/auth/session';
@@ -29,30 +30,14 @@ export async function POST(request: NextRequest) {
   if (!credentials) return NextResponse.json({ error: 'Please check the submitted fields.' }, { status: 400 });
 
   try {
-    const baseUrl = getVitoApiBaseUrl();
-    const loginResponse = await fetch(`${baseUrl}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(credentials),
-      cache: 'no-store',
-    });
-    if (!loginResponse.ok) {
-      const error = publicAuthError(loginResponse.status);
-      return NextResponse.json({ error: error.message }, { status: error.status });
-    }
+    const publicClient = createPublicVitoApiClient();
+    const login = await publicClient.post('/auth/login', credentials, parseLoginResult);
+    const maxAge = parseSessionLifetime(login.expiresIn);
+    if (!maxAge) return NextResponse.json({ error: 'The VITO identity response was invalid.' }, { status: 502 });
 
-    const login = parseLoginResult(await loginResponse.json());
-    const maxAge = login ? parseSessionLifetime(login.expiresIn) : null;
-    if (!login || !maxAge) return NextResponse.json({ error: 'The VITO identity response was invalid.' }, { status: 502 });
-
-    const organizationResponse = await fetch(`${baseUrl}/organizations/${encodeURIComponent(login.user.organizationId)}`, {
-      headers: { Authorization: `Bearer ${login.accessToken}`, Accept: 'application/json' },
-      cache: 'no-store',
-    });
-    if (!organizationResponse.ok) return NextResponse.json({ error: 'The tenant context could not be verified.' }, { status: 502 });
-
-    const organization = parseOrganization(await organizationResponse.json());
-    if (!organization || organization.id !== login.user.organizationId || organization.slug !== credentials.organizationSlug) {
+    const organization = await publicClient.withAccessToken(login.accessToken)
+      .get(`/organizations/${encodeURIComponent(login.user.organizationId)}`, parseOrganization);
+    if (organization.id !== login.user.organizationId || organization.slug !== credentials.organizationSlug) {
       return NextResponse.json({ error: 'The tenant context could not be verified.' }, { status: 502 });
     }
 
@@ -67,7 +52,11 @@ export async function POST(request: NextRequest) {
       priority: 'high',
     });
     return response;
-  } catch {
+  } catch (cause) {
+    if (cause instanceof VitoApiError) {
+      const error = publicAuthError(cause.status);
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json({ error: 'The VITO identity service is currently unavailable.' }, { status: 502 });
   }
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getVitoApiBaseUrl } from '../lib/auth/config.ts';
+import { getVitoApiBaseUrl } from '../lib/api/config.ts';
 import { parseJwtIdentifiers, parseLoginCredentials, parseOrganization, parseSessionLifetime } from '../lib/auth/contracts.ts';
 import { isSameOriginMutation, publicAuthError } from '../lib/auth/request.ts';
 
