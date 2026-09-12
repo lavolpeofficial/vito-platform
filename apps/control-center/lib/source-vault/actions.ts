@@ -9,6 +9,7 @@ import { inferSourceType, parseHarvestResult, parseSourceUpload } from './contra
 
 const SOURCE_VAULT_PATH = '/source-vault';
 const MAX_BROWSER_UPLOAD_BYTES = 25 * 1024 * 1024;
+type RedirectTarget = Parameters<typeof redirect>[0];
 
 export async function uploadSourceAction(formData: FormData): Promise<void> {
   const session = await getAuthenticatedSession();
@@ -27,7 +28,7 @@ export async function uploadSourceAction(formData: FormData): Promise<void> {
   copyOptionalString(formData, payload, 'language', 32);
   copyOptionalString(formData, payload, 'title', 500);
 
-  let destination = `${SOURCE_VAULT_PATH}?notice=UPLOAD_FAILED`;
+  let destination = sourceVaultTarget('notice=UPLOAD_FAILED');
   try {
     const client = await createAuthenticatedVitoApiClient();
     const uploaded = await client.postFormData('/source-vault/upload', payload, parseSourceUpload);
@@ -37,14 +38,14 @@ export async function uploadSourceAction(formData: FormData): Promise<void> {
         {},
         parseHarvestResult,
       );
-      destination = `${SOURCE_VAULT_PATH}?notice=${uploaded.duplicate ? 'DUPLICATE_HARVESTED' : 'UPLOADED_HARVESTED'}&units=${harvested.knowledgeUnits}`;
+      destination = sourceVaultTarget(`notice=${uploaded.duplicate ? 'DUPLICATE_HARVESTED' : 'UPLOADED_HARVESTED'}&units=${harvested.knowledgeUnits}`);
     } catch (error) {
       const code = error instanceof VitoApiError && error.status === 400 ? 'UPLOADED_UNSUPPORTED_FOR_HARVEST' : 'UPLOADED_HARVEST_FAILED';
-      destination = `${SOURCE_VAULT_PATH}?notice=${code}`;
+      destination = sourceVaultTarget(`notice=${code}`);
     }
     revalidatePath(SOURCE_VAULT_PATH);
   } catch (error) {
-    destination = `${SOURCE_VAULT_PATH}?error=${encodeURIComponent(stableErrorCode(error))}`;
+    destination = sourceVaultTarget(`error=${encodeURIComponent(stableErrorCode(error))}`);
   }
   redirect(destination);
 }
@@ -53,7 +54,7 @@ export async function harvestSourceAction(formData: FormData): Promise<void> {
   const sourceId = stringField(formData, 'sourceId', 256);
   if (!sourceId) redirectWith('error', 'INVALID_SOURCE');
 
-  let destination = `${SOURCE_VAULT_PATH}?notice=HARVEST_FAILED`;
+  let destination = sourceVaultTarget('notice=HARVEST_FAILED');
   try {
     const client = await createAuthenticatedVitoApiClient();
     const result = await client.post(
@@ -62,9 +63,9 @@ export async function harvestSourceAction(formData: FormData): Promise<void> {
       parseHarvestResult,
     );
     revalidatePath(SOURCE_VAULT_PATH);
-    destination = `${SOURCE_VAULT_PATH}?notice=HARVESTED&units=${result.knowledgeUnits}`;
+    destination = sourceVaultTarget(`notice=HARVESTED&units=${result.knowledgeUnits}`);
   } catch (error) {
-    destination = `${SOURCE_VAULT_PATH}?error=${encodeURIComponent(stableErrorCode(error))}`;
+    destination = sourceVaultTarget(`error=${encodeURIComponent(stableErrorCode(error))}`);
   }
   redirect(destination);
 }
@@ -87,6 +88,10 @@ function stableErrorCode(error: unknown): string {
   return 'UNEXPECTED_ERROR';
 }
 
+function sourceVaultTarget(query: string): RedirectTarget {
+  return `${SOURCE_VAULT_PATH}?${query}` as RedirectTarget;
+}
+
 function redirectWith(key: 'error' | 'notice', value: string): never {
-  redirect(`${SOURCE_VAULT_PATH}?${key}=${encodeURIComponent(value)}`);
+  redirect(sourceVaultTarget(`${key}=${encodeURIComponent(value)}`));
 }
