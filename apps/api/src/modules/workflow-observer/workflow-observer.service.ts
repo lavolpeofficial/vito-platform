@@ -80,6 +80,7 @@ export class WorkflowObserverService {
   private classifyNextAction(status: string, currentStepType: string | null, blockReasonCode: string | null): WorkflowNextAction {
     if (status === 'CREATED') return 'START_RUN';
     if (status === 'RUNNING' && currentStepType === 'HUMAN_RELEASE_GATE') return 'APPROVE_HUMAN_RELEASE';
+    if (status === 'RUNNING' && currentStepType === 'RELEASE_EXECUTION') return 'HUMAN_REVIEW_REQUIRED';
     if (status === 'RUNNING' && currentStepType) return 'EXECUTE_CURRENT_STEP';
     if (status === 'BLOCKED' && blockReasonCode === 'PROVIDER_BLOCKED') return 'RESUME_RUN';
     if (status === 'BLOCKED') return 'HUMAN_REVIEW_REQUIRED';
