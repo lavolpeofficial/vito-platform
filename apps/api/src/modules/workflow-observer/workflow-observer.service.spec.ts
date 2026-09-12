@@ -35,6 +35,18 @@ describe('WorkflowObserverService', () => {
     expect(result.nextAction).toBe('APPROVE_HUMAN_RELEASE');
   });
 
+  it('fails closed at PARSE_VERDICT because no authoritative verdict parser owns that step yet', async () => {
+    workflowRun.findFirst.mockResolvedValue({
+      id: 'run-verdict', organizationId: 'org-1', correlationId: 'corr-verdict', status: 'RUNNING', currentStepType: 'PARSE_VERDICT',
+      blockReasonCode: null, failureReasonCode: null, correctionLoopCount: 0, maxCorrectionLoops: 3, startedAt: new Date(), completedAt: null,
+      stepRuns: [{ id: 'step-verdict', stepType: 'PARSE_VERDICT', status: 'READY', attemptNumber: 1, causationId: null, startedAt: new Date(), finishedAt: null }],
+    });
+    auditEvent.findMany.mockResolvedValue([]);
+    const result = await service.observe('org-1', 'run-verdict');
+    expect(result.boundary).toBe('ACTIVE');
+    expect(result.nextAction).toBe('HUMAN_REVIEW_REQUIRED');
+  });
+
   it('fails closed at RELEASE_EXECUTION because no agent capability owns that step', async () => {
     workflowRun.findFirst.mockResolvedValue({
       id: 'run-release', organizationId: 'org-1', correlationId: 'corr-release', status: 'RUNNING', currentStepType: 'RELEASE_EXECUTION',
