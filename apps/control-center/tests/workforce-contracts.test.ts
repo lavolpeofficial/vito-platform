@@ -1,0 +1,8 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { parseCapabilities, parseCapabilityDiscovery, parseEmployees, parseProviderSnapshot } from '../lib/workforce/contracts.ts';
+
+test('parses digital employee capability assignments',()=>{const result=parseEmployees([{id:'e1',name:'TIMO',code:'TIMO',employeeType:'ASSISTANT',status:'ACTIVE',version:'1',workforceInstanceId:null,capabilities:[{isEnabled:true,capability:{id:'c1',code:'CODE_BUILD',name:'Build',riskLevel:'MEDIUM',requiresApproval:false}}]}]);assert.equal(result?.[0]?.capabilities[0]?.capability.code,'CODE_BUILD');});
+test('rejects malformed capability lists',()=>{assert.equal(parseCapabilities([{id:'c1',code:'X'}]),null);});
+test('parses read only provider readiness',()=>{const result=parseProviderSnapshot({authority:'READ_ONLY',providers:[{id:'p1',providerCode:'P',displayName:'Provider',status:'ACTIVE',healthStatus:'HEALTHY',quotaStatus:'AVAILABLE',staticallyRoutable:true,enabledCapabilities:['CODE_BUILD']}],capabilityCoverage:[{capabilityCode:'CODE_BUILD',enabledProviderCount:1,staticallyRoutableProviderCount:1,providerCodes:['P'],readiness:'ROUTABLE_BASELINE'}]});assert.equal(result?.capabilityCoverage[0]?.readiness,'ROUTABLE_BASELINE');});
+test('parses governed discovery gap',()=>{const result=parseCapabilityDiscovery({code:'CODE_BUILD',availability:'REGISTERED_UNROUTABLE',officialEngineeringCapability:true,assignedDigitalEmployeeCount:1,registeredCapability:{id:'c1',name:'Build',riskLevel:'MEDIUM',requiresApproval:false},executableProviders:[],gap:{type:'NO_EXECUTABLE_PROVIDER',suggestedNextState:'PROVIDER_OR_ASSIGNMENT_REVIEW'}});assert.equal(result?.gap?.type,'NO_EXECUTABLE_PROVIDER');});
