@@ -53,6 +53,26 @@ export type GoalPlan = Readonly<{
   nextAction: 'CREATE_GOVERNED_WORKFLOW_FROM_APPROVED_PLAN';
 }>;
 
+export type GoalWorkflowMaterialization = Readonly<{
+  plan: GoalPlan;
+  task: Readonly<{ id: string; title: string; status: string }>;
+  workflowRun: Readonly<{
+    id: string;
+    taskId: string;
+    status: 'CREATED';
+    currentStepType: null;
+    workflowDefinitionCode: 'ENGINEERING_CHANGE';
+    workflowDefinitionVersion: string;
+    assuranceLevel: AssuranceLevel;
+    correlationId: string;
+  }>;
+  started: false;
+  executionAuthorityGranted: false;
+  providerSelection: 'DEFERRED_TO_PROVIDER_ROUTER';
+  requiresHumanReleaseApproval: true;
+  nextAction: 'START_GOVERNED_WORKFLOW';
+}>;
+
 export function parseGoalPlan(input: unknown): GoalPlan | null {
   const root = record(input);
   if (!root || !text(root.plannerVersion, 64) || root.planningMode !== 'TEMPLATE_GROUNDED' || root.goalClass !== 'ENGINEERING_CHANGE' || !text(root.goal, 2000) || !assurance(root.assuranceLevel) || root.providerSelection !== 'DEFERRED_TO_PROVIDER_ROUTER' || root.requiresHumanReleaseApproval !== true || root.executable !== false || root.nextAction !== 'CREATE_GOVERNED_WORKFLOW_FROM_APPROVED_PLAN') return null;
@@ -63,6 +83,35 @@ export function parseGoalPlan(input: unknown): GoalPlan | null {
   const loop = record(root.correctionLoop);
   if (!loop || !text(loop.stepType, 128) || !(loop.capabilityCode === null || text(loop.capabilityCode, 256)) || loop.executionAuthority !== 'AGENT_WORKFORCE' || !text(loop.trigger, 256) || !text(loop.returnsTo, 128) || !integer(loop.maxLoops)) return null;
   return { plannerVersion: root.plannerVersion, planningMode: 'TEMPLATE_GROUNDED', goalClass: 'ENGINEERING_CHANGE', goal: root.goal, assuranceLevel: root.assuranceLevel, providerSelection: 'DEFERRED_TO_PROVIDER_ROUTER', requiresHumanReleaseApproval: true, steps: steps as GoalPlanStep[], correctionLoop: { stepType: loop.stepType, capabilityCode: loop.capabilityCode as string | null, executionAuthority: 'AGENT_WORKFORCE', trigger: loop.trigger, returnsTo: loop.returnsTo, maxLoops: loop.maxLoops }, knowledgeEvidence: knowledgeEvidence as KnowledgeEvidence[], memoryEvidence: memoryEvidence as MemoryEvidence[], executable: false, nextAction: 'CREATE_GOVERNED_WORKFLOW_FROM_APPROVED_PLAN' };
+}
+
+export function parseGoalWorkflowMaterialization(input: unknown): GoalWorkflowMaterialization | null {
+  const root = record(input);
+  if (!root || root.started !== false || root.executionAuthorityGranted !== false || root.providerSelection !== 'DEFERRED_TO_PROVIDER_ROUTER' || root.requiresHumanReleaseApproval !== true || root.nextAction !== 'START_GOVERNED_WORKFLOW') return null;
+  const plan = parseGoalPlan(root.plan);
+  const task = record(root.task);
+  const workflowRun = record(root.workflowRun);
+  if (!plan || !task || !text(task.id, 256) || !text(task.title, 200) || !text(task.status, 64)) return null;
+  if (!workflowRun || !text(workflowRun.id, 256) || workflowRun.taskId !== task.id || workflowRun.status !== 'CREATED' || workflowRun.currentStepType !== null || workflowRun.workflowDefinitionCode !== 'ENGINEERING_CHANGE' || workflowRun.workflowDefinitionVersion !== plan.plannerVersion || workflowRun.assuranceLevel !== plan.assuranceLevel || !text(workflowRun.correlationId, 256)) return null;
+  return {
+    plan,
+    task: { id: task.id, title: task.title, status: task.status },
+    workflowRun: {
+      id: workflowRun.id,
+      taskId: workflowRun.taskId,
+      status: 'CREATED',
+      currentStepType: null,
+      workflowDefinitionCode: 'ENGINEERING_CHANGE',
+      workflowDefinitionVersion: workflowRun.workflowDefinitionVersion,
+      assuranceLevel: workflowRun.assuranceLevel,
+      correlationId: workflowRun.correlationId,
+    },
+    started: false,
+    executionAuthorityGranted: false,
+    providerSelection: 'DEFERRED_TO_PROVIDER_ROUTER',
+    requiresHumanReleaseApproval: true,
+    nextAction: 'START_GOVERNED_WORKFLOW',
+  };
 }
 
 function parseStep(value: unknown): GoalPlanStep | null { const row = record(value); if (!row || !integer(row.order) || !text(row.stepType, 128) || !(row.capabilityCode === null || text(row.capabilityCode, 256)) || !authority(row.executionAuthority) || typeof row.humanBoundary !== 'boolean' || typeof row.conditional !== 'boolean') return null; return { order: row.order, stepType: row.stepType, capabilityCode: row.capabilityCode as string | null, executionAuthority: row.executionAuthority, humanBoundary: row.humanBoundary, conditional: row.conditional }; }
