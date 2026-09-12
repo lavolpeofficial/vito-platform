@@ -30,6 +30,14 @@ export class KnowledgeHarvesterController {
     return this.service.harvestDocxSource(this.tenantContext.getOrThrow(), sourceId);
   }
 
+  @Post('sources/:sourceId/harvest-xlsx')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: 'Harvests bounded XLSX row evidence with cell-range provenance; formulas are not evaluated.' })
+  harvestXlsx(@Param('sourceId') sourceId: string) {
+    return this.service.harvestXlsxSource(this.tenantContext.getOrThrow(), sourceId);
+  }
+
   @Get('search')
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER, UserRole.VIEWER)
   @ApiOkResponse({ description: 'Tenant-scoped PostgreSQL full-text retrieval over harvested knowledge.' })
