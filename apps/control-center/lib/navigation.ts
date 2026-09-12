@@ -1,8 +1,8 @@
 export type NavigationItem = Readonly<{
-  href: '/operations' | '/source-vault' | '/planning' | '/workflows' | '/workforce' | '/governance' | '/audit';
+  href: '/operations' | '/source-vault' | '/planning' | '/workflows' | '/workforce' | '/governance' | '/memory' | '/audit';
   label: string;
   description: string;
-  icon: 'pulse' | 'vault' | 'planning' | 'workflow' | 'agents' | 'governance' | 'audit';
+  icon: 'pulse' | 'vault' | 'planning' | 'workflow' | 'agents' | 'governance' | 'memory' | 'audit';
 }>;
 
 export const navigationItems: readonly NavigationItem[] = [
@@ -12,6 +12,7 @@ export const navigationItems: readonly NavigationItem[] = [
   { href: '/workflows', label: 'Workflows', description: 'Abläufe, Freigaben und Ausführung', icon: 'workflow' },
   { href: '/workforce', label: 'Agents & Capabilities', description: 'Digitale Mitarbeiter und Befugnisse', icon: 'agents' },
   { href: '/governance', label: 'Governance & Reviews', description: 'Menschliche Freigaben und Review-Grenzen', icon: 'governance' },
+  { href: '/memory', label: 'Memory Explorer', description: 'Aktive Erinnerungen und Provenienz', icon: 'memory' },
   { href: '/audit', label: 'Audit & Activity', description: 'Unveränderbare operative Evidenz', icon: 'audit' },
 ] as const;
 
