@@ -66,13 +66,13 @@ export class WorkflowAgentRuntimeService {
     if (!run.taskId) throw new ConflictException('Agent-executable workflow requires a task identity.');
     const task = await this.prisma.task.findFirst({
       where: { id: run.taskId, organizationId },
-      select: { id: true, title: true, description: true, assignedDigitalEmployeeId: true },
+      select: { id: true, title: true, description: true },
     });
     if (!task) throw new NotFoundException('Workflow task not found.');
-    if (!task.assignedDigitalEmployeeId) {
-      throw new ConflictException('Workflow task is not assigned to a DigitalEmployee.');
-    }
 
+    // Agent identity is resolved server-side by AgentWorkforce from persisted
+    // workflow-step assignment first, with the legacy task assignment retained
+    // only as a backwards-compatible fallback.
     const prompt = this.buildPrompt(step.stepType, task.title, task.description);
     const dispatch = await this.agentWorkforce.dispatch({
       organizationId,

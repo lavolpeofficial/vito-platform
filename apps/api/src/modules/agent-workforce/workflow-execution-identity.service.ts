@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { EngineeringStepType } from '@vito/contracts';
 import { PrismaService } from '../../prisma/prisma.service';
+import { WorkflowAgentAssignmentService } from './workflow-agent-assignment.service';
 import { WorkflowExecutionPlanService } from './workflow-execution-plan.service';
 
 export interface PersistedWorkflowExecutionIdentity {
@@ -21,6 +22,7 @@ export class WorkflowExecutionIdentityService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly executionPlan: WorkflowExecutionPlanService,
+    @Optional() private readonly agentAssignments?: WorkflowAgentAssignmentService,
   ) {}
 
   async resolve(
@@ -48,28 +50,40 @@ export class WorkflowExecutionIdentityService {
       throw new BadRequestException('Persisted workflow execution requires a task identity.');
     }
 
-    const task = await this.prisma.task.findFirst({
-      where: { id: step.workflowRun.taskId, organizationId },
-      select: { id: true, assignedDigitalEmployeeId: true },
-    });
-    if (!task) throw new NotFoundException('Workflow task not found.');
-    if (!task.assignedDigitalEmployeeId) {
-      throw new BadRequestException(
-        'Persisted workflow agent execution requires a task assigned to a DigitalEmployee.',
-      );
-    }
-
-    const agent = await this.prisma.digitalEmployee.findFirst({
-      where: { id: task.assignedDigitalEmployeeId, organizationId },
-      select: { id: true },
-    });
-    if (!agent) throw new NotFoundException('Assigned DigitalEmployee not found.');
-
     const planEntry = await this.executionPlan.resolveAndBind(
       organizationId,
       workflowRunId,
       step.stepType as EngineeringStepType,
     );
+
+    const assignment = this.agentAssignments
+      ? await this.agentAssignments.resolveApproved(organizationId, workflowRunId, step.stepType)
+      : null;
+    if (assignment && assignment.capabilityCode !== planEntry.capabilityCode) {
+      throw new BadRequestException('Approved workflow agent assignment capability does not match server-owned execution plan.');
+    }
+
+    const task = await this.prisma.task.findFirst({
+      where: { id: step.workflowRun.taskId, organizationId },
+      select: { id: true, assignedDigitalEmployeeId: true },
+    });
+    if (!task) throw new NotFoundException('Workflow task not found.');
+
+    const agentId = assignment?.digitalEmployeeId ?? task.assignedDigitalEmployeeId;
+    if (!agentId) {
+      throw new BadRequestException(
+        'Persisted workflow agent execution requires either an approved step assignment or a task assigned to a DigitalEmployee.',
+      );
+    }
+
+    const agent = await this.prisma.digitalEmployee.findFirst({
+      where: { id: agentId, organizationId },
+      select: { id: true, status: true },
+    });
+    if (!agent) throw new NotFoundException('Assigned DigitalEmployee not found.');
+    if (assignment && agent.status !== 'ACTIVE') {
+      throw new BadRequestException('Approved workflow-step DigitalEmployee is no longer ACTIVE.');
+    }
 
     return Object.freeze({
       organizationId,
