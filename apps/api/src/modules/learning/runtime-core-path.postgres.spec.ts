@@ -65,11 +65,6 @@ describePg('VITO core path · PostgreSQL proof v2', () => {
     getUserId: () => userId,
     getAuthenticationMethod: () => 'jwt',
   } as any;
-  const foreignTenantContext = {
-    getOrThrow: () => foreignOrganizationId,
-    getUserId: () => null,
-    getAuthenticationMethod: () => 'jwt',
-  } as any;
 
   const assignment = new WorkflowAgentAssignmentService(
     prisma,
@@ -272,15 +267,24 @@ describePg('VITO core path · PostgreSQL proof v2', () => {
 
     const planResult = await agentRuntime.executeCurrentStep(organizationId, run.id);
     expect(planResult.disposition).toBe('TRANSITIONED');
+    if (planResult.disposition !== 'TRANSITIONED') {
+      throw new Error(`Expected PLAN to transition, got ${planResult.disposition}.`);
+    }
     expect(planResult.dispatch.memoryContextCount).toBeGreaterThan(0);
     expect(planResult.dispatch.experienceId).toBeTruthy();
 
     const buildResult = await agentRuntime.executeCurrentStep(organizationId, run.id);
     expect(buildResult.disposition).toBe('TRANSITIONED');
+    if (buildResult.disposition !== 'TRANSITIONED') {
+      throw new Error(`Expected BUILD to transition, got ${buildResult.disposition}.`);
+    }
     expect(buildResult.dispatch.experienceId).toBeTruthy();
 
     const testResult = await agentRuntime.executeCurrentStep(organizationId, run.id);
     expect(testResult.disposition).toBe('TRANSITIONED');
+    if (testResult.disposition !== 'TRANSITIONED') {
+      throw new Error(`Expected TEST to transition, got ${testResult.disposition}.`);
+    }
     expect(testResult.capabilityCode).toBe('TEST_EXECUTION');
     expect(testResult.dispatch.experienceId).toBeTruthy();
 
