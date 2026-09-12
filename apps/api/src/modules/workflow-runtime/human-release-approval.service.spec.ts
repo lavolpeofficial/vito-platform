@@ -11,6 +11,10 @@ function buildService(overrides: {
   step?: any;
   transition?: any;
 } = {}) {
+  const resolvedStep = Object.prototype.hasOwnProperty.call(overrides, 'step')
+    ? overrides.step
+    : { id: STEP };
+
   const prisma: any = {
     workflowRun: {
       findFirst: jest.fn().mockResolvedValue(
@@ -23,7 +27,7 @@ function buildService(overrides: {
       ),
     },
     workflowStepRun: {
-      findFirst: jest.fn().mockResolvedValue(overrides.step ?? { id: STEP }),
+      findFirst: jest.fn().mockResolvedValue(resolvedStep),
     },
   };
 
