@@ -1,0 +1,10 @@
+'use client';
+import { useActionState } from 'react';
+import { loadVerification, type VerificationState } from '@/lib/verification/actions';
+const initialState: VerificationState = { records: [], workflowRunId: '', error: null };
+export function VerificationClient(){ const [state, action, pending] = useActionState(loadVerification, initialState); return <>
+<form action={action} className="verification-search"><label><span>Workflow Run ID</span><input name="workflowRunId" required placeholder="Persisted workflow run ID" /></label><label><span>Status</span><select name="status" defaultValue=""><option value="">All statuses</option><option>VERIFIED</option><option>FAILED</option><option>INCONCLUSIVE</option><option>BLOCKED</option></select></label><button type="submit" disabled={pending}>{pending?'Loading…':'Load verification'}</button></form>
+{state.error?<div className="verification-banner">Verification observability failed: {state.error}</div>:null}
+<section className="verification-panel"><div className="verification-head"><div><span className="eyebrow">Objective evidence</span><h2>Verification Records</h2></div><span>{state.records.length} results</span></div>{state.records.length===0?<p className="verification-empty">Load a workflow run to inspect persisted verification evidence. Classification and rule logic remain backend-owned.</p>:<div className="verification-list">{state.records.map((record)=><article className="verification-card" key={record.id}><div className="verification-card-top"><div><strong>{record.stepType}</strong><span>{new Date(record.createdAt).toLocaleString('de-DE')}</span></div><span className="verification-status">{record.status}</span></div><dl><Row label="Rule" value={record.ruleCode}/><Row label="Step Run" value={record.workflowStepRunId}/><Row label="Verification" value={record.id}/><Row label="Workflow" value={record.workflowRunId}/></dl><details><summary>Evidence</summary><pre>{JSON.stringify(record.evidence,null,2)}</pre></details></article>)}</div>}</section>
+</>; }
+function Row({label,value}:Readonly<{label:string;value:string}>){ return <div><dt>{label}</dt><dd>{value}</dd></div>; }

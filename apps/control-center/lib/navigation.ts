@@ -1,8 +1,8 @@
 export type NavigationItem = Readonly<{
-  href: '/operations' | '/source-vault' | '/planning' | '/workflows' | '/workforce' | '/governance' | '/learning' | '/memory' | '/audit';
+  href: '/operations' | '/source-vault' | '/planning' | '/workflows' | '/verification' | '/workforce' | '/governance' | '/learning' | '/memory' | '/audit';
   label: string;
   description: string;
-  icon: 'pulse' | 'vault' | 'planning' | 'workflow' | 'agents' | 'governance' | 'learning' | 'memory' | 'audit';
+  icon: 'pulse' | 'vault' | 'planning' | 'workflow' | 'verification' | 'agents' | 'governance' | 'learning' | 'memory' | 'audit';
 }>;
 
 export const navigationItems: readonly NavigationItem[] = [
@@ -10,6 +10,7 @@ export const navigationItems: readonly NavigationItem[] = [
   { href: '/source-vault', label: 'Source Vault', description: 'Quellen, Verarbeitung und Herkunft', icon: 'vault' },
   { href: '/planning', label: 'Goal & Planning', description: 'Ziele und governbare Pläne', icon: 'planning' },
   { href: '/workflows', label: 'Workflows', description: 'Abläufe, Freigaben und Ausführung', icon: 'workflow' },
+  { href: '/verification', label: 'Verification Explorer', description: 'Objektive Workflow-Evidenz', icon: 'verification' },
   { href: '/workforce', label: 'Agents & Capabilities', description: 'Digitale Mitarbeiter und Befugnisse', icon: 'agents' },
   { href: '/governance', label: 'Governance & Reviews', description: 'Menschliche Freigaben und Review-Grenzen', icon: 'governance' },
   { href: '/learning', label: 'Learning Explorer', description: 'Experience, Outcome und Reflection', icon: 'learning' },

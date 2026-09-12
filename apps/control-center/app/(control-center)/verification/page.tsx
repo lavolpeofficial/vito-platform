@@ -1,0 +1,4 @@
+import './verification.css';
+import { VerificationClient } from './verification-client';
+export const metadata = { title: 'Verification Explorer' };
+export default function VerificationPage(){ return <main><div className="breadcrumb"><a href="/">Control Center</a><span>/</span><span>Verification Explorer</span></div><section className="module-heading"><div className="module-icon">VE</div><div><span className="eyebrow">Execution ≠ correctness</span><h1>Verification Explorer</h1><p>Persistierte, tenant-scoped Verifikation für Workflow-Schritte – einschließlich VERIFIED, FAILED, INCONCLUSIVE und BLOCKED.</p></div></section><div className="boundary-notice"><span className="system-dot"/><div><strong>Read-only verification surface</strong><p>Diese Oberfläche erzeugt keine Verification und bestätigt keinen Human Gate. Regeln, Klassifikation, Evidenz und Tenant-Grenzen bleiben vollständig Backend-Verantwortung.</p></div></div><VerificationClient/></main>; }
