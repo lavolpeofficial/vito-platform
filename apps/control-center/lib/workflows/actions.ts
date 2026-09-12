@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createAuthenticatedVitoApiClient } from '@/lib/api/server';
 import { VitoApiError } from '@/lib/api/error';
-import { parseMutationResult, type WorkflowNextAction } from './contracts';
+import { parseHumanReleaseApprovalResult, parseMutationResult, type WorkflowNextAction } from './contracts';
 
 const WORKFLOWS_PATH = '/workflows';
 
@@ -18,9 +18,14 @@ export async function workflowAction(formData: FormData): Promise<void> {
 
   try {
     const client = await createAuthenticatedVitoApiClient();
-    await client.post(path, {}, parseMutationResult);
+    if (action === 'APPROVE_HUMAN_RELEASE') {
+      await client.post(path, {}, parseHumanReleaseApprovalResult);
+    } else {
+      await client.post(path, {}, parseMutationResult);
+    }
     revalidatePath(WORKFLOWS_PATH);
-    redirectWorkflow(workflowRunId, action === 'START_RUN' ? 'STARTED' : action === 'RESUME_RUN' ? 'RESUMED' : 'EXECUTED', false);
+    const notice = action === 'START_RUN' ? 'STARTED' : action === 'RESUME_RUN' ? 'RESUMED' : action === 'APPROVE_HUMAN_RELEASE' ? 'RELEASE_APPROVED' : 'EXECUTED';
+    redirectWorkflow(workflowRunId, notice, false);
   } catch (error) {
     const code = error instanceof VitoApiError ? error.code : 'UNEXPECTED_ERROR';
     redirectWorkflow(workflowRunId, code);
@@ -32,6 +37,7 @@ function mutationPath(workflowRunId: string, action: WorkflowNextAction): `/${st
   if (action === 'START_RUN') return `/workflow-runtime/${id}/start`;
   if (action === 'RESUME_RUN') return `/workflow-runtime/${id}/resume`;
   if (action === 'EXECUTE_CURRENT_STEP') return `/workflow-agent-runtime/${id}/execute-current`;
+  if (action === 'APPROVE_HUMAN_RELEASE') return `/workflow-runtime/${id}/human-release-approval`;
   return null;
 }
 
