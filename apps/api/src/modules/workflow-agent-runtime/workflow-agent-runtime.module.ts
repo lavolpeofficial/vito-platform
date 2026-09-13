@@ -6,6 +6,7 @@ import { WorkflowVerificationModule } from '../workflow-verification/workflow-ve
 import { WorkflowAgentRuntimeController } from './workflow-agent-runtime.controller';
 import { WorkflowAgentRunnerService } from './workflow-agent-runner.service';
 import { WorkflowAgentRuntimeService } from './workflow-agent-runtime.service';
+import { WorkflowAl4ReviewCoordinatorService } from './workflow-al4-review-coordinator.service';
 import { WorkflowReviewEvidenceService } from './workflow-review-evidence.service';
 import { WorkflowReviewVerdictService } from './workflow-review-verdict.service';
 
@@ -15,12 +16,14 @@ import { WorkflowReviewVerdictService } from './workflow-review-verdict.service'
   providers: [
     WorkflowAgentRuntimeService,
     WorkflowAgentRunnerService,
+    WorkflowAl4ReviewCoordinatorService,
     WorkflowReviewEvidenceService,
     WorkflowReviewVerdictService,
   ],
   exports: [
     WorkflowAgentRuntimeService,
     WorkflowAgentRunnerService,
+    WorkflowAl4ReviewCoordinatorService,
     WorkflowReviewEvidenceService,
     WorkflowReviewVerdictService,
   ],
