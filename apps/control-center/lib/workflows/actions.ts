@@ -24,7 +24,12 @@ export async function workflowAction(formData: FormData): Promise<void> {
       await client.post(path, {}, parseMutationResult);
     }
     revalidatePath(WORKFLOWS_PATH);
-    const notice = action === 'START_RUN' ? 'STARTED' : action === 'RESUME_RUN' ? 'RESUMED' : action === 'APPROVE_HUMAN_RELEASE' ? 'RELEASE_APPROVED' : 'EXECUTED';
+    const notice =
+      action === 'START_RUN' ? 'STARTED'
+        : action === 'RESUME_RUN' ? 'RESUMED'
+          : action === 'APPROVE_HUMAN_RELEASE' ? 'RELEASE_APPROVED'
+            : action === 'PROCESS_REVIEW_VERDICT' ? 'VERDICT_PROCESSED'
+              : 'EXECUTED';
     redirectWorkflow(workflowRunId, notice, false);
   } catch (error) {
     const code = error instanceof VitoApiError ? error.code : 'UNEXPECTED_ERROR';
@@ -37,6 +42,7 @@ function mutationPath(workflowRunId: string, action: WorkflowNextAction): `/${st
   if (action === 'START_RUN') return `/workflow-runtime/${id}/start`;
   if (action === 'RESUME_RUN') return `/workflow-runtime/${id}/resume`;
   if (action === 'EXECUTE_CURRENT_STEP') return `/workflow-agent-runtime/${id}/execute-current`;
+  if (action === 'PROCESS_REVIEW_VERDICT') return `/workflow-agent-runtime/${id}/parse-verdict`;
   if (action === 'APPROVE_HUMAN_RELEASE') return `/workflow-runtime/${id}/human-release-approval`;
   return null;
 }

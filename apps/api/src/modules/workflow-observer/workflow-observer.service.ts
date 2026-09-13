@@ -14,6 +14,7 @@ export type WorkflowBoundary =
 export type WorkflowNextAction =
   | 'START_RUN'
   | 'EXECUTE_CURRENT_STEP'
+  | 'PROCESS_REVIEW_VERDICT'
   | 'RESUME_RUN'
   | 'APPROVE_HUMAN_RELEASE'
   | 'HUMAN_REVIEW_REQUIRED'
@@ -53,7 +54,12 @@ export class WorkflowObserverService {
     });
 
     const boundary = this.classifyBoundary(run.status);
-    const nextAction = this.classifyNextAction(run.status, run.currentStepType, run.blockReasonCode);
+    const nextAction = this.classifyNextAction(
+      run.status,
+      run.currentStepType,
+      run.blockReasonCode,
+      run.assuranceLevel,
+    );
 
     return {
       workflowRunId: run.id, organizationId, correlationId: run.correlationId, status: run.status,
@@ -77,16 +83,29 @@ export class WorkflowObserverService {
     }
   }
 
-  private classifyNextAction(status: string, currentStepType: string | null, blockReasonCode: string | null): WorkflowNextAction {
+  private classifyNextAction(
+    status: string,
+    currentStepType: string | null,
+    blockReasonCode: string | null,
+    assuranceLevel: string | null,
+  ): WorkflowNextAction {
     if (status === 'CREATED') return 'START_RUN';
     if (status === 'RUNNING' && currentStepType === 'HUMAN_RELEASE_GATE') return 'APPROVE_HUMAN_RELEASE';
-    if (
-      status === 'RUNNING' &&
-      (currentStepType === 'PARSE_VERDICT' || currentStepType === 'RELEASE_EXECUTION')
-    ) return 'HUMAN_REVIEW_REQUIRED';
+    if (status === 'RUNNING' && currentStepType === 'PARSE_VERDICT') {
+      return this.serverOwnedVerdictProcessingAllowed(assuranceLevel)
+        ? 'PROCESS_REVIEW_VERDICT'
+        : 'HUMAN_REVIEW_REQUIRED';
+    }
+    if (status === 'RUNNING' && currentStepType === 'RELEASE_EXECUTION') return 'HUMAN_REVIEW_REQUIRED';
     if (status === 'RUNNING' && currentStepType) return 'EXECUTE_CURRENT_STEP';
     if (status === 'BLOCKED' && blockReasonCode === 'PROVIDER_BLOCKED') return 'RESUME_RUN';
     if (status === 'BLOCKED') return 'HUMAN_REVIEW_REQUIRED';
     return 'NONE';
+  }
+
+  private serverOwnedVerdictProcessingAllowed(assuranceLevel: string | null): boolean {
+    if (!assuranceLevel) return false;
+    const normalized = assuranceLevel.replace(/^AL-(\d)$/u, 'AL$1');
+    return normalized === 'AL1' || normalized === 'AL2' || normalized === 'AL3';
   }
 }
