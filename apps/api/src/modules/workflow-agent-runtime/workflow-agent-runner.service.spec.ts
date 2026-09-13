@@ -1,3 +1,5 @@
+import { BadRequestException } from '@nestjs/common';
+import { WorkflowWorkforceAssignmentRequiredException } from '../agent-workforce/workflow-execution-identity.service';
 import { WorkflowAgentRunnerService } from './workflow-agent-runner.service';
 
 describe('WorkflowAgentRunnerService', () => {
@@ -26,6 +28,24 @@ describe('WorkflowAgentRunnerService', () => {
     expect(result.boundary).toBe('NON_AGENT_STEP');
     expect(result.stepsExecuted).toBe(3);
     expect(executeCurrentStep).toHaveBeenCalledTimes(3);
+  });
+
+  it('surfaces missing governed workforce assignment as a bounded boundary', async () => {
+    executeCurrentStep.mockRejectedValueOnce(new WorkflowWorkforceAssignmentRequiredException());
+
+    const result = await service.executeUntilBoundary('org-1', 'run-1');
+
+    expect(result.disposition).toBe('BOUNDARY_REACHED');
+    expect(result.boundary).toBe('WORKFORCE_ASSIGNMENT_REQUIRED');
+    expect(result.stepsExecuted).toBe(0);
+    expect(result.executions).toEqual([]);
+    expect(executeCurrentStep).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not swallow unrelated bad-request failures', async () => {
+    executeCurrentStep.mockRejectedValueOnce(new BadRequestException('unrelated invariant failure'));
+
+    await expect(service.executeUntilBoundary('org-1', 'run-1')).rejects.toThrow('unrelated invariant failure');
   });
 
   it('stops immediately when execution is provider-blocked', async () => {

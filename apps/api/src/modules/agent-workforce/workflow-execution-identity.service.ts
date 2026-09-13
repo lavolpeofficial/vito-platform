@@ -4,6 +4,22 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { WorkflowAgentAssignmentService } from './workflow-agent-assignment.service';
 import { WorkflowExecutionPlanService } from './workflow-execution-plan.service';
 
+export const WORKFORCE_ASSIGNMENT_REQUIRED = 'WORKFORCE_ASSIGNMENT_REQUIRED' as const;
+
+export class WorkflowWorkforceAssignmentRequiredException extends BadRequestException {
+  readonly boundary = WORKFORCE_ASSIGNMENT_REQUIRED;
+
+  constructor() {
+    super({
+      statusCode: 400,
+      error: 'Bad Request',
+      message:
+        'Persisted workflow agent execution requires either an approved step assignment or a task assigned to a DigitalEmployee.',
+      boundary: WORKFORCE_ASSIGNMENT_REQUIRED,
+    });
+  }
+}
+
 export interface PersistedWorkflowExecutionIdentity {
   readonly organizationId: string;
   readonly workflowRunId: string;
@@ -71,9 +87,7 @@ export class WorkflowExecutionIdentityService {
 
     const agentId = assignment?.digitalEmployeeId ?? task.assignedDigitalEmployeeId;
     if (!agentId) {
-      throw new BadRequestException(
-        'Persisted workflow agent execution requires either an approved step assignment or a task assigned to a DigitalEmployee.',
-      );
+      throw new WorkflowWorkforceAssignmentRequiredException();
     }
 
     const agent = await this.prisma.digitalEmployee.findFirst({

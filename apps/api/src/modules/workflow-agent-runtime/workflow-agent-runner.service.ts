@@ -1,4 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import {
+  WORKFORCE_ASSIGNMENT_REQUIRED,
+  WorkflowWorkforceAssignmentRequiredException,
+} from '../agent-workforce/workflow-execution-identity.service';
 import { WorkflowVerificationService } from '../workflow-verification/workflow-verification.service';
 import { WorkflowAgentRuntimeService } from './workflow-agent-runtime.service';
 
@@ -17,7 +21,22 @@ export class WorkflowAgentRunnerService {
     const executions: StepExecution[] = [];
 
     for (let index = 0; index < MAX_AUTONOMOUS_STEPS; index += 1) {
-      const execution = await this.runtime.executeCurrentStep(organizationId, workflowRunId);
+      let execution: StepExecution;
+      try {
+        execution = await this.runtime.executeCurrentStep(organizationId, workflowRunId);
+      } catch (error) {
+        if (error instanceof WorkflowWorkforceAssignmentRequiredException) {
+          return Object.freeze({
+            disposition: 'BOUNDARY_REACHED' as const,
+            boundary: WORKFORCE_ASSIGNMENT_REQUIRED,
+            workflowRunId,
+            stepsExecuted: executions.length,
+            executions: Object.freeze([...executions]),
+          });
+        }
+        throw error;
+      }
+
       executions.push(execution);
 
       if (
