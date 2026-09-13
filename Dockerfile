@@ -6,7 +6,7 @@ ENV PATH="$PNPM_HOME:$PATH"
 WORKDIR /app
 
 RUN apt-get update \
- && apt-get install -y openssl \
+ && apt-get install -y --no-install-recommends openssl \
  && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable
@@ -26,18 +26,25 @@ FROM node:22-bookworm-slim AS runtime
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
+ENV COREPACK_HOME="/opt/corepack"
 ENV NODE_ENV="production"
 
 WORKDIR /app
 
 RUN apt-get update \
- && apt-get install -y openssl \
+ && apt-get install -y --no-install-recommends \
+      bubblewrap \
+      ca-certificates \
+      git \
+      openssl \
  && rm -rf /var/lib/apt/lists/*
 
-RUN corepack enable
+RUN corepack enable \
+ && corepack prepare pnpm@11.17.0 --activate \
+ && pnpm --version
 
 COPY --from=builder /app /app
 
-EXPOSE 3000
+EXPOSE 3000 3001
 
 CMD ["pnpm", "start"]
