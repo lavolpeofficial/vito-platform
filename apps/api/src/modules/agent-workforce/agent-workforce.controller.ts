@@ -1,10 +1,11 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
-import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiCreatedResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 
 import { Roles } from '../../common/decorators/roles.decorator';
 import { TenantContext } from '../../common/tenant/tenant-context';
 import { AgentWorkforceService } from './agent-workforce.service';
+import { EngineeringAgentProvisioningService } from './engineering-agent-provisioning.service';
 import { DispatchAgentTaskDto } from './dto/dispatch-agent-task.dto';
 
 @ApiTags('agent-workforce')
@@ -13,8 +14,17 @@ import { DispatchAgentTaskDto } from './dto/dispatch-agent-task.dto';
 export class AgentWorkforceController {
   constructor(
     private readonly service: AgentWorkforceService,
+    private readonly engineeringProvisioning: EngineeringAgentProvisioningService,
     private readonly tenantContext: TenantContext,
   ) {}
+
+  @Post('engineering-agent/provision')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiCreatedResponse({ description: 'Governed VITO engineering agent DRAFT bootstrap created or verified. No execution authority is enabled.' })
+  provisionEngineeringAgent() {
+    return this.engineeringProvisioning.provision();
+  }
 
   @Post('dispatch')
   @Roles(UserRole.OWNER, UserRole.ADMIN)
