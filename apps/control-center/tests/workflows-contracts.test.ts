@@ -23,9 +23,16 @@ test('accepts server-owned explicit human release action', () => {
   assert.equal(parsed.nextAction, 'APPROVE_HUMAN_RELEASE');
 });
 
+test('accepts server-owned review verdict processing without browser verdict data', () => {
+  const parsed = parseWorkflowSnapshot({ ...BASE, currentStepType: 'PARSE_VERDICT', nextAction: 'PROCESS_REVIEW_VERDICT' });
+  assert.ok(parsed);
+  assert.equal(parsed.nextAction, 'PROCESS_REVIEW_VERDICT');
+});
+
 test('rejects authority escalation and unknown next actions', () => {
   assert.equal(parseWorkflowSnapshot({ ...BASE, authority: 'WRITE' }), null);
   assert.equal(parseWorkflowSnapshot({ ...BASE, nextAction: 'APPROVE_RELEASE' }), null);
+  assert.equal(parseWorkflowSnapshot({ ...BASE, nextAction: 'SUBMIT_BROWSER_VERDICT' }), null);
 });
 
 test('accepts only a non-executing explicit human approval response', () => {
