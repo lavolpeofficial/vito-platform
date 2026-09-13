@@ -35,39 +35,31 @@ describe('WorkflowObserverService', () => {
     expect(result.nextAction).toBe('APPROVE_HUMAN_RELEASE');
   });
 
-  it('offers server-owned verdict processing for PARSE_VERDICT at AL1-AL3', async () => {
-    workflowRun.findFirst.mockResolvedValue({
-      id: 'run-verdict', organizationId: 'org-1', correlationId: 'corr-verdict', status: 'RUNNING', currentStepType: 'PARSE_VERDICT', assuranceLevel: 'AL3',
-      blockReasonCode: null, failureReasonCode: null, correctionLoopCount: 0, maxCorrectionLoops: 3, startedAt: new Date(), completedAt: null,
-      stepRuns: [{ id: 'step-verdict', stepType: 'PARSE_VERDICT', status: 'READY', attemptNumber: 1, causationId: null, startedAt: new Date(), finishedAt: null }],
-    });
-    auditEvent.findMany.mockResolvedValue([]);
-    const result = await service.observe('org-1', 'run-verdict');
-    expect(result.boundary).toBe('ACTIVE');
-    expect(result.nextAction).toBe('PROCESS_REVIEW_VERDICT');
+  it('offers server-owned verdict processing for PARSE_VERDICT at AL1-AL4', async () => {
+    for (const assuranceLevel of ['AL1', 'AL2', 'AL3', 'AL4']) {
+      workflowRun.findFirst.mockResolvedValue({
+        id: `run-verdict-${assuranceLevel}`, organizationId: 'org-1', correlationId: `corr-verdict-${assuranceLevel}`, status: 'RUNNING', currentStepType: 'PARSE_VERDICT', assuranceLevel,
+        blockReasonCode: null, failureReasonCode: null, correctionLoopCount: 0, maxCorrectionLoops: 3, startedAt: new Date(), completedAt: null,
+        stepRuns: [{ id: `step-verdict-${assuranceLevel}`, stepType: 'PARSE_VERDICT', status: 'READY', attemptNumber: 1, causationId: null, startedAt: new Date(), finishedAt: null }],
+      });
+      auditEvent.findMany.mockResolvedValue([]);
+      const result = await service.observe('org-1', `run-verdict-${assuranceLevel}`);
+      expect(result.boundary).toBe('ACTIVE');
+      expect(result.nextAction).toBe('PROCESS_REVIEW_VERDICT');
+    }
   });
 
-  it('keeps PARSE_VERDICT fail-closed at AL4', async () => {
-    workflowRun.findFirst.mockResolvedValue({
-      id: 'run-verdict-al4', organizationId: 'org-1', correlationId: 'corr-verdict-al4', status: 'RUNNING', currentStepType: 'PARSE_VERDICT', assuranceLevel: 'AL4',
-      blockReasonCode: null, failureReasonCode: null, correctionLoopCount: 0, maxCorrectionLoops: 3, startedAt: new Date(), completedAt: null,
-      stepRuns: [{ id: 'step-verdict-al4', stepType: 'PARSE_VERDICT', status: 'READY', attemptNumber: 1, causationId: null, startedAt: new Date(), finishedAt: null }],
-    });
-    auditEvent.findMany.mockResolvedValue([]);
-    const result = await service.observe('org-1', 'run-verdict-al4');
-    expect(result.boundary).toBe('ACTIVE');
-    expect(result.nextAction).toBe('HUMAN_REVIEW_REQUIRED');
-  });
-
-  it('fails closed at PARSE_VERDICT when assurance is unavailable', async () => {
-    workflowRun.findFirst.mockResolvedValue({
-      id: 'run-verdict-unknown', organizationId: 'org-1', correlationId: 'corr-verdict-unknown', status: 'RUNNING', currentStepType: 'PARSE_VERDICT', assuranceLevel: null,
-      blockReasonCode: null, failureReasonCode: null, correctionLoopCount: 0, maxCorrectionLoops: 3, startedAt: new Date(), completedAt: null,
-      stepRuns: [{ id: 'step-verdict-unknown', stepType: 'PARSE_VERDICT', status: 'READY', attemptNumber: 1, causationId: null, startedAt: new Date(), finishedAt: null }],
-    });
-    auditEvent.findMany.mockResolvedValue([]);
-    const result = await service.observe('org-1', 'run-verdict-unknown');
-    expect(result.nextAction).toBe('HUMAN_REVIEW_REQUIRED');
+  it('fails closed at PARSE_VERDICT when assurance is unavailable or invalid', async () => {
+    for (const assuranceLevel of [null, 'AL5']) {
+      workflowRun.findFirst.mockResolvedValue({
+        id: 'run-verdict-unknown', organizationId: 'org-1', correlationId: 'corr-verdict-unknown', status: 'RUNNING', currentStepType: 'PARSE_VERDICT', assuranceLevel,
+        blockReasonCode: null, failureReasonCode: null, correctionLoopCount: 0, maxCorrectionLoops: 3, startedAt: new Date(), completedAt: null,
+        stepRuns: [{ id: 'step-verdict-unknown', stepType: 'PARSE_VERDICT', status: 'READY', attemptNumber: 1, causationId: null, startedAt: new Date(), finishedAt: null }],
+      });
+      auditEvent.findMany.mockResolvedValue([]);
+      const result = await service.observe('org-1', 'run-verdict-unknown');
+      expect(result.nextAction).toBe('HUMAN_REVIEW_REQUIRED');
+    }
   });
 
   it('fails closed at RELEASE_EXECUTION because no agent capability owns that step', async () => {
