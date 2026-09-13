@@ -14,6 +14,7 @@ export type WorkflowBoundary =
 export type WorkflowNextAction =
   | 'START_RUN'
   | 'EXECUTE_CURRENT_STEP'
+  | 'COORDINATE_AL4_REVIEWS'
   | 'PROCESS_REVIEW_VERDICT'
   | 'RESUME_RUN'
   | 'APPROVE_HUMAN_RELEASE'
@@ -91,8 +92,14 @@ export class WorkflowObserverService {
   ): WorkflowNextAction {
     if (status === 'CREATED') return 'START_RUN';
     if (status === 'RUNNING' && currentStepType === 'HUMAN_RELEASE_GATE') return 'APPROVE_HUMAN_RELEASE';
+    if (status === 'RUNNING' && currentStepType === 'RED_TEAM') {
+      const normalized = this.normalizeAssuranceLevel(assuranceLevel);
+      if (normalized === 'AL4') return 'COORDINATE_AL4_REVIEWS';
+      if (normalized && normalized !== 'AL4') return 'EXECUTE_CURRENT_STEP';
+      return 'HUMAN_REVIEW_REQUIRED';
+    }
     if (status === 'RUNNING' && currentStepType === 'PARSE_VERDICT') {
-      return this.serverOwnedVerdictProcessingAllowed(assuranceLevel)
+      return this.normalizeAssuranceLevel(assuranceLevel)
         ? 'PROCESS_REVIEW_VERDICT'
         : 'HUMAN_REVIEW_REQUIRED';
     }
@@ -103,9 +110,9 @@ export class WorkflowObserverService {
     return 'NONE';
   }
 
-  private serverOwnedVerdictProcessingAllowed(assuranceLevel: string | null): boolean {
-    if (!assuranceLevel) return false;
+  private normalizeAssuranceLevel(assuranceLevel: string | null): 'AL1' | 'AL2' | 'AL3' | 'AL4' | null {
+    if (!assuranceLevel) return null;
     const normalized = assuranceLevel.replace(/^AL-(\d)$/u, 'AL$1');
-    return /^AL[1-4]$/u.test(normalized);
+    return /^AL[1-4]$/u.test(normalized) ? normalized as 'AL1' | 'AL2' | 'AL3' | 'AL4' : null;
   }
 }
