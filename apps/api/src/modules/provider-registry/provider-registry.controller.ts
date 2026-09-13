@@ -4,6 +4,7 @@ import { UserRole } from '@prisma/client';
 import type { ProviderRoutingRequest } from '@vito/contracts';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { TenantContext } from '../../common/tenant/tenant-context';
+import { EngineeringProviderProvisioningService } from './engineering-provider-provisioning.service';
 import { ProviderRegistryService } from './provider-registry.service';
 import { ProviderRouterService } from './provider-router.service';
 
@@ -14,8 +15,15 @@ export class ProviderRegistryController {
   constructor(
     private readonly registryService: ProviderRegistryService,
     private readonly routerService: ProviderRouterService,
+    private readonly engineeringProvisioning: EngineeringProviderProvisioningService,
     private readonly tenantContext: TenantContext,
   ) {}
+
+  @Post('engineering-provider/provision')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  provisionEngineeringProvider() {
+    return this.engineeringProvisioning.provision();
+  }
 
   @Post('providers')
   @Roles(UserRole.OWNER, UserRole.ADMIN)
