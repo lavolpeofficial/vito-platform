@@ -8,6 +8,7 @@ import { LearningModule } from '../learning/learning.module';
 import { MemoryModule } from '../memory/memory.module';
 import { AgentWorkforceController } from './agent-workforce.controller';
 import { AgentWorkforceService } from './agent-workforce.service';
+import { EngineeringAgentProvisioningService } from './engineering-agent-provisioning.service';
 import { WorkflowAgentAssignmentController } from './workflow-agent-assignment.controller';
 import { WorkflowAgentAssignmentService } from './workflow-agent-assignment.service';
 import { WorkflowExecutionIdentityService } from './workflow-execution-identity.service';
@@ -25,10 +26,16 @@ import { WorkflowExecutionPlanService } from './workflow-execution-plan.service'
   controllers: [AgentWorkforceController, WorkflowAgentAssignmentController],
   providers: [
     AgentWorkforceService,
+    EngineeringAgentProvisioningService,
     WorkflowExecutionIdentityService,
     WorkflowExecutionPlanService,
     WorkflowAgentAssignmentService,
   ],
-  exports: [AgentWorkforceService, WorkflowExecutionPlanService, WorkflowAgentAssignmentService],
+  exports: [
+    AgentWorkforceService,
+    EngineeringAgentProvisioningService,
+    WorkflowExecutionPlanService,
+    WorkflowAgentAssignmentService,
+  ],
 })
 export class AgentWorkforceModule {}
