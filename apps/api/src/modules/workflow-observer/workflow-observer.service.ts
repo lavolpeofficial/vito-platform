@@ -106,6 +106,6 @@ export class WorkflowObserverService {
   private serverOwnedVerdictProcessingAllowed(assuranceLevel: string | null): boolean {
     if (!assuranceLevel) return false;
     const normalized = assuranceLevel.replace(/^AL-(\d)$/u, 'AL$1');
-    return normalized === 'AL1' || normalized === 'AL2' || normalized === 'AL3';
+    return /^AL[1-4]$/u.test(normalized);
   }
 }
