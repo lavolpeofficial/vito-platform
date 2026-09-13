@@ -267,6 +267,9 @@ describePg('VITO AL4 end-to-end dogfood · PostgreSQL proof', () => {
       disposition: 'AL4_VERDICT_TRANSITIONED',
       assuranceLevel: 'AL4',
     });
+    if (verdictResult.disposition !== 'AL4_VERDICT_TRANSITIONED') {
+      throw new Error(`Expected AL4 verdict transition, got ${verdictResult.disposition}.`);
+    }
     expect(verdictResult.reviewerExecutionIds).toHaveLength(2);
 
     const verifyStep = await prisma.workflowStepRun.findFirstOrThrow({
