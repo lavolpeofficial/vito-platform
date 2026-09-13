@@ -45,7 +45,7 @@ services:
       OPERATOR_BRIDGE_EXPOSURE: internal
       SENSITIVE_PAYLOAD_TTL_HOURS: "72"
       VITO_SERVER_CREDENTIALS: "{}"
-      VITO_REPOSITORY_REGISTRY: "[]"
+      VITO_REPOSITORY_REGISTRY: '[{"repositoryId":"lavolpeofficial/vito-platform","cloneUrl":"https://github.com/lavolpeofficial/vito-platform.git","allowedBaseRefs":["main"],"enabled":true}]'
       VITO_TRUSTED_LOCAL_EXECUTABLES: "{}"
       VITO_TRUSTED_AGENT_LAUNCHER_ROOT: /opt/vito/trusted-launchers
       VITO_SANDBOX_TECHNOLOGY: bubblewrap
