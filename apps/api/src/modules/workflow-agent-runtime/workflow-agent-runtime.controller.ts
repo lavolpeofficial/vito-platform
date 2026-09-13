@@ -1,10 +1,11 @@
-import { Controller, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
+import { Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { TenantContext } from '../../common/tenant/tenant-context';
 import { WorkflowAgentRunnerService } from './workflow-agent-runner.service';
 import { WorkflowAgentRuntimeService } from './workflow-agent-runtime.service';
+import { WorkflowReviewEvidenceService } from './workflow-review-evidence.service';
 
 @ApiTags('workflow-agent-runtime')
 @ApiBearerAuth()
@@ -13,6 +14,7 @@ export class WorkflowAgentRuntimeController {
   constructor(
     private readonly service: WorkflowAgentRuntimeService,
     private readonly runner: WorkflowAgentRunnerService,
+    private readonly reviewEvidence: WorkflowReviewEvidenceService,
     private readonly tenantContext: TenantContext,
   ) {}
 
@@ -34,5 +36,15 @@ export class WorkflowAgentRuntimeController {
   executeUntilBoundary(@Param('workflowRunId') workflowRunId: string) {
     const organizationId = this.tenantContext.getOrThrow();
     return this.runner.executeUntilBoundary(organizationId, workflowRunId);
+  }
+
+  @Get(':workflowRunId/review-evidence')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @ApiOkResponse({
+    description: 'Resolves the authoritative governed RED_TEAM execution evidence lineage without interpreting a verdict.',
+  })
+  resolveReviewEvidence(@Param('workflowRunId') workflowRunId: string) {
+    const organizationId = this.tenantContext.getOrThrow();
+    return this.reviewEvidence.resolve(organizationId, workflowRunId);
   }
 }
