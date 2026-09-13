@@ -82,7 +82,7 @@ describe('ProviderRegistryController authority boundary', () => {
     'createProvider', 'updateProvider', 'activateProvider', 'updateHealthStatus', 'updateQuotaStatus',
     'assignCapability', 'setCapabilityEnabled',
   ])('requires OWNER or ADMIN for mutating handler %s', (handlerName) => {
-    const roles = Reflect.getMetadadata(ROLES_KEY, (ProviderRegistryController.prototype as any)[handlerName]);
+    const roles = Reflect.getMetadata(ROLES_KEY, (ProviderRegistryController.prototype as any)[handlerName]);
     expect(roles).toEqual([UserRole.OWNER, UserRole.ADMIN]);
   });
 
