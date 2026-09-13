@@ -6,6 +6,7 @@ import { TenantContext } from '../../common/tenant/tenant-context';
 import { WorkflowAgentRunnerService } from './workflow-agent-runner.service';
 import { WorkflowAgentRuntimeService } from './workflow-agent-runtime.service';
 import { WorkflowReviewEvidenceService } from './workflow-review-evidence.service';
+import { WorkflowReviewVerdictService } from './workflow-review-verdict.service';
 
 @ApiTags('workflow-agent-runtime')
 @ApiBearerAuth()
@@ -15,6 +16,7 @@ export class WorkflowAgentRuntimeController {
     private readonly service: WorkflowAgentRuntimeService,
     private readonly runner: WorkflowAgentRunnerService,
     private readonly reviewEvidence: WorkflowReviewEvidenceService,
+    private readonly reviewVerdict: WorkflowReviewVerdictService,
     private readonly tenantContext: TenantContext,
   ) {}
 
@@ -46,5 +48,17 @@ export class WorkflowAgentRuntimeController {
   resolveReviewEvidence(@Param('workflowRunId') workflowRunId: string) {
     const organizationId = this.tenantContext.getOrThrow();
     return this.reviewEvidence.resolve(organizationId, workflowRunId);
+  }
+
+  @Post(':workflowRunId/parse-verdict')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description:
+      'Transitions a READY PARSE_VERDICT step only from the persisted typed RED_TEAM ReviewResult bound to authoritative governed execution evidence. AL4 remains fail-closed.',
+  })
+  parseVerdict(@Param('workflowRunId') workflowRunId: string) {
+    const organizationId = this.tenantContext.getOrThrow();
+    return this.reviewVerdict.parseAndTransition(organizationId, workflowRunId);
   }
 }

@@ -7,11 +7,22 @@ import { WorkflowAgentRuntimeController } from './workflow-agent-runtime.control
 import { WorkflowAgentRunnerService } from './workflow-agent-runner.service';
 import { WorkflowAgentRuntimeService } from './workflow-agent-runtime.service';
 import { WorkflowReviewEvidenceService } from './workflow-review-evidence.service';
+import { WorkflowReviewVerdictService } from './workflow-review-verdict.service';
 
 @Module({
   imports: [AgentWorkforceModule, WorkflowRuntimeModule, LearningModule, WorkflowVerificationModule],
   controllers: [WorkflowAgentRuntimeController],
-  providers: [WorkflowAgentRuntimeService, WorkflowAgentRunnerService, WorkflowReviewEvidenceService],
-  exports: [WorkflowAgentRuntimeService, WorkflowAgentRunnerService, WorkflowReviewEvidenceService],
+  providers: [
+    WorkflowAgentRuntimeService,
+    WorkflowAgentRunnerService,
+    WorkflowReviewEvidenceService,
+    WorkflowReviewVerdictService,
+  ],
+  exports: [
+    WorkflowAgentRuntimeService,
+    WorkflowAgentRunnerService,
+    WorkflowReviewEvidenceService,
+    WorkflowReviewVerdictService,
+  ],
 })
 export class WorkflowAgentRuntimeModule {}
