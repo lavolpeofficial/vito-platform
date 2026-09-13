@@ -1,0 +1,112 @@
+name: vito-staging
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vito_staging
+      POSTGRES_PASSWORD: ${VITO_STAGING_DB_PASSWORD:?VITO_STAGING_DB_PASSWORD is required}
+      POSTGRES_DB: vito_staging
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vito_staging -d vito_staging"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - vito-staging
+
+  api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: vito-staging-app:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://vito_staging:${VITO_STAGING_DB_PASSWORD}@postgres:5432/vito_staging
+      PORT: "3000"
+      NODE_ENV: staging
+      ENABLE_SWAGGER: "false"
+      JWT_SECRET: ${VITO_STAGING_JWT_SECRET:?VITO_STAGING_JWT_SECRET is required}
+      JWT_EXPIRES_IN: 15m
+      ALLOW_INSECURE_TENANT_HEADER: "false"
+      CORS_ALLOWED_ORIGINS: http://127.0.0.1:33001
+      LOGIN_RATE_LIMIT_MAX: "5"
+      LOGIN_RATE_LIMIT_WINDOW_MS: "60000"
+      SOURCE_VAULT_STORAGE_DRIVER: local
+      SOURCE_VAULT_LOCAL_DIR: /var/lib/vito/source-vault
+      SOURCE_VAULT_MAX_UPLOAD_BYTES: "26214400"
+      GOVERNED_WORKSPACE_ROOT: /var/lib/vito/workspaces
+      OPERATOR_BRIDGE_EXPOSURE: internal
+      SENSITIVE_PAYLOAD_TTL_HOURS: "72"
+      VITO_SERVER_CREDENTIALS: "{}"
+      VITO_REPOSITORY_REGISTRY: "[]"
+      VITO_TRUSTED_LOCAL_EXECUTABLES: "{}"
+      VITO_TRUSTED_AGENT_LAUNCHER_ROOT: /opt/vito/trusted-launchers
+      VITO_SANDBOX_TECHNOLOGY: bubblewrap
+    command:
+      - sh
+      - -c
+      - |
+        pnpm prisma:migrate:deploy
+        exec pnpm start
+    ports:
+      - "127.0.0.1:33000:3000"
+    volumes:
+      - source-vault:/var/lib/vito/source-vault
+      - governed-workspaces:/var/lib/vito/workspaces
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - vito-staging
+
+  control-center:
+    image: vito-staging-app:local
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      VITO_API_BASE_URL: http://api:3000
+    command:
+      - pnpm
+      - --filter
+      - "@vito/control-center"
+      - start
+    ports:
+      - "127.0.0.1:33001:3001"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3001/').then(r=>{if(r.status>=500)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - vito-staging
+
+volumes:
+  postgres-data:
+  source-vault:
+  governed-workspaces:
+
+networks:
+  vito-staging:
+    internal: true
