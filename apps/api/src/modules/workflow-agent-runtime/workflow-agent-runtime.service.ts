@@ -8,6 +8,9 @@ import { RuntimeReflectionLearningService } from '../learning/runtime-reflection
 import { WorkflowRuntimeService } from '../workflow-runtime/workflow-runtime.service';
 
 const MAX_TASK_CONTEXT_CHARS = 32_000;
+const MAX_EXECUTION_EVIDENCE_REFERENCES = 32;
+const MAX_EXECUTION_EVIDENCE_REFERENCE_CHARS = 2_048;
+const MAX_EXECUTION_EVIDENCE_ID_CHARS = 256;
 
 @Injectable()
 export class WorkflowAgentRuntimeService {
@@ -85,6 +88,7 @@ export class WorkflowAgentRuntimeService {
     });
 
     const executionStatus = dispatch.execution.status as AgentExecutionStatus;
+    const executionEvidence = this.executionEvidence(dispatch.execution);
     const completionStatus = this.toWorkflowCompletionStatus(executionStatus);
     const providerBlocked =
       executionStatus === AgentExecutionStatus.POLICY_BLOCKED ||
@@ -105,6 +109,7 @@ export class WorkflowAgentRuntimeService {
           selectedProviderCode: dispatch.selectedProviderCode,
           experienceId: dispatch.experienceId,
           executionStatus,
+          executionEvidence,
         },
       });
       const outcomeEvaluation = await this.recordOutcome({
@@ -167,6 +172,7 @@ export class WorkflowAgentRuntimeService {
         selectedProviderCode: dispatch.selectedProviderCode,
         experienceId: dispatch.experienceId,
         executionStatus,
+        executionEvidence,
       },
     });
 
@@ -222,6 +228,62 @@ export class WorkflowAgentRuntimeService {
       });
     }
     return outcome;
+  }
+
+  /**
+   * Preserve only bounded references from the governed invocation result.
+   * This is provenance for later server-side evidence resolution; it is not
+   * verdict authority and never carries arbitrary provider metadata forward.
+   */
+  private executionEvidence(execution: unknown): Readonly<Record<string, unknown>> {
+    if (!execution || typeof execution !== 'object' || Array.isArray(execution)) {
+      return Object.freeze({});
+    }
+
+    const source = execution as Record<string, unknown>;
+    const evidence: Record<string, unknown> = {};
+
+    const invocationId = this.boundedEvidenceScalar(
+      source.invocationId,
+      MAX_EXECUTION_EVIDENCE_ID_CHARS,
+    );
+    if (invocationId) evidence.invocationId = invocationId;
+
+    const outputReference = this.boundedEvidenceScalar(
+      source.outputReference,
+      MAX_EXECUTION_EVIDENCE_REFERENCE_CHARS,
+    );
+    if (outputReference) evidence.outputReference = outputReference;
+
+    const artifactReferences = this.boundedEvidenceReferences(source.artifactReferences);
+    if (artifactReferences.length > 0) evidence.artifactReferences = artifactReferences;
+
+    const evidenceReferences = this.boundedEvidenceReferences(source.evidenceReferences);
+    if (evidenceReferences.length > 0) evidence.evidenceReferences = evidenceReferences;
+
+    return Object.freeze(evidence);
+  }
+
+  private boundedEvidenceScalar(value: unknown, maxChars: number): string | null {
+    if (typeof value !== 'string' || value.length === 0 || value.length > maxChars) {
+      return null;
+    }
+    return value;
+  }
+
+  private boundedEvidenceReferences(value: unknown): readonly string[] {
+    if (!Array.isArray(value)) return Object.freeze([]);
+
+    const references = value
+      .filter(
+        (item): item is string =>
+          typeof item === 'string' &&
+          item.length > 0 &&
+          item.length <= MAX_EXECUTION_EVIDENCE_REFERENCE_CHARS,
+      )
+      .slice(0, MAX_EXECUTION_EVIDENCE_REFERENCES);
+
+    return Object.freeze(references);
   }
 
   private buildPrompt(stepType: string, title: string, description: string | null): string {
