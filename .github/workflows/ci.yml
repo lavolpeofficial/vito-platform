@@ -77,6 +77,7 @@ jobs:
         with:
           version: 11.17.0
           run_install: false
+          dest: ${{ runner.temp }}/vito-ci-${{ github.run_id }}-${{ github.run_attempt }}/pnpm
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -88,6 +89,13 @@ jobs:
         shell: bash
         run: |
           test -n "$PNPM_HOME"
+          case "$PNPM_HOME" in
+            "$VITO_CI_TEMP"/pnpm/node_modules/.bin) ;;
+            *)
+              echo "pnpm installation escaped bounded workflow workspace: $PNPM_HOME" >&2
+              exit 1
+              ;;
+          esac
           export PATH="$PNPM_HOME:$PATH"
           echo "$PNPM_HOME" >> "$GITHUB_PATH"
           command -v pnpm
