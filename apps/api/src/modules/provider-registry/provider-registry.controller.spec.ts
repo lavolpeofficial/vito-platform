@@ -12,10 +12,29 @@ describe('ProviderRegistryController authority boundary', () => {
     route: jest.fn(), findDecisionById: jest.fn(),
     findDecisionsByCorrelationId: jest.fn(), findDecisionsByWorkflowRunId: jest.fn(),
   };
+  const engineeringProvisioning = { provision: jest.fn() };
   const tenantContext = { getOrThrow: jest.fn(() => 'org-jwt') };
-  const controller = new ProviderRegistryController(registry as any, router as any, tenantContext as any);
+  const controller = new ProviderRegistryController(
+    registry as any,
+    router as any,
+    engineeringProvisioning as any,
+    tenantContext as any,
+  );
 
   beforeEach(() => jest.clearAllMocks());
+
+  it('delegates governed engineering provider bootstrap without caller-owned authority input', async () => {
+    engineeringProvisioning.provision.mockResolvedValue({
+      providerCode: 'cloud.openai.main',
+      status: 'DISABLED',
+    });
+
+    await expect(controller.provisionEngineeringProvider()).resolves.toEqual({
+      providerCode: 'cloud.openai.main',
+      status: 'DISABLED',
+    });
+    expect(engineeringProvisioning.provision).toHaveBeenCalledTimes(1);
+  });
 
   it('derives provider CRUD tenant exclusively from TenantContext', async () => {
     registry.createProvider.mockResolvedValue({ id: 'provider-1' });
@@ -41,6 +60,7 @@ describe('ProviderRegistryController authority boundary', () => {
   });
 
   it.each([
+    'provisionEngineeringProvider',
     'createProvider', 'updateProvider', 'updateHealthStatus', 'updateQuotaStatus',
     'assignCapability', 'setCapabilityEnabled',
   ])('requires OWNER or ADMIN for mutating handler %s', (handlerName) => {
