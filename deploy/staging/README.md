@@ -59,3 +59,13 @@ bash scripts/staging/bootstrap-owner.sh
 ```
 
 The bootstrap is idempotent through the existing Prisma seed. It then performs a real JWT login and an authenticated read-only `GET /operations/summary` smoke check. The access token remains process-local and is never printed. This bootstrap does not approve Human Release, enable providers/capabilities, or grant execution authority beyond the existing OWNER role.
+
+## Run the governed dogfood goal flow
+
+With the same OWNER credentials present in the environment, exercise the real staging control path:
+
+```bash
+node scripts/staging/dogfood-goal-flow.mjs
+```
+
+The harness performs a real OWNER login, creates a non-executable governed engineering plan, materializes it into a `CREATED` workflow, starts that workflow, executes only through the bounded `execute-until-boundary` runtime, and observes the persisted result. It never calls the Human Release approval endpoint, never resumes a blocked workflow automatically, and treats an unapproved transition into `RELEASE_EXECUTION` or a completed workflow as a hard failure.
