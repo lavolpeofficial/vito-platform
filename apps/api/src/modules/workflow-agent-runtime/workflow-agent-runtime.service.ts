@@ -6,6 +6,7 @@ import { WorkflowExecutionPlanService } from '../agent-workforce/workflow-execut
 import { RuntimeOutcomeEvaluationService } from '../learning/runtime-outcome-evaluation.service';
 import { RuntimeReflectionLearningService } from '../learning/runtime-reflection-learning.service';
 import { WorkflowRuntimeService } from '../workflow-runtime/workflow-runtime.service';
+import { WorkflowReviewResultProjectorService } from './workflow-review-result-projector.service';
 
 const MAX_TASK_CONTEXT_CHARS = 32_000;
 const MAX_EXECUTION_EVIDENCE_REFERENCES = 32;
@@ -14,6 +15,8 @@ const MAX_EXECUTION_EVIDENCE_ID_CHARS = 256;
 
 @Injectable()
 export class WorkflowAgentRuntimeService {
+  private readonly reviewProjector = new WorkflowReviewResultProjectorService();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly agentWorkforce: AgentWorkforceService,
@@ -73,9 +76,6 @@ export class WorkflowAgentRuntimeService {
     });
     if (!task) throw new NotFoundException('Workflow task not found.');
 
-    // Agent identity is resolved server-side by AgentWorkforce from persisted
-    // workflow-step assignment first, with the legacy task assignment retained
-    // only as a backwards-compatible fallback.
     const prompt = this.buildPrompt(step.stepType, task.title, task.description);
     const dispatch = await this.agentWorkforce.dispatch({
       organizationId,
@@ -159,6 +159,52 @@ export class WorkflowAgentRuntimeService {
       });
     }
 
+    const reviewResult =
+      step.stepType === EngineeringStepType.RED_TEAM && completionStatus === 'SUCCEEDED'
+        ? this.reviewProjector.project(dispatch.execution, run.assuranceLevel)
+        : null;
+
+    if (step.stepType === EngineeringStepType.RED_TEAM && completionStatus === 'SUCCEEDED' && !reviewResult) {
+      const transition = await this.workflowRuntime.completeStep({
+        organizationId,
+        workflowRunId,
+        workflowStepRunId: step.id,
+        stepStatus: 'FAILED',
+        metadata: {
+          source: 'WORKFLOW_AGENT_RUNTIME',
+          capabilityCode,
+          routingDecisionId: dispatch.routingDecisionId,
+          selectedProviderId: dispatch.selectedProviderId,
+          selectedProviderCode: dispatch.selectedProviderCode,
+          experienceId: dispatch.experienceId,
+          executionStatus,
+          executionEvidence,
+          reviewProjectionStatus: 'INVALID',
+        },
+      });
+      const outcomeEvaluation = await this.recordOutcome({
+        organizationId,
+        experienceId: dispatch.experienceId,
+        workflowRunId,
+        workflowStepRunId: step.id,
+        stepType: step.stepType,
+        capabilityCode,
+        executionStatus,
+        transitionKind: transition.outcome?.kind ?? null,
+      });
+      return Object.freeze({
+        disposition: 'REVIEW_RESULT_INVALID' as const,
+        workflowRunId,
+        workflowStepRunId: step.id,
+        stepType: step.stepType,
+        capabilityCode,
+        executionStatus,
+        dispatch,
+        transition,
+        outcomeEvaluation,
+      });
+    }
+
     const transition = await this.workflowRuntime.completeStep({
       organizationId,
       workflowRunId,
@@ -173,6 +219,7 @@ export class WorkflowAgentRuntimeService {
         experienceId: dispatch.experienceId,
         executionStatus,
         executionEvidence,
+        ...(reviewResult ? { reviewProjectionStatus: 'VALID', reviewResult } : {}),
       },
     });
 
@@ -230,67 +277,48 @@ export class WorkflowAgentRuntimeService {
     return outcome;
   }
 
-  /**
-   * Preserve only bounded references from the governed invocation result.
-   * This is provenance for later server-side evidence resolution; it is not
-   * verdict authority and never carries arbitrary provider metadata forward.
-   */
   private executionEvidence(execution: unknown): Readonly<Record<string, unknown>> {
     if (!execution || typeof execution !== 'object' || Array.isArray(execution)) {
       return Object.freeze({});
     }
-
     const source = execution as Record<string, unknown>;
     const evidence: Record<string, unknown> = {};
-
-    const invocationId = this.boundedEvidenceScalar(
-      source.invocationId,
-      MAX_EXECUTION_EVIDENCE_ID_CHARS,
-    );
+    const invocationId = this.boundedEvidenceScalar(source.invocationId, MAX_EXECUTION_EVIDENCE_ID_CHARS);
     if (invocationId) evidence.invocationId = invocationId;
-
-    const outputReference = this.boundedEvidenceScalar(
-      source.outputReference,
-      MAX_EXECUTION_EVIDENCE_REFERENCE_CHARS,
-    );
+    const outputReference = this.boundedEvidenceScalar(source.outputReference, MAX_EXECUTION_EVIDENCE_REFERENCE_CHARS);
     if (outputReference) evidence.outputReference = outputReference;
-
     const artifactReferences = this.boundedEvidenceReferences(source.artifactReferences);
     if (artifactReferences.length > 0) evidence.artifactReferences = artifactReferences;
-
     const evidenceReferences = this.boundedEvidenceReferences(source.evidenceReferences);
     if (evidenceReferences.length > 0) evidence.evidenceReferences = evidenceReferences;
-
     return Object.freeze(evidence);
   }
 
   private boundedEvidenceScalar(value: unknown, maxChars: number): string | null {
-    if (typeof value !== 'string' || value.length === 0 || value.length > maxChars) {
-      return null;
-    }
+    if (typeof value !== 'string' || value.length === 0 || value.length > maxChars) return null;
     return value;
   }
 
   private boundedEvidenceReferences(value: unknown): readonly string[] {
     if (!Array.isArray(value)) return Object.freeze([]);
-
-    const references = value
-      .filter(
-        (item): item is string =>
-          typeof item === 'string' &&
-          item.length > 0 &&
-          item.length <= MAX_EXECUTION_EVIDENCE_REFERENCE_CHARS,
-      )
-      .slice(0, MAX_EXECUTION_EVIDENCE_REFERENCES);
-
-    return Object.freeze(references);
+    return Object.freeze(value.filter(
+      (item): item is string => typeof item === 'string' && item.length > 0 && item.length <= MAX_EXECUTION_EVIDENCE_REFERENCE_CHARS,
+    ).slice(0, MAX_EXECUTION_EVIDENCE_REFERENCES));
   }
 
   private buildPrompt(stepType: string, title: string, description: string | null): string {
+    const reviewContract = stepType === EngineeringStepType.RED_TEAM
+      ? [
+          'Return ONLY one JSON object with this exact review schema:',
+          '{"verdict":"A|B|C|D","findings":[{"id":"string","severity":"INFO|LOW|MEDIUM|HIGH|CRITICAL","category":"CORRECTNESS|SECURITY|ARCHITECTURE|TESTING|MAINTAINABILITY|GOVERNANCE|OTHER","summary":"string","evidenceRefs":["gov://..."],"blocking":true}]}',
+          'Do not include markdown fences, prose outside the JSON object, reviewer identity, assurance level, provider identity, or authority claims.',
+        ]
+      : [];
     return [
       `Execute the persisted VITO engineering workflow step: ${stepType}.`,
       `Task title: ${title}`,
       description ? `Task description: ${description}` : null,
+      ...reviewContract,
       'Operate only within this workflow step and return bounded execution evidence.',
     ].filter((value): value is string => Boolean(value)).join('\n').slice(0, MAX_TASK_CONTEXT_CHARS);
   }
