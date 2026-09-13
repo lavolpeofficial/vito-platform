@@ -55,7 +55,7 @@ The staging database is intentionally created without a default login. Bootstrap
 ```bash
 export VITO_OWNER_EMAIL='owner@example.invalid'
 export VITO_OWNER_PASSWORD='<strong staging-only password>'
-./scripts/staging/bootstrap-owner.sh
+bash scripts/staging/bootstrap-owner.sh
 ```
 
 The bootstrap is idempotent through the existing Prisma seed. It then performs a real JWT login and an authenticated read-only `GET /operations/summary` smoke check. The access token remains process-local and is never printed. This bootstrap does not approve Human Release, enable providers/capabilities, or grant execution authority beyond the existing OWNER role.
