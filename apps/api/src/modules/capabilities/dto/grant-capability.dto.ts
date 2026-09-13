@@ -2,7 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsObject, IsOptional } from 'class-validator';
 
 export class GrantCapabilityDto {
-  @ApiPropertyOptional({ default: true })
+  @ApiPropertyOptional({ default: false })
   @IsOptional()
   @IsBoolean()
   isEnabled?: boolean;

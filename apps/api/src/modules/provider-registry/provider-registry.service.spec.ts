@@ -13,10 +13,6 @@ import { Prisma } from '@prisma/client';
 import { ProviderRegistryService } from './provider-registry.service';
 import { randomUUID } from 'crypto';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 const ORG_A = 'org-a';
 const ORG_B = 'org-b';
 
@@ -68,11 +64,8 @@ function buildService() {
   return { service, prisma, auditService, tx };
 }
 
-// ===========================================================================
-// Durable ProviderCapability assignment
-// ===========================================================================
 describe('ProviderCapability assignment', () => {
-  it('creates a durable enabled assignment and audits it', async () => {
+  it('creates a durable disabled assignment by default and audits it', async () => {
     const providerRow = { id: 'provider-1', organizationId: ORG_A, providerCode: 'TEST_PROVIDER' };
     const { service, prisma, auditService, tx } = buildService();
     prisma.agentProvider.findFirst.mockResolvedValue(providerRow);
@@ -88,11 +81,11 @@ describe('ProviderCapability assignment', () => {
         organizationId: ORG_A,
         agentProviderId: 'provider-1',
         capabilityCode: 'CODE_BUILD',
-        isEnabled: true,
+        isEnabled: false,
       },
     });
     expect(result.capabilityCode).toBe('CODE_BUILD');
-    expect(result.isEnabled).toBe(true);
+    expect(result.isEnabled).toBe(false);
 
     expect(auditService.record).toHaveBeenCalledTimes(1);
     const auditCall = auditService.record.mock.calls[0][0];
@@ -186,9 +179,23 @@ describe('ProviderCapability assignment', () => {
   });
 });
 
-// ===========================================================================
-// Explicit estimated monetary cost persistence
-// ===========================================================================
+describe('provider default-deny provisioning', () => {
+  it('creates providers disabled unless status is explicitly supplied', async () => {
+    const { service, tx } = buildService();
+
+    await service.createProvider({
+      organizationId: ORG_A,
+      providerCode: 'SAFE_DEFAULT',
+      displayName: 'Safe Default',
+      supportedCapabilities: [],
+    });
+
+    expect(tx.agentProvider.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ status: 'DISABLED' }),
+    });
+  });
+});
+
 describe('estimatedCostMinorUnits persistence', () => {
   it('createProvider persists explicit estimatedCostMinorUnits', async () => {
     const { service, tx, auditService } = buildService();
