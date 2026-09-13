@@ -69,7 +69,7 @@ export class WorkflowAgentRuntimeController {
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({
     description:
-      'Transitions a READY PARSE_VERDICT step only from the persisted typed RED_TEAM ReviewResult bound to authoritative governed execution evidence. AL4 remains fail-closed.',
+      'Transitions a READY PARSE_VERDICT step only from persisted typed RED_TEAM evidence bound to authoritative governed execution lineage; AL4 additionally requires two independently routed reviewer results and validated independence context.',
   })
   parseVerdict(@Param('workflowRunId') workflowRunId: string) {
     const organizationId = this.tenantContext.getOrThrow();

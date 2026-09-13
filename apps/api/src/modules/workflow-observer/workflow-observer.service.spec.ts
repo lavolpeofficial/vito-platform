@@ -35,6 +35,43 @@ describe('WorkflowObserverService', () => {
     expect(result.nextAction).toBe('APPROVE_HUMAN_RELEASE');
   });
 
+  it('routes AL4 RED_TEAM through the governed multi-review coordinator', async () => {
+    workflowRun.findFirst.mockResolvedValue({
+      id: 'run-red-al4', organizationId: 'org-1', correlationId: 'corr-red-al4', status: 'RUNNING', currentStepType: 'RED_TEAM', assuranceLevel: 'AL4',
+      blockReasonCode: null, failureReasonCode: null, correctionLoopCount: 0, maxCorrectionLoops: 3, startedAt: new Date(), completedAt: null,
+      stepRuns: [{ id: 'step-red-al4', stepType: 'RED_TEAM', status: 'READY', attemptNumber: 1, causationId: null, startedAt: new Date(), finishedAt: null }],
+    });
+    auditEvent.findMany.mockResolvedValue([]);
+    const result = await service.observe('org-1', 'run-red-al4');
+    expect(result.nextAction).toBe('COORDINATE_AL4_REVIEWS');
+  });
+
+  it('keeps AL1-AL3 RED_TEAM on the ordinary agent execution path', async () => {
+    for (const assuranceLevel of ['AL1', 'AL2', 'AL3']) {
+      workflowRun.findFirst.mockResolvedValue({
+        id: `run-red-${assuranceLevel}`, organizationId: 'org-1', correlationId: `corr-red-${assuranceLevel}`, status: 'RUNNING', currentStepType: 'RED_TEAM', assuranceLevel,
+        blockReasonCode: null, failureReasonCode: null, correctionLoopCount: 0, maxCorrectionLoops: 3, startedAt: new Date(), completedAt: null,
+        stepRuns: [{ id: `step-red-${assuranceLevel}`, stepType: 'RED_TEAM', status: 'READY', attemptNumber: 1, causationId: null, startedAt: new Date(), finishedAt: null }],
+      });
+      auditEvent.findMany.mockResolvedValue([]);
+      const result = await service.observe('org-1', `run-red-${assuranceLevel}`);
+      expect(result.nextAction).toBe('EXECUTE_CURRENT_STEP');
+    }
+  });
+
+  it('fails closed for RED_TEAM when assurance is unavailable or invalid', async () => {
+    for (const assuranceLevel of [null, 'AL5']) {
+      workflowRun.findFirst.mockResolvedValue({
+        id: 'run-red-unknown', organizationId: 'org-1', correlationId: 'corr-red-unknown', status: 'RUNNING', currentStepType: 'RED_TEAM', assuranceLevel,
+        blockReasonCode: null, failureReasonCode: null, correctionLoopCount: 0, maxCorrectionLoops: 3, startedAt: new Date(), completedAt: null,
+        stepRuns: [{ id: 'step-red-unknown', stepType: 'RED_TEAM', status: 'READY', attemptNumber: 1, causationId: null, startedAt: new Date(), finishedAt: null }],
+      });
+      auditEvent.findMany.mockResolvedValue([]);
+      const result = await service.observe('org-1', 'run-red-unknown');
+      expect(result.nextAction).toBe('HUMAN_REVIEW_REQUIRED');
+    }
+  });
+
   it('offers server-owned verdict processing for PARSE_VERDICT at AL1-AL4', async () => {
     for (const assuranceLevel of ['AL1', 'AL2', 'AL3', 'AL4']) {
       workflowRun.findFirst.mockResolvedValue({
