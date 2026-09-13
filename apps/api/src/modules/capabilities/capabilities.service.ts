@@ -82,11 +82,11 @@ export class CapabilitiesService {
         create: {
           digitalEmployeeId,
           capabilityId,
-          isEnabled: dto.isEnabled ?? true,
+          isEnabled: dto.isEnabled ?? false,
           configuration: (dto.configuration ?? {}) as Prisma.InputJsonValue,
         },
         update: {
-          isEnabled: dto.isEnabled ?? true,
+          isEnabled: dto.isEnabled ?? false,
           configuration: (dto.configuration ?? {}) as Prisma.InputJsonValue,
         },
       });
