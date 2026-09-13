@@ -6,7 +6,7 @@ ENV PATH="$PNPM_HOME:$PATH"
 WORKDIR /app
 
 RUN apt-get update \
- && apt-get install -y openssl \
+ && apt-get install -y --no-install-recommends openssl \
  && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable
@@ -31,13 +31,17 @@ ENV NODE_ENV="production"
 WORKDIR /app
 
 RUN apt-get update \
- && apt-get install -y openssl \
+ && apt-get install -y --no-install-recommends \
+      bubblewrap \
+      ca-certificates \
+      git \
+      openssl \
  && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable
 
 COPY --from=builder /app /app
 
-EXPOSE 3000
+EXPOSE 3000 3001
 
 CMD ["pnpm", "start"]
