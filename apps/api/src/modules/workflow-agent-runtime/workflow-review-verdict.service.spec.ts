@@ -6,6 +6,8 @@ function makeService() {
   const prisma = {
     workflowRun: { findFirst: jest.fn() },
     workflowStepRun: { findFirst: jest.fn() },
+    governedExecutionRecord: { findFirst: jest.fn() },
+    agentProvider: { findFirst: jest.fn() },
   };
   const reviewEvidence = { resolve: jest.fn() };
   const workflowRuntime = { completeStep: jest.fn() };
@@ -36,6 +38,48 @@ const reviewMetadata = {
     assuranceLevel: 'AL3',
     artifactRefs: ['gov://artifact/review-1'],
   },
+};
+
+const al4Metadata = {
+  source: 'WORKFLOW_AL4_REVIEW_COORDINATOR',
+  reviewResults: [
+    {
+      verdict: ReviewVerdict.A,
+      findings: [],
+      reviewerExecutionId: 'inv-review-1',
+      assuranceLevel: 'AL4',
+      artifactRefs: ['gov://artifact/review-1'],
+    },
+    {
+      verdict: ReviewVerdict.A,
+      findings: [],
+      reviewerExecutionId: 'inv-review-2',
+      assuranceLevel: 'AL4',
+      artifactRefs: ['gov://artifact/review-2'],
+    },
+  ],
+  independenceContext: {
+    builderProviderId: 'provider-builder',
+    builderModelFamily: 'family-builder',
+    previousReviewerProviderIds: ['provider-review-1', 'provider-review-2'],
+    previousReviewerModelFamilies: ['family-review-1', 'family-review-2'],
+  },
+  builderLineage: {
+    providerId: 'provider-builder',
+    modelFamily: 'family-builder',
+  },
+  reviewerLineage: [
+    {
+      reviewerExecutionId: 'inv-review-1',
+      providerId: 'provider-review-1',
+      modelFamily: 'family-review-1',
+    },
+    {
+      reviewerExecutionId: 'inv-review-2',
+      providerId: 'provider-review-2',
+      modelFamily: 'family-review-2',
+    },
+  ],
 };
 
 describe('WorkflowReviewVerdictService', () => {
@@ -79,7 +123,7 @@ describe('WorkflowReviewVerdictService', () => {
     });
   });
 
-  it('fails closed for AL4 until multi-reviewer independence evidence exists', async () => {
+  it('transitions AL4 only from two governed independent reviewer executions', async () => {
     const { prisma, reviewEvidence, workflowRuntime, service } = makeService();
     prisma.workflowRun.findFirst.mockResolvedValue({
       id: 'run-1',
@@ -87,9 +131,88 @@ describe('WorkflowReviewVerdictService', () => {
       currentStepType: EngineeringStepType.PARSE_VERDICT,
       assuranceLevel: 'AL4',
     });
+    prisma.workflowStepRun.findFirst
+      .mockResolvedValueOnce({ id: 'step-parse' })
+      .mockResolvedValueOnce({ id: 'step-red', metadata: al4Metadata });
+    prisma.agentProvider.findFirst
+      .mockResolvedValueOnce({ id: 'provider-review-1', modelFamily: 'family-review-1' })
+      .mockResolvedValueOnce({ id: 'provider-review-2', modelFamily: 'family-review-2' });
+    prisma.governedExecutionRecord.findFirst
+      .mockResolvedValueOnce({ id: 'inv-review-1', artifactReferences: ['gov://artifact/review-1'] })
+      .mockResolvedValueOnce({ id: 'inv-review-2', artifactReferences: ['gov://artifact/review-2'] });
+    workflowRuntime.completeStep.mockResolvedValue({
+      outcome: { kind: 'NEXT_STEP', nextStep: EngineeringStepType.VERIFY },
+    });
+
+    const result = await service.parseAndTransition('org-1', 'run-1');
+
+    expect(reviewEvidence.resolve).not.toHaveBeenCalled();
+    expect(workflowRuntime.completeStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: 'org-1',
+        workflowRunId: 'run-1',
+        workflowStepRunId: 'step-parse',
+        stepStatus: 'SUCCEEDED',
+        reviewResults: al4Metadata.reviewResults,
+        independenceContext: al4Metadata.independenceContext,
+      }),
+    );
+    expect(result).toMatchObject({
+      disposition: 'AL4_VERDICT_TRANSITIONED',
+      assuranceLevel: 'AL4',
+      reviewerExecutionIds: ['inv-review-1', 'inv-review-2'],
+    });
+  });
+
+  it('fails closed for AL4 when reviewer model-family independence is forged', async () => {
+    const { prisma, workflowRuntime, service } = makeService();
+    prisma.workflowRun.findFirst.mockResolvedValue({
+      id: 'run-1',
+      status: 'RUNNING',
+      currentStepType: EngineeringStepType.PARSE_VERDICT,
+      assuranceLevel: 'AL4',
+    });
+    prisma.workflowStepRun.findFirst
+      .mockResolvedValueOnce({ id: 'step-parse' })
+      .mockResolvedValueOnce({
+        id: 'step-red',
+        metadata: {
+          ...al4Metadata,
+          independenceContext: {
+            ...al4Metadata.independenceContext,
+            previousReviewerModelFamilies: ['family-review-1', 'family-review-1'],
+          },
+        },
+      });
+    prisma.agentProvider.findFirst
+      .mockResolvedValueOnce({ id: 'provider-review-1', modelFamily: 'family-review-1' })
+      .mockResolvedValueOnce({ id: 'provider-review-2', modelFamily: 'family-review-2' });
+    prisma.governedExecutionRecord.findFirst
+      .mockResolvedValueOnce({ id: 'inv-review-1', artifactReferences: ['gov://artifact/review-1'] })
+      .mockResolvedValueOnce({ id: 'inv-review-2', artifactReferences: ['gov://artifact/review-2'] });
 
     await expect(service.parseAndTransition('org-1', 'run-1')).rejects.toBeInstanceOf(ConflictException);
-    expect(reviewEvidence.resolve).not.toHaveBeenCalled();
+    expect(workflowRuntime.completeStep).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for AL4 when a reviewer execution is absent from the governed ledger', async () => {
+    const { prisma, workflowRuntime, service } = makeService();
+    prisma.workflowRun.findFirst.mockResolvedValue({
+      id: 'run-1',
+      status: 'RUNNING',
+      currentStepType: EngineeringStepType.PARSE_VERDICT,
+      assuranceLevel: 'AL4',
+    });
+    prisma.workflowStepRun.findFirst
+      .mockResolvedValueOnce({ id: 'step-parse' })
+      .mockResolvedValueOnce({ id: 'step-red', metadata: al4Metadata });
+    prisma.agentProvider.findFirst.mockResolvedValueOnce({
+      id: 'provider-review-1',
+      modelFamily: 'family-review-1',
+    });
+    prisma.governedExecutionRecord.findFirst.mockResolvedValueOnce(null);
+
+    await expect(service.parseAndTransition('org-1', 'run-1')).rejects.toBeInstanceOf(ConflictException);
     expect(workflowRuntime.completeStep).not.toHaveBeenCalled();
   });
 
