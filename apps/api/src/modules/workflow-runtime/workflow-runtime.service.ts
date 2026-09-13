@@ -6,6 +6,8 @@ import {
   type StateMachineInput,
   type TransitionOutcome,
   type BlockReason,
+  type ReviewResult,
+  type IndependenceContext,
 } from '@vito/contracts';
 import {
   WorkflowRunStatus,
@@ -34,6 +36,8 @@ export interface CompleteStepInput {
   stepStatus: 'SUCCEEDED' | 'FAILED';
   providerStatus?: AgentExecutionStatus;
   verdict?: string;
+  reviewResults?: readonly ReviewResult[];
+  independenceContext?: IndependenceContext;
   humanApproved?: boolean;
   metadata?: Record<string, unknown>;
 }
@@ -275,6 +279,9 @@ export class WorkflowRuntimeService {
         },
         humanApproved: input.humanApproved,
         verdict: input.verdict as any,
+        reviewResults: input.reviewResults,
+        independenceContext: input.independenceContext,
+        assuranceLevel: freshRun.assuranceLevel as any,
       };
 
       const outcome = nextEngineeringStep(stateMachineInput);
