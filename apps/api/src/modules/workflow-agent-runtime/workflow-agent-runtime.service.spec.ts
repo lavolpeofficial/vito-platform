@@ -41,10 +41,18 @@ describe('WorkflowAgentRuntimeService', () => {
     tryRecordOutcome.mockResolvedValue({ id: 'outcome-1', score: 1 });
   });
 
-  it('dispatches, transitions, then objectively evaluates the persisted runtime Experience', async () => {
+  it('dispatches, binds governed evidence references, transitions, then objectively evaluates the persisted runtime Experience', async () => {
     dispatch.mockResolvedValue({
       routingDecisionId: 'route-1', selectedProviderId: 'provider-1', selectedProviderCode: 'local-builder',
-      experienceId: 'exp-1', execution: { status: AgentExecutionStatus.SUCCEEDED },
+      experienceId: 'exp-1',
+      execution: {
+        status: AgentExecutionStatus.SUCCEEDED,
+        invocationId: 'invocation-1',
+        outputReference: 'artifact://review/output.json',
+        artifactReferences: ['artifact://review/report.json'],
+        evidenceReferences: ['evidence://review/trace-1'],
+        providerExecutionMetadata: { shouldNotPersist: true },
+      },
     });
 
     const result = await service.executeCurrentStep('org-1', 'run-1');
@@ -56,8 +64,19 @@ describe('WorkflowAgentRuntimeService', () => {
     }));
     expect(completeStep).toHaveBeenCalledWith(expect.objectContaining({
       stepStatus: 'SUCCEEDED',
-      metadata: expect.objectContaining({ experienceId: 'exp-1', executionStatus: AgentExecutionStatus.SUCCEEDED }),
+      metadata: expect.objectContaining({
+        experienceId: 'exp-1',
+        executionStatus: AgentExecutionStatus.SUCCEEDED,
+        executionEvidence: {
+          invocationId: 'invocation-1',
+          outputReference: 'artifact://review/output.json',
+          artifactReferences: ['artifact://review/report.json'],
+          evidenceReferences: ['evidence://review/trace-1'],
+        },
+      }),
     }));
+    const completion = completeStep.mock.calls[0][0];
+    expect(completion.metadata.executionEvidence.providerExecutionMetadata).toBeUndefined();
     expect(tryRecordOutcome).toHaveBeenCalledWith(expect.objectContaining({
       organizationId: 'org-1', experienceId: 'exp-1', workflowStepRunId: 'step-1',
       executionStatus: AgentExecutionStatus.SUCCEEDED, transitionKind: 'NEXT_STEP',
@@ -65,6 +84,31 @@ describe('WorkflowAgentRuntimeService', () => {
     expect(result.disposition).toBe('TRANSITIONED');
     if (result.disposition !== 'TRANSITIONED') throw new Error('expected transitioned result');
     expect(result.outcomeEvaluation).toEqual(expect.objectContaining({ id: 'outcome-1' }));
+  });
+
+  it('bounds execution evidence instead of persisting arbitrary or oversized provider output', async () => {
+    const validRefs = Array.from({ length: 40 }, (_, index) => `evidence://review/${index}`);
+    dispatch.mockResolvedValue({
+      routingDecisionId: 'route-1', selectedProviderId: 'provider-1', selectedProviderCode: 'local-builder',
+      experienceId: 'exp-bounded',
+      execution: {
+        status: AgentExecutionStatus.SUCCEEDED,
+        invocationId: 'x'.repeat(257),
+        outputReference: 'y'.repeat(2049),
+        artifactReferences: ['artifact://valid', 123, '', 'z'.repeat(2049)],
+        evidenceReferences: validRefs,
+        providerExecutionMetadata: { unrestricted: 'metadata' },
+      },
+    });
+
+    await service.executeCurrentStep('org-1', 'run-1');
+
+    const evidence = completeStep.mock.calls[0][0].metadata.executionEvidence;
+    expect(evidence.invocationId).toBeUndefined();
+    expect(evidence.outputReference).toBeUndefined();
+    expect(evidence.artifactReferences).toEqual(['artifact://valid']);
+    expect(evidence.evidenceReferences).toHaveLength(32);
+    expect(evidence.providerExecutionMetadata).toBeUndefined();
   });
 
   it('records objective failure evidence after failed execution transition', async () => {
@@ -82,7 +126,12 @@ describe('WorkflowAgentRuntimeService', () => {
   it('propagates provider blocking into WorkflowRuntime without falsely failing the step', async () => {
     dispatch.mockResolvedValue({
       routingDecisionId: 'route-1', selectedProviderId: 'provider-1', selectedProviderCode: 'local-builder',
-      experienceId: 'exp-3', execution: { status: AgentExecutionStatus.POLICY_BLOCKED },
+      experienceId: 'exp-3',
+      execution: {
+        status: AgentExecutionStatus.POLICY_BLOCKED,
+        invocationId: 'invocation-blocked',
+        evidenceReferences: ['evidence://policy/decision'],
+      },
     });
     completeStep.mockResolvedValueOnce({ idempotent: false, outcome: { kind: 'BLOCKED' } });
 
@@ -93,7 +142,12 @@ describe('WorkflowAgentRuntimeService', () => {
       workflowRunId: 'run-1', workflowStepRunId: 'step-1',
       stepStatus: 'FAILED', providerStatus: AgentExecutionStatus.POLICY_BLOCKED,
       metadata: expect.objectContaining({
-        experienceId: 'exp-3', executionStatus: AgentExecutionStatus.POLICY_BLOCKED,
+        experienceId: 'exp-3',
+        executionStatus: AgentExecutionStatus.POLICY_BLOCKED,
+        executionEvidence: {
+          invocationId: 'invocation-blocked',
+          evidenceReferences: ['evidence://policy/decision'],
+        },
       }),
     }));
     expect(tryRecordOutcome).toHaveBeenCalledWith(expect.objectContaining({
