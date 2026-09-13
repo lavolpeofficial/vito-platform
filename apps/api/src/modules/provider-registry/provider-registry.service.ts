@@ -90,7 +90,7 @@ export class ProviderRegistryService {
           providerCode: input.providerCode,
           displayName: input.displayName,
           providerType: (input.providerType ?? 'CLOUD_LLM') as any,
-          status: (input.status ?? 'ACTIVE') as any,
+          status: (input.status ?? 'DISABLED') as any,
           modelFamily: input.modelFamily ?? null,
           modelName: input.modelName ?? null,
           modelCode: input.modelCode ?? null,
@@ -286,7 +286,7 @@ export class ProviderRegistryService {
             organizationId: input.organizationId,
             agentProviderId: provider.id,
             capabilityCode: input.capabilityCode,
-            isEnabled: input.isEnabled ?? true,
+            isEnabled: input.isEnabled ?? false,
           },
         });
 
