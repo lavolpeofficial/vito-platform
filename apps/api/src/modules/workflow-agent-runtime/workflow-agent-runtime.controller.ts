@@ -5,6 +5,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { TenantContext } from '../../common/tenant/tenant-context';
 import { WorkflowAgentRunnerService } from './workflow-agent-runner.service';
 import { WorkflowAgentRuntimeService } from './workflow-agent-runtime.service';
+import { WorkflowAl4ReviewCoordinatorService } from './workflow-al4-review-coordinator.service';
 import { WorkflowReviewEvidenceService } from './workflow-review-evidence.service';
 import { WorkflowReviewVerdictService } from './workflow-review-verdict.service';
 
@@ -15,6 +16,7 @@ export class WorkflowAgentRuntimeController {
   constructor(
     private readonly service: WorkflowAgentRuntimeService,
     private readonly runner: WorkflowAgentRunnerService,
+    private readonly al4ReviewCoordinator: WorkflowAl4ReviewCoordinatorService,
     private readonly reviewEvidence: WorkflowReviewEvidenceService,
     private readonly reviewVerdict: WorkflowReviewVerdictService,
     private readonly tenantContext: TenantContext,
@@ -38,6 +40,18 @@ export class WorkflowAgentRuntimeController {
   executeUntilBoundary(@Param('workflowRunId') workflowRunId: string) {
     const organizationId = this.tenantContext.getOrThrow();
     return this.runner.executeUntilBoundary(organizationId, workflowRunId);
+  }
+
+  @Post(':workflowRunId/al4-reviews')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description:
+      'Coordinates two independently routed governed AL4 RED_TEAM reviews and persists only typed review evidence and provider/model-family lineage.',
+  })
+  coordinateAl4Reviews(@Param('workflowRunId') workflowRunId: string) {
+    const organizationId = this.tenantContext.getOrThrow();
+    return this.al4ReviewCoordinator.coordinate(organizationId, workflowRunId);
   }
 
   @Get(':workflowRunId/review-evidence')
