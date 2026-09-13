@@ -95,7 +95,7 @@ export class WorkflowObserverService {
     if (status === 'RUNNING' && currentStepType === 'RED_TEAM') {
       const normalized = this.normalizeAssuranceLevel(assuranceLevel);
       if (normalized === 'AL4') return 'COORDINATE_AL4_REVIEWS';
-      if (normalized && normalized !== 'AL4') return 'EXECUTE_CURRENT_STEP';
+      if (normalized) return 'EXECUTE_CURRENT_STEP';
       return 'HUMAN_REVIEW_REQUIRED';
     }
     if (status === 'RUNNING' && currentStepType === 'PARSE_VERDICT') {
