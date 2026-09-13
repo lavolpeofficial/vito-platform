@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { EngineeringProviderProvisioningService } from './engineering-provider-provisioning.service';
+import { ProviderRegistryController } from './provider-registry.controller';
 import { ProviderRegistryService } from './provider-registry.service';
 import { ProviderRouterService } from './provider-router.service';
 
 @Module({
   imports: [AuditModule],
+  controllers: [ProviderRegistryController],
   providers: [
     ProviderRegistryService,
     ProviderRouterService,
