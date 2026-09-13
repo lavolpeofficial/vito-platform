@@ -46,8 +46,10 @@ services:
       SENSITIVE_PAYLOAD_TTL_HOURS: "72"
       VITO_SERVER_CREDENTIALS: "{}"
       VITO_REPOSITORY_REGISTRY: '[{"repositoryId":"lavolpeofficial/vito-platform","cloneUrl":"https://github.com/lavolpeofficial/vito-platform.git","allowedBaseRefs":["main"],"enabled":true}]'
-      VITO_TRUSTED_LOCAL_EXECUTABLES: "{}"
+      VITO_TRUSTED_LOCAL_EXECUTABLES: '{"opencode":"/opt/vito/trusted-launchers/opencode"}'
       VITO_TRUSTED_AGENT_LAUNCHER_ROOT: /opt/vito/trusted-launchers
+      VITO_CLOUD_EXECUTION_PROFILES: '[{"profileId":"staging-openai-opencode","providerCode":"cloud.openai.main","credentialRef":"cloud:openai:staging","trustedLauncherAlias":"opencode","expectedProviderId":"openai","maxDurationMs":600000,"maxParallelism":1,"enabled":false}]'
+      VITO_CLOUD_AGENT_CREDENTIALS: "{}"
       VITO_SANDBOX_TECHNOLOGY: bubblewrap
     command:
       - sh
