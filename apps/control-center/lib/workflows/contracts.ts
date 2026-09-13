@@ -1,4 +1,4 @@
-export type WorkflowNextAction = 'START_RUN' | 'EXECUTE_CURRENT_STEP' | 'RESUME_RUN' | 'APPROVE_HUMAN_RELEASE' | 'HUMAN_REVIEW_REQUIRED' | 'NONE';
+export type WorkflowNextAction = 'START_RUN' | 'EXECUTE_CURRENT_STEP' | 'PROCESS_REVIEW_VERDICT' | 'RESUME_RUN' | 'APPROVE_HUMAN_RELEASE' | 'HUMAN_REVIEW_REQUIRED' | 'NONE';
 export type WorkflowBoundary = 'NOT_STARTED' | 'ACTIVE' | 'BLOCKED' | 'TERMINAL_COMPLETE' | 'TERMINAL_FAILURE' | 'UNKNOWN';
 
 export type WorkflowStepSnapshot = Readonly<{ id: string; stepType: string; status: string; attemptNumber: number; causationId: string | null; startedAt: string; finishedAt: string | null }>;
@@ -21,7 +21,7 @@ export type HumanReleaseApprovalResult = Readonly<{
 }>;
 
 const BOUNDARIES = new Set<WorkflowBoundary>(['NOT_STARTED', 'ACTIVE', 'BLOCKED', 'TERMINAL_COMPLETE', 'TERMINAL_FAILURE', 'UNKNOWN']);
-const NEXT_ACTIONS = new Set<WorkflowNextAction>(['START_RUN', 'EXECUTE_CURRENT_STEP', 'RESUME_RUN', 'APPROVE_HUMAN_RELEASE', 'HUMAN_REVIEW_REQUIRED', 'NONE']);
+const NEXT_ACTIONS = new Set<WorkflowNextAction>(['START_RUN', 'EXECUTE_CURRENT_STEP', 'PROCESS_REVIEW_VERDICT', 'RESUME_RUN', 'APPROVE_HUMAN_RELEASE', 'HUMAN_REVIEW_REQUIRED', 'NONE']);
 
 export function parseWorkflowSnapshot(input: unknown): WorkflowSnapshot | null {
   const root = record(input);
