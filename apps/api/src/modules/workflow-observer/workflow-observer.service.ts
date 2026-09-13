@@ -1,5 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { EngineeringStepType } from '@vito/contracts';
 import { PrismaService } from '../../prisma/prisma.service';
+import { WorkflowAgentAssignmentService } from '../agent-workforce/workflow-agent-assignment.service';
+import { WorkflowExecutionPlanService } from '../agent-workforce/workflow-execution-plan.service';
 
 const MAX_TIMELINE_EVENTS = 200;
 
@@ -23,7 +26,11 @@ export type WorkflowNextAction =
 
 @Injectable()
 export class WorkflowObserverService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly executionPlan: WorkflowExecutionPlanService,
+    private readonly assignments: WorkflowAgentAssignmentService,
+  ) {}
 
   async observe(organizationId: string, workflowRunId: string) {
     const run = await this.prisma.workflowRun.findFirst({
@@ -55,11 +62,19 @@ export class WorkflowObserverService {
     });
 
     const boundary = this.classifyBoundary(run.status);
+    const workforceReady = await this.resolveWorkforceReadiness(
+      organizationId,
+      run.id,
+      run.taskId,
+      run.status,
+      run.currentStepType,
+    );
     const nextAction = this.classifyNextAction(
       run.status,
       run.currentStepType,
       run.blockReasonCode,
       run.assuranceLevel,
+      workforceReady,
     );
 
     return {
@@ -70,6 +85,32 @@ export class WorkflowObserverService {
       steps: run.stepRuns, timeline: events, timelineTruncated: events.length === MAX_TIMELINE_EVENTS,
       observedAt: new Date(), authority: 'READ_ONLY' as const,
     };
+  }
+
+  private async resolveWorkforceReadiness(
+    organizationId: string,
+    workflowRunId: string,
+    taskId: string | null,
+    status: string,
+    currentStepType: string | null,
+  ): Promise<boolean | null> {
+    if (status !== 'RUNNING' || !currentStepType) return null;
+    const capabilityCode = this.executionPlan.capabilityForStep(currentStepType as EngineeringStepType);
+    if (!capabilityCode) return null;
+
+    const assignment = await this.assignments.resolveApproved(
+      organizationId,
+      workflowRunId,
+      currentStepType,
+    );
+    if (assignment) return true;
+    if (!taskId) return false;
+
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, organizationId },
+      select: { assignedDigitalEmployeeId: true },
+    });
+    return Boolean(task?.assignedDigitalEmployeeId);
   }
 
   private classifyBoundary(status: string): WorkflowBoundary {
@@ -89,14 +130,15 @@ export class WorkflowObserverService {
     currentStepType: string | null,
     blockReasonCode: string | null,
     assuranceLevel: string | null,
+    workforceReady: boolean | null,
   ): WorkflowNextAction {
     if (status === 'CREATED') return 'START_RUN';
     if (status === 'RUNNING' && currentStepType === 'HUMAN_RELEASE_GATE') return 'APPROVE_HUMAN_RELEASE';
     if (status === 'RUNNING' && currentStepType === 'RED_TEAM') {
       const normalized = this.normalizeAssuranceLevel(assuranceLevel);
+      if (!normalized || workforceReady === false) return 'HUMAN_REVIEW_REQUIRED';
       if (normalized === 'AL4') return 'COORDINATE_AL4_REVIEWS';
-      if (normalized) return 'EXECUTE_CURRENT_STEP';
-      return 'HUMAN_REVIEW_REQUIRED';
+      return 'EXECUTE_CURRENT_STEP';
     }
     if (status === 'RUNNING' && currentStepType === 'PARSE_VERDICT') {
       return this.normalizeAssuranceLevel(assuranceLevel)
@@ -104,7 +146,9 @@ export class WorkflowObserverService {
         : 'HUMAN_REVIEW_REQUIRED';
     }
     if (status === 'RUNNING' && currentStepType === 'RELEASE_EXECUTION') return 'HUMAN_REVIEW_REQUIRED';
-    if (status === 'RUNNING' && currentStepType) return 'EXECUTE_CURRENT_STEP';
+    if (status === 'RUNNING' && currentStepType) {
+      return workforceReady === false ? 'HUMAN_REVIEW_REQUIRED' : 'EXECUTE_CURRENT_STEP';
+    }
     if (status === 'BLOCKED' && blockReasonCode === 'PROVIDER_BLOCKED') return 'RESUME_RUN';
     if (status === 'BLOCKED') return 'HUMAN_REVIEW_REQUIRED';
     return 'NONE';
