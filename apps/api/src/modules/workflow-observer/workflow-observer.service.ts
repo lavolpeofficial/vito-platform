@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { EngineeringStepType } from '@vito/contracts';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WorkflowAgentAssignmentService } from '../agent-workforce/workflow-agent-assignment.service';
@@ -28,8 +28,8 @@ export type WorkflowNextAction =
 export class WorkflowObserverService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly executionPlan: WorkflowExecutionPlanService,
-    private readonly assignments: WorkflowAgentAssignmentService,
+    @Optional() private readonly executionPlan?: WorkflowExecutionPlanService,
+    @Optional() private readonly assignments?: WorkflowAgentAssignmentService,
   ) {}
 
   async observe(organizationId: string, workflowRunId: string) {
@@ -94,7 +94,7 @@ export class WorkflowObserverService {
     status: string,
     currentStepType: string | null,
   ): Promise<boolean | null> {
-    if (status !== 'RUNNING' || !currentStepType) return null;
+    if (status !== 'RUNNING' || !currentStepType || !this.executionPlan || !this.assignments) return null;
     const capabilityCode = this.executionPlan.capabilityForStep(currentStepType as EngineeringStepType);
     if (!capabilityCode) return null;
 
