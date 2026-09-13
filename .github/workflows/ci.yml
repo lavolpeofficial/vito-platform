@@ -141,9 +141,3 @@ jobs:
 
       - name: Build API
         run: pnpm build
-
-      - name: Clean bounded runner workspace
-        if: always()
-        shell: bash
-        run: |
-          rm -rf -- "${VITO_CI_TEMP:-}" "${VITO_CI_CACHE:-}"
