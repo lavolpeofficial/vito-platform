@@ -16,7 +16,7 @@ services:
       timeout: 5s
       retries: 20
     networks:
-      - vito-staging
+      - vito-staging-backend
 
   api:
     build:
@@ -71,7 +71,8 @@ services:
       retries: 20
       start_period: 20s
     networks:
-      - vito-staging
+      - vito-staging-backend
+      - vito-staging-edge
 
   control-center:
     image: vito-staging-app:local
@@ -100,7 +101,7 @@ services:
       retries: 20
       start_period: 20s
     networks:
-      - vito-staging
+      - vito-staging-edge
 
 volumes:
   postgres-data:
@@ -108,5 +109,6 @@ volumes:
   governed-workspaces:
 
 networks:
-  vito-staging:
+  vito-staging-backend:
     internal: true
+  vito-staging-edge:
