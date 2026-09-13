@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -27,6 +27,15 @@ export interface CreateProviderInput {
   costMetadata?: Record<string, unknown>;
   assuranceLevels?: readonly string[];
   metadata?: Record<string, unknown>;
+}
+
+export interface ActivateProviderInput {
+  organizationId: string;
+  providerId: string;
+  credentialAuthorizationConfirmed: boolean;
+  capabilitiesReviewed: boolean;
+  cloudProfileReviewed: boolean;
+  approvalNote?: string;
 }
 
 export interface UpdateProviderInput {
@@ -137,6 +146,11 @@ export class ProviderRegistryService {
       where: { id: input.providerId, organizationId: input.organizationId },
     });
     if (!existing) throw new NotFoundException('Provider nicht gefunden.');
+    if (input.status === 'ACTIVE') {
+      throw new BadRequestException(
+        'Provider activation is blocked on the generic update endpoint. Use the explicit activation gate.',
+      );
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const updateData: Prisma.AgentProviderUpdateInput = {};
@@ -196,6 +210,57 @@ export class ProviderRegistryService {
         tx,
       );
 
+      return provider;
+    });
+  }
+
+  async activateProvider(input: ActivateProviderInput) {
+    const existing = await this.prisma.agentProvider.findFirst({
+      where: { id: input.providerId, organizationId: input.organizationId },
+      include: { capabilities: true },
+    });
+    if (!existing) throw new NotFoundException('Provider nicht gefunden.');
+    if (existing.status === 'ACTIVE') {
+      throw new BadRequestException('Provider is already active.');
+    }
+    if (
+      !input.credentialAuthorizationConfirmed ||
+      !input.capabilitiesReviewed ||
+      !input.cloudProfileReviewed
+    ) {
+      throw new BadRequestException(
+        'Credential authorization, provider capabilities and cloud profile must be explicitly reviewed before activation.',
+      );
+    }
+    const enabledCapabilities = existing.capabilities.filter((capability) => capability.isEnabled);
+    if (enabledCapabilities.length === 0) {
+      throw new BadRequestException('At least one provider capability must be explicitly enabled before activation.');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const provider = await tx.agentProvider.update({
+        where: { id: input.providerId },
+        data: { status: 'ACTIVE' },
+      });
+      await this.auditService.record(
+        {
+          organizationId: input.organizationId,
+          actorType: 'SYSTEM',
+          action: 'PROVIDER_ACTIVATED',
+          entityType: 'AgentProvider',
+          entityId: provider.id,
+          metadata: {
+            providerCode: provider.providerCode,
+            credentialAuthorizationConfirmed: true,
+            capabilitiesReviewed: true,
+            cloudProfileReviewed: true,
+            enabledCapabilityCodes: enabledCapabilities.map((capability) => capability.capabilityCode),
+            approvalNote: input.approvalNote,
+            activationGateVersion: '0.1.0',
+          },
+        },
+        tx,
+      );
       return provider;
     });
   }

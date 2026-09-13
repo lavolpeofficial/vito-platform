@@ -8,7 +8,7 @@
  *  - Explizite estimatedCostMinorUnits Persistenz (create/update)
  */
 
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { ProviderRegistryService } from './provider-registry.service';
 import { randomUUID } from 'crypto';
@@ -244,5 +244,104 @@ describe('estimatedCostMinorUnits persistence', () => {
       where: { id: 'provider-1' },
       data: expect.objectContaining({ estimatedCostMinorUnits: 300 }),
     });
+  });
+});
+
+
+describe('provider activation gate', () => {
+  it('blocks ACTIVE on the generic update path', async () => {
+    const { service, prisma, tx } = buildService();
+    prisma.agentProvider.findFirst.mockResolvedValue({ id: 'provider-1', organizationId: ORG_A, status: 'DISABLED' });
+
+    await expect(
+      service.updateProvider({ organizationId: ORG_A, providerId: 'provider-1', status: 'ACTIVE' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.agentProvider.update).not.toHaveBeenCalled();
+  });
+
+  it('fails closed unless every activation review is explicitly confirmed', async () => {
+    const { service, prisma, tx } = buildService();
+    prisma.agentProvider.findFirst.mockResolvedValue({
+      id: 'provider-1',
+      organizationId: ORG_A,
+      providerCode: 'cloud.openai.main',
+      status: 'DISABLED',
+      capabilities: [{ capabilityCode: 'CODE_PLAN', isEnabled: true }],
+    });
+
+    await expect(
+      service.activateProvider({
+        organizationId: ORG_A,
+        providerId: 'provider-1',
+        credentialAuthorizationConfirmed: true,
+        capabilitiesReviewed: true,
+        cloudProfileReviewed: false,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.agentProvider.update).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when no provider capability is enabled', async () => {
+    const { service, prisma, tx } = buildService();
+    prisma.agentProvider.findFirst.mockResolvedValue({
+      id: 'provider-1',
+      organizationId: ORG_A,
+      providerCode: 'cloud.openai.main',
+      status: 'DISABLED',
+      capabilities: [{ capabilityCode: 'CODE_PLAN', isEnabled: false }],
+    });
+
+    await expect(
+      service.activateProvider({
+        organizationId: ORG_A,
+        providerId: 'provider-1',
+        credentialAuthorizationConfirmed: true,
+        capabilitiesReviewed: true,
+        cloudProfileReviewed: true,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.agentProvider.update).not.toHaveBeenCalled();
+  });
+
+  it('activates only through the explicit gate and writes activation audit evidence', async () => {
+    const { service, prisma, tx, auditService } = buildService();
+    prisma.agentProvider.findFirst.mockResolvedValue({
+      id: 'provider-1',
+      organizationId: ORG_A,
+      providerCode: 'cloud.openai.main',
+      status: 'DISABLED',
+      capabilities: [
+        { capabilityCode: 'CODE_PLAN', isEnabled: true },
+        { capabilityCode: 'CODE_BUILD', isEnabled: false },
+      ],
+    });
+
+    const result = await service.activateProvider({
+      organizationId: ORG_A,
+      providerId: 'provider-1',
+      credentialAuthorizationConfirmed: true,
+      capabilitiesReviewed: true,
+      cloudProfileReviewed: true,
+      approvalNote: 'Human-authorized staging gate',
+    });
+
+    expect(result.status).toBe('ACTIVE');
+    expect(tx.agentProvider.update).toHaveBeenCalledWith({
+      where: { id: 'provider-1' },
+      data: { status: 'ACTIVE' },
+    });
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'PROVIDER_ACTIVATED',
+        metadata: expect.objectContaining({
+          credentialAuthorizationConfirmed: true,
+          capabilitiesReviewed: true,
+          cloudProfileReviewed: true,
+          enabledCapabilityCodes: ['CODE_PLAN'],
+          activationGateVersion: '0.1.0',
+        }),
+      }),
+      tx,
+    );
   });
 });

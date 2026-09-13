@@ -5,7 +5,7 @@ import { ProviderRegistryController } from './provider-registry.controller';
 describe('ProviderRegistryController authority boundary', () => {
   const registry = {
     createProvider: jest.fn(), findAllProviders: jest.fn(), findProviderById: jest.fn(),
-    updateProvider: jest.fn(), updateHealthStatus: jest.fn(), updateQuotaStatus: jest.fn(),
+    updateProvider: jest.fn(), activateProvider: jest.fn(), updateHealthStatus: jest.fn(), updateQuotaStatus: jest.fn(),
     assignCapability: jest.fn(), listCapabilities: jest.fn(), setCapabilityEnabled: jest.fn(),
   };
   const router = {
@@ -48,6 +48,24 @@ describe('ProviderRegistryController authority boundary', () => {
     expect(registry.findProviderById).toHaveBeenCalledWith('org-jwt', 'provider-1');
   });
 
+  it('binds explicit provider activation to TenantContext and forwards only gate evidence', async () => {
+    registry.activateProvider.mockResolvedValue({ id: 'provider-1', status: 'ACTIVE' });
+    const body = {
+      credentialAuthorizationConfirmed: true,
+      capabilitiesReviewed: true,
+      cloudProfileReviewed: true,
+      approvalNote: 'human gate',
+    };
+
+    await controller.activateProvider('provider-1', body);
+
+    expect(registry.activateProvider).toHaveBeenCalledWith({
+      organizationId: 'org-jwt',
+      providerId: 'provider-1',
+      ...body,
+    });
+  });
+
   it('binds routing and decision queries to TenantContext', async () => {
     await controller.route({ capability: 'CODE_BUILD', correlationId: 'corr-1' });
     expect(router.route).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 'org-jwt', capability: 'CODE_BUILD' }));
@@ -61,10 +79,10 @@ describe('ProviderRegistryController authority boundary', () => {
 
   it.each([
     'provisionEngineeringProvider',
-    'createProvider', 'updateProvider', 'updateHealthStatus', 'updateQuotaStatus',
+    'createProvider', 'updateProvider', 'activateProvider', 'updateHealthStatus', 'updateQuotaStatus',
     'assignCapability', 'setCapabilityEnabled',
   ])('requires OWNER or ADMIN for mutating handler %s', (handlerName) => {
-    const roles = Reflect.getMetadata(ROLES_KEY, (ProviderRegistryController.prototype as any)[handlerName]);
+    const roles = Reflect.getMetadadata(ROLES_KEY, (ProviderRegistryController.prototype as any)[handlerName]);
     expect(roles).toEqual([UserRole.OWNER, UserRole.ADMIN]);
   });
 

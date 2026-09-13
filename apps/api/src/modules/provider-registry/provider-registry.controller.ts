@@ -53,6 +53,24 @@ export class ProviderRegistryController {
     return this.registryService.updateProvider({ organizationId: this.tenantContext.getOrThrow(), providerId, ...body } as any);
   }
 
+  @Post('providers/:providerId/activate')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  activateProvider(
+    @Param('providerId') providerId: string,
+    @Body() body: {
+      credentialAuthorizationConfirmed: boolean;
+      capabilitiesReviewed: boolean;
+      cloudProfileReviewed: boolean;
+      approvalNote?: string;
+    },
+  ) {
+    return this.registryService.activateProvider({
+      organizationId: this.tenantContext.getOrThrow(),
+      providerId,
+      ...body,
+    });
+  }
+
   @Patch('providers/:providerId/health')
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   updateHealthStatus(@Param('providerId') providerId: string, @Body() body: { healthStatus: string }) {
