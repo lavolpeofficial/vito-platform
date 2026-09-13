@@ -12,7 +12,7 @@ const MAX_AUTH_JSON_BYTES = 1024 * 1024;
  *
  * Values are NEVER logged, returned as invocation metadata, or materialized
  * outside an ephemeral cloud session HOME. The registry only ever hands out
- * opaque references; the resolver maps a reference to the auth.json payload
+ * opaque references; the resolver maps a reference to an opaque credential payload
  * only inside the ephemeral boundary that immediately tears it down.
  */
 @Injectable()
@@ -35,7 +35,7 @@ export class CloudCredentialResolver {
   }
 
   /**
-   * Resolve the auth.json payload for a reference.
+   * Resolve the opaque credential payload for a reference.
    * Returns null on unknown ref (fail closed). The payload must only be
    * written into an ephemeral session artifact and must never be observed
    * in logs or audit output.
@@ -50,7 +50,7 @@ export class CloudCredentialResolver {
 
 /**
  * Parse the server-owned credential map from environment.
- * Format: VITO_CLOUD_AGENT_CREDENTIALS = JSON object { "<credentialRef>": "<authJson>" }.
+ * Format: VITO_CLOUD_AGENT_CREDENTIALS = JSON object { "<credentialRef>": "<opaquePayload>" }.
  * Malformed refs or values are dropped (fail closed); a reference used by a
  * profile but missing here means the broker returns null and execution fails.
  */

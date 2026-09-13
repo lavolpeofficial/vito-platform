@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { spawn } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join, isAbsolute, relative } from 'node:path';
 import {
@@ -37,6 +37,9 @@ const SESSION_PATH_TOKEN = 'runs';
 
 /** Fallback PATH — NEVER merged from operator process.env beyond PATH. */
 const DEFAULT_PATH = '/usr/local/bin:/usr/bin:/bin';
+const OPENCODE_SQLITE_CREDENTIAL_MARKER = 'opencode-sqlite-v1';
+const DEFAULT_OPENCODE_SQLITE_CREDENTIAL_PATH = '/run/secrets/vito-cloud/opencode.db';
+const MAX_OPENCODE_SQLITE_CREDENTIAL_BYTES = 32 * 1024 * 1024;
 
 /**
  * Server-owned provider-identity observability flags injected into the agent
@@ -63,7 +66,8 @@ const DEFAULT_LOG_LEVEL = 'INFO';
  *  - Per-run ephemeral HOME/XDG/cache session directory OUTSIDE the worktree,
  *    under GOVERNED_WORKSPACE_ROOT; removed on every terminal path.
  *  - Credential is materialized ONLY inside the ephemeral session HOME at
- *    $XDG_DATA_HOME/opencode/auth.json; never logged, never returned;
+ *    $XDG_DATA_HOME/opencode/auth.json OR, for OpenCode >=2.0.3, as
+ *    $XDG_DATA_HOME/opencode/opencode.db; never logged, never returned;
  *    deleted with the session.
  *  - Caller-supplied env is limited to the governed allowlist (B ∪ C); the
  *    host operator env is never merged beyond PATH. No operator HOME/SSH/Git
@@ -82,6 +86,7 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
     private readonly credentialResolver: CloudCredentialResolver,
     workspaceRoot: string,
     private readonly nodeEnv = process.env.NODE_ENV ?? 'development',
+    private readonly opencodeSqliteCredentialPath = DEFAULT_OPENCODE_SQLITE_CREDENTIAL_PATH,
   ) {
     if (!isAbsolute(workspaceRoot)) {
       throw new SandboxStartupError(
@@ -237,8 +242,8 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
       return undefined;
     }
 
-    const authJson = this.credentialResolver.resolve(credentialReference);
-    if (authJson === null) {
+    const credentialPayload = this.credentialResolver.resolve(credentialReference);
+    if (credentialPayload === null) {
       throw new SandboxStartupError(
         'CREDENTIAL_RESOLUTION_FAILED',
         'Cloud credential reference could not be resolved (fail closed)',
@@ -248,8 +253,41 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
     const dataHome = join(sessionDir, '.local/share');
     const authDir = join(dataHome, 'opencode');
     mkdirSync(authDir, { recursive: true });
+
+    if (credentialPayload === OPENCODE_SQLITE_CREDENTIAL_MARKER) {
+      this.materializeOpenCodeSqliteCredential(authDir);
+      return;
+    }
+
     const authPath = join(authDir, 'auth.json');
-    writeFileSync(authPath, authJson, { encoding: 'utf8', mode: 0o600 });
+    writeFileSync(authPath, credentialPayload, { encoding: 'utf8', mode: 0o600 });
+  }
+
+  private materializeOpenCodeSqliteCredential(authDir: string): void {
+    let stat;
+    try {
+      stat = statSync(this.opencodeSqliteCredentialPath);
+    } catch {
+      throw new SandboxStartupError(
+        'OPENCODE_SQLITE_CREDENTIAL_UNAVAILABLE',
+        'OpenCode SQLite credential source is unavailable (fail closed)',
+      );
+    }
+
+    if (
+      !stat.isFile() ||
+      stat.size <= 0 ||
+      stat.size > MAX_OPENCODE_SQLITE_CREDENTIAL_BYTES
+    ) {
+      throw new SandboxStartupError(
+        'OPENCODE_SQLITE_CREDENTIAL_INVALID',
+        'OpenCode SQLite credential source is not a bounded regular file',
+      );
+    }
+
+    const credentialPath = join(authDir, 'opencode.db');
+    copyFileSync(this.opencodeSqliteCredentialPath, credentialPath);
+    chmodSync(credentialPath, 0o600);
   }
 
   private isConfined(sessionDir: string): boolean {

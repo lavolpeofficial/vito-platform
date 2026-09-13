@@ -62,6 +62,7 @@ services:
     volumes:
       - source-vault:/var/lib/vito/source-vault
       - governed-workspaces:/var/lib/vito/workspaces
+      - "${VITO_CLOUD_OPENCODE_DB_PATH:?VITO_CLOUD_OPENCODE_DB_PATH is required}:/run/secrets/vito-cloud/opencode.db:ro"
     healthcheck:
       test:
         - CMD
