@@ -545,7 +545,7 @@ model Capability {
 model DigitalEmployeeCapability {
   digitalEmployeeId String
   capabilityId      String
-  isEnabled         Boolean  @default(true)
+  isEnabled         Boolean  @default(false)
   configuration     Json     @default("{}")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -776,7 +776,7 @@ model AgentProvider {
   providerCode            String
   displayName             String
   providerType            ProviderType                  @default(CLOUD_LLM)
-  status                  ProviderStatus                @default(ACTIVE)
+  status                  ProviderStatus                @default(DISABLED)
   credentialRequirement   ProviderCredentialRequirement @default(UNKNOWN)
   modelFamily             String?
   modelName               String?
@@ -815,7 +815,7 @@ model ProviderCapability {
   organizationId  String
   agentProviderId String
   capabilityCode  String
-  isEnabled       Boolean  @default(true)
+  isEnabled       Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
