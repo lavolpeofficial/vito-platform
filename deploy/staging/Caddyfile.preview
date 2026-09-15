@@ -1,0 +1,34 @@
+# VITO staging preview ingress.
+# This file is intentionally not activated by the staging compose stack.
+# Activation is an explicit infrastructure action after review.
+#
+# Required environment variables on the ingress runtime:
+#   VITO_PREVIEW_HOST
+#   VITO_PREVIEW_BASIC_AUTH_HASH
+#
+# The ingress proxy must be attached to the vito-staging-edge network so the
+# upstream remains private and no VITO host port needs to be exposed publicly.
+
+{$VITO_PREVIEW_HOST} {
+    encode zstd gzip
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        Strict-Transport-Security "max-age=31536000"
+        -Server
+    }
+
+    basic_auth {
+        preview {$VITO_PREVIEW_BASIC_AUTH_HASH}
+    }
+
+    reverse_proxy control-center:3001
+
+    log {
+        output stdout
+        format json
+    }
+}

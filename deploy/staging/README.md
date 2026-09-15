@@ -40,6 +40,14 @@ docker compose --env-file deploy/staging/.env -f deploy/staging/docker-compose.y
 
 The Control Center is available only on the host loopback interface at `http://127.0.0.1:33001` until an explicit ingress decision is approved.
 
+## Governed preview ingress
+
+`deploy/staging/Caddyfile.preview` defines the reviewed external preview boundary. It is deliberately inert: the staging compose stack does not publish it and does not attach itself to an external proxy.
+
+Activation requires an explicit infrastructure action after review. The ingress runtime must provide `VITO_PREVIEW_HOST` and a Caddy-compatible `VITO_PREVIEW_BASIC_AUTH_HASH`, and it must be attached to `vito-staging-edge` so that `control-center:3001` remains private. Do not publish ports 3000, 3001, 33000 or 33001 to the Internet.
+
+The preview layer adds HTTPS, security headers and Basic Auth in front of the existing VITO application login. It does not bypass VITO authentication, tenant isolation, Human Release, provider activation or any other application governance gate.
+
 ## Stop
 
 ```bash
