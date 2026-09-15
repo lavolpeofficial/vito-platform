@@ -57,3 +57,23 @@ test('rejects cross-origin mutations when a browser Origin header is present', (
   };
   assert.equal(isSameOriginMutation(request as never), false);
 });
+
+test('accepts only the explicitly configured reverse-proxy public origin', () => {
+  const environment = process.env as Record<string, string | undefined>;
+  const previous = environment.VITO_CONTROL_CENTER_PUBLIC_ORIGIN;
+  const request = {
+    headers: new Headers({ origin: 'https://vito-preview.77.42.25.224.nip.io' }),
+    nextUrl: new URL('http://control-center:3001/api/auth/login'),
+  };
+  try {
+    environment.VITO_CONTROL_CENTER_PUBLIC_ORIGIN = 'https://vito-preview.77.42.25.224.nip.io';
+    assert.equal(isSameOriginMutation(request as never), true);
+    environment.VITO_CONTROL_CENTER_PUBLIC_ORIGIN = 'https://other.example';
+    assert.equal(isSameOriginMutation(request as never), false);
+    environment.VITO_CONTROL_CENTER_PUBLIC_ORIGIN = 'https://vito-preview.77.42.25.224.nip.io/path';
+    assert.equal(isSameOriginMutation(request as never), false);
+  } finally {
+    if (previous === undefined) delete environment.VITO_CONTROL_CENTER_PUBLIC_ORIGIN;
+    else environment.VITO_CONTROL_CENTER_PUBLIC_ORIGIN = previous;
+  }
+});
