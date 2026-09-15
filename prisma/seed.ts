@@ -55,7 +55,7 @@ async function seedOwner(organizationId: string): Promise<void> {
 async function main() {
   const laVolpe = await prisma.organization.upsert({
     where: { slug: 'la-volpe' },
-    update: { name: 'LA VOLPE', status: 'ACTIVE' },
+    update: {},
     create: {
       name: 'LA VOLPE',
       slug: 'la-volpe',
