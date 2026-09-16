@@ -43,7 +43,7 @@ export function LoginForm() {
   return (
     <form className="login-form" onSubmit={handleSubmit}>
       <label htmlFor="organizationSlug">Organization</label>
-      <input autoCapitalize="none" autoComplete="organization" id="organizationSlug" maxLength={60} name="organizationSlug" placeholder="organization-slug" required spellCheck={false} />
+      <input autoCapitalize="none" autoComplete="organization" id="organizationSlug" maxLength={60} name="organizationSlug" placeholder="organization-slug" defaultValue="la-volpe" required spellCheck={false} />
 
       <label htmlFor="email">Email</label>
       <input autoCapitalize="none" autoComplete="username" id="email" maxLength={320} name="email" placeholder="name@organization.com" required spellCheck={false} type="email" />
