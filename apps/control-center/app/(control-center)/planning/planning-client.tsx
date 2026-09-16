@@ -3,11 +3,14 @@
 import { useActionState } from 'react';
 import {
   createGoalPlan,
-  initialGoalPlanningState,
-  initialGoalWorkflowMaterializationState,
   materializeGoalWorkflow,
+  type GoalPlanningState,
+  type GoalWorkflowMaterializationState,
 } from '@/lib/planning/actions';
 import type { GoalPlan } from '@/lib/planning/contracts';
+
+const initialGoalPlanningState: GoalPlanningState = { plan: null, error: null };
+const initialGoalWorkflowMaterializationState: GoalWorkflowMaterializationState = { result: null, error: null };
 
 export function PlanningClient() {
   const [state, action, pending] = useActionState(createGoalPlan, initialGoalPlanningState);
@@ -63,4 +66,4 @@ function MaterializeWorkflow({ plan }: Readonly<{ plan: GoalPlan }>) {
 }
 
 function Fact({ label, value }: Readonly<{ label: string; value: string }>) { return <div><span>{label}</span><strong>{value}</strong></div>; }
-function Evidence({ title, items }: Readonly<{ title: string; items: readonly Readonly<{ id: string; meta: string; content: string }>[] }>) { return <section className="plan-panel"><span className="eyebrow">Evidence</span><h2>{title}</h2>{items.length === 0 ? <p className="plan-empty">Keine Evidenz vom Planner zurückgegeben.</p> : <div className="plan-evidence">{items.map((item) => <article key={item.id}><small>{item.meta}</small><p>{item.content}</p></article>)}</div>}</section>; }
+function Evidence({ title, items }: Readonly<{ title: string; items: readonly Readonly<{ id: string; meta: string; content: string }>[] }>) { return <section className="plan-panel"><span className="eyebrow">Evidence</span><h2>{title}</h2>{items.length === 0 ? <p className="plan-empty">Keine Evidenz vom Planner zurückgegeben.</p> : <div className="plan-evidence">{items.map((item) => <article key={item.id}><small>{item.meta}</small><p>{item.content}</p></article>)}</section>; }
