@@ -11,13 +11,11 @@ import {
 } from './contracts';
 
 export type GoalPlanningState = Readonly<{ plan: GoalPlan | null; error: string | null }>;
-export const initialGoalPlanningState: GoalPlanningState = { plan: null, error: null };
 
 export type GoalWorkflowMaterializationState = Readonly<{
   result: GoalWorkflowMaterialization | null;
   error: string | null;
 }>;
-export const initialGoalWorkflowMaterializationState: GoalWorkflowMaterializationState = { result: null, error: null };
 
 export async function createGoalPlan(_previous: GoalPlanningState, formData: FormData): Promise<GoalPlanningState> {
   const rawGoal = formData.get('goal');

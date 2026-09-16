@@ -3,11 +3,14 @@
 import { useActionState } from 'react';
 import {
   createGoalPlan,
-  initialGoalPlanningState,
-  initialGoalWorkflowMaterializationState,
   materializeGoalWorkflow,
+  type GoalPlanningState,
+  type GoalWorkflowMaterializationState,
 } from '@/lib/planning/actions';
 import type { GoalPlan } from '@/lib/planning/contracts';
+
+const initialGoalPlanningState: GoalPlanningState = { plan: null, error: null };
+const initialGoalWorkflowMaterializationState: GoalWorkflowMaterializationState = { result: null, error: null };
 
 export function PlanningClient() {
   const [state, action, pending] = useActionState(createGoalPlan, initialGoalPlanningState);
