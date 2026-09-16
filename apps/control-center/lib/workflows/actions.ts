@@ -23,19 +23,20 @@ export async function workflowAction(formData: FormData): Promise<void> {
     } else {
       await client.post(path, {}, parseMutationResult);
     }
-    revalidatePath(WORKFLOWS_PATH);
-    const notice =
-      action === 'START_RUN' ? 'STARTED'
-        : action === 'RESUME_RUN' ? 'RESUMED'
-          : action === 'APPROVE_HUMAN_RELEASE' ? 'RELEASE_APPROVED'
-            : action === 'COORDINATE_AL4_REVIEWS' ? 'AL4_REVIEWS_COORDINATED'
-              : action === 'PROCESS_REVIEW_VERDICT' ? 'VERDICT_PROCESSED'
-                : 'EXECUTED';
-    redirectWorkflow(workflowRunId, notice, false);
   } catch (error) {
     const code = error instanceof VitoApiError ? error.code : 'UNEXPECTED_ERROR';
     redirectWorkflow(workflowRunId, code);
   }
+
+  revalidatePath(WORKFLOWS_PATH);
+  const notice =
+    action === 'START_RUN' ? 'STARTED'
+      : action === 'RESUME_RUN' ? 'RESUMED'
+        : action === 'APPROVE_HUMAN_RELEASE' ? 'RELEASE_APPROVED'
+          : action === 'COORDINATE_AL4_REVIEWS' ? 'AL4_REVIEWS_COORDINATED'
+            : action === 'PROCESS_REVIEW_VERDICT' ? 'VERDICT_PROCESSED'
+              : 'EXECUTED';
+  redirectWorkflow(workflowRunId, notice, false);
 }
 
 function mutationPath(workflowRunId: string, action: WorkflowNextAction): `/${string}` | null {
