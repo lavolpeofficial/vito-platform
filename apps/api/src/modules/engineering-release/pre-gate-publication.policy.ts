@@ -20,6 +20,7 @@ export interface PreGatePublicationRequest {
 }
 export function authorizePreGatePublication(request: PreGatePublicationRequest): boolean {
   if (!['COMMIT', 'PUSH', 'DRAFT_PR', 'CI_READ'].includes(request.action)) return false;
+  if (request.actorIsMachine !== true) return false;
   if (!request.organizationId || request.organizationId !== request.missionOrganizationId) return false;
   if (!request.missionId || request.missionId !== request.approvedMissionId) return false;
   if (!request.codeBuildApprovedByHuman || !request.codeBuildApprovalActive) return false;
