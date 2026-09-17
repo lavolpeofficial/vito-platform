@@ -7,12 +7,15 @@ describe('EngineeringProviderProvisioningService transaction rollback', () => {
       capabilities: [] as Array<{ id: string }>,
       audits: [] as Array<{ action: string }>,
     };
+    let stagedAudits: Array<{ action: string }> = [];
+    let transactionClient: unknown;
     const transaction = jest.fn(async (callback: (tx: any) => Promise<unknown>) => {
       const staged = {
         providers: [] as Array<{ id: string }>,
         capabilities: [] as Array<{ id: string }>,
         audits: [] as Array<{ action: string }>,
       };
+      stagedAudits = staged.audits;
       const tx = {
         agentProvider: {
           findFirst: jest.fn().mockResolvedValue(null),
@@ -31,19 +34,20 @@ describe('EngineeringProviderProvisioningService transaction rollback', () => {
           }),
         },
       };
+      transactionClient = tx;
       const result = await callback(tx);
       committed.providers.push(...staged.providers);
       committed.capabilities.push(...staged.capabilities);
       committed.audits.push(...staged.audits);
       return result;
     });
-    let auditCalls = 0;
     const audit = {
       record: jest.fn(async (event: { action: string }, tx: unknown) => {
-        expect(tx).toBeDefined();
-        auditCalls += 1;
-        if (auditCalls === 2) throw new Error('simulated capability audit write failure');
-        // The first audit write is staged by the transaction, never committed on rejection.
+        expect(tx).toBe(transactionClient);
+        stagedAudits.push({ action: event.action });
+        if (event.action === 'PROVIDER_CAPABILITY_ASSIGNED') {
+          throw new Error('simulated capability audit write failure');
+        }
       }),
     };
     const tenant = {
@@ -62,6 +66,10 @@ describe('EngineeringProviderProvisioningService transaction rollback', () => {
     );
     expect(transaction).toHaveBeenCalledTimes(1);
     expect(audit.record).toHaveBeenCalledTimes(2);
+    expect(stagedAudits).toEqual([
+      { action: 'PROVIDER_REGISTERED' },
+      { action: 'PROVIDER_CAPABILITY_ASSIGNED' },
+    ]);
     expect(committed).toEqual({ providers: [], capabilities: [], audits: [] });
   });
 });
