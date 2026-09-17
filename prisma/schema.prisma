@@ -322,6 +322,7 @@ model Organization {
   governedOperationEnvelopes GovernedOperationEnvelope[]
   governedExecutionRecords   GovernedExecutionRecord[]
   operatorTasks              OperatorTask[]
+  codeBuildApprovals         CodeBuildApproval[]
 
   @@map("organizations")
 }
@@ -341,9 +342,9 @@ model WorkforceInstance {
   organization Organization      @relation(fields: [organizationId], references: [id])
   orchestrator DigitalEmployee?  @relation("WorkforceOrchestrator", fields: [orchestratorEmployeeId], references: [id], onDelete: SetNull)
   members      DigitalEmployee[] @relation("WorkforceMembers")
-  departments Department[]
-  teams       Team[]
-  positions   Position[]
+  departments  Department[]
+  teams        Team[]
+  positions    Position[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -486,8 +487,11 @@ model User {
   deletedByUser User?  @relation("UserDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
   disabledUsers User[] @relation("UserDeletedBy")
 
-  assignedTasks Task[] @relation("TaskAssignedUser")
-  createdTasks  Task[] @relation("TaskCreatedByUser")
+  assignedTasks              Task[]              @relation("TaskAssignedUser")
+  createdTasks               Task[]              @relation("TaskCreatedByUser")
+  codeBuildApprovalsGranted  CodeBuildApproval[] @relation("CodeBuildApprovalGrantedBy")
+  codeBuildApprovalsRevoked  CodeBuildApproval[] @relation("CodeBuildApprovalRevokedBy")
+  codeBuildApprovalsConsumed CodeBuildApproval[] @relation("CodeBuildApprovalConsumedBy")
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -650,6 +654,40 @@ model AuditEvent {
   @@index([organizationId])
   @@index([organizationId, entityType, entityId])
   @@map("audit_events")
+}
+
+/// Persisted, tenant-scoped human authorization for one bounded CODE_BUILD execution.
+/// A general chat message is deliberately not approval evidence.
+model CodeBuildApproval {
+  id                     String    @id @default(uuid())
+  organizationId         String
+  missionId              String
+  repository             String
+  branch                 String
+  approvalRequestKey     String
+  approvalRequestHash    String
+  approvedByUserId       String
+  approvedAt             DateTime  @default(now())
+  expiresAt              DateTime
+  revokedAt              DateTime?
+  revokedByUserId        String?
+  consumedAt             DateTime?
+  consumedByUserId       String?
+  consumptionRequestKey  String?
+  consumptionRequestHash String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  approvedBy   User         @relation("CodeBuildApprovalGrantedBy", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+  revokedBy    User?        @relation("CodeBuildApprovalRevokedBy", fields: [revokedByUserId], references: [id], onDelete: Restrict)
+  consumedBy   User?        @relation("CodeBuildApprovalConsumedBy", fields: [consumedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, approvalRequestKey])
+  @@unique([organizationId, consumptionRequestKey])
+  @@index([organizationId, missionId, repository, branch])
+  @@index([organizationId, expiresAt])
+  @@map("code_build_approvals")
 }
 
 model Source {
@@ -889,13 +927,13 @@ model GovernedOperationEnvelope {
 /// Bindung steckt unveränderlich im Schlüssel selbst.
 /// Claims werden NIE freigegeben (kein Release-Pfad).
 model GovernedInvocationClaim {
-  id                  String                        @id @default(uuid())
-  logicalOperationKey String                        @unique
-  invocationId        String                        @unique
+  id                  String                       @id @default(uuid())
+  logicalOperationKey String                       @unique
+  invocationId        String                       @unique
   contextFingerprint  String
   state               GovernedInvocationClaimState @default(IN_PROGRESS)
-  claimedAt           DateTime                      @default(now())
-  updatedAt           DateTime                      @updatedAt
+  claimedAt           DateTime                     @default(now())
+  updatedAt           DateTime                     @updatedAt
 
   @@map("governed_invocation_claims")
 }
