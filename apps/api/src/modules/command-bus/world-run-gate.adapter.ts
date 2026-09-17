@@ -15,6 +15,7 @@ export interface WorldRunGateResult {
   caseId: string;
   verifier: string;
   dispatch: 'ACCEPTED';
+  correlationId: string;
   runId: number;
   runUrl: string;
   runStatus: string;
@@ -41,9 +42,8 @@ export class WorldRunGateAdapter implements CommandHandler<WorldRunGateResult> {
     }
 
     const headSha = await this.client.getBranchHeadSha();
-    const dispatchedAt = Date.now();
-    await this.client.dispatchWorkflow();
-    const run = await this.correlateRun(this.client, headSha, dispatchedAt);
+    await this.client.dispatchWorkflow(command.correlationId);
+    const run = await this.correlateRun(this.client, headSha, command.correlationId);
 
     return {
       system: 'WORLD',
@@ -54,6 +54,7 @@ export class WorldRunGateAdapter implements CommandHandler<WorldRunGateResult> {
       caseId: manifest.caseId,
       verifier: manifest.verifier,
       dispatch: 'ACCEPTED',
+      correlationId: command.correlationId,
       runId: run.id,
       runUrl: run.html_url,
       runStatus: run.status,
@@ -64,9 +65,9 @@ export class WorldRunGateAdapter implements CommandHandler<WorldRunGateResult> {
   private async correlateRun(
     client: WorldGitHubClient,
     headSha: string,
-    dispatchedAt: number,
+    correlationId: string,
   ): Promise<WorldWorkflowRun> {
-    const earliest = dispatchedAt - 5_000;
+    const expectedTitle = `WORLD ${correlationId}`;
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const runs = await client.listWorkflowRuns();
       const candidates = runs.filter((run) =>
@@ -74,7 +75,8 @@ export class WorldRunGateAdapter implements CommandHandler<WorldRunGateResult> {
         run.head_branch === client.branch &&
         run.head_sha === headSha &&
         run.path.endsWith(`/${client.workflow}`) &&
-        Date.parse(run.created_at) >= earliest,
+        run.display_title === expectedTitle &&
+        client.correlationIdFromRun(run) === correlationId,
       );
       if (candidates.length === 1) return candidates[0];
       if (candidates.length > 1) throw new Error('WORLD_GATE_RUN_CORRELATION_AMBIGUOUS');

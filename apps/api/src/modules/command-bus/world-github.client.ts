@@ -9,6 +9,7 @@ interface GitHubContentsResponse {
 interface WorkflowRun {
   id: number;
   name: string;
+  display_title: string;
   path: string;
   event: string;
   status: string;
@@ -83,12 +84,13 @@ export class WorldGitHubClient {
     return payload.sha;
   }
 
-  async dispatchWorkflow(): Promise<void> {
+  async dispatchWorkflow(correlationId: string): Promise<void> {
+    if (!this.isCorrelationId(correlationId)) throw new Error('WORLD_CORRELATION_ID_INVALID');
     const url = `https://api.github.com/repos/${this.repository}/actions/workflows/${encodeURIComponent(this.workflow)}/dispatches`;
     await this.request(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ref: this.branch }),
+      body: JSON.stringify({ ref: this.branch, inputs: { correlationId } }),
     });
   }
 
@@ -110,6 +112,17 @@ export class WorldGitHubClient {
     const response = await this.request(url);
     const payload = (await response.json()) as WorkflowArtifactsResponse;
     return Array.isArray(payload.artifacts) ? payload.artifacts : [];
+  }
+
+  correlationIdFromRun(run: WorldWorkflowRun): string | null {
+    const match = /^WORLD ([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/.exec(
+      run.display_title,
+    );
+    return match?.[1] ?? null;
+  }
+
+  private isCorrelationId(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
   }
 
   private async request(url: string, init: RequestInit = {}): Promise<Response> {
