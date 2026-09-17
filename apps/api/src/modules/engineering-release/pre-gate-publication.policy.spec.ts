@@ -16,9 +16,9 @@ describe('pre-gate publication policy (not connected to mutation adapter)', () =
     { organizationId: 'tenant-b' }, { missionId: 'other' }, { codeBuildApprovedByHuman: false },
     { codeBuildApprovalActive: false }, { repository: 'other/repo' }, { branch: 'main' },
     { branch: 'feat/other' }, { approvedBranch: 'feat/other' }, { approvedRepository: 'other/repo' },
-    { organizationId: '' }, { missionId: '' },
+    { organizationId: '' }, { missionId: '' }, { actorIsMachine: false }, { actorIsMachine: undefined },
   ])('denies missing or mismatched approval scope %#', (override) => {
-    expect(authorizePreGatePublication({ ...valid, ...override })).toBe(false);
+    expect(authorizePreGatePublication({ ...valid, ...override } as PreGatePublicationRequest)).toBe(false);
   });
   it('denies non-draft PR', () => expect(authorizePreGatePublication({ ...valid, action: 'DRAFT_PR', draft: false })).toBe(false));
   it.each([
