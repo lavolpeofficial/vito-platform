@@ -53,6 +53,22 @@ describePg('CODE_BUILD approval PostgreSQL security gate', () => {
     expect(await prisma.auditEvent.count({ where: { organizationId: t.organizationId, action: 'CODE_BUILD_APPROVAL_GRANTED' } })).toBe(1);
   });
 
+  it('rejects stale role claims and downgraded users for grants, replays and revocations', async () => {
+    const t = await tenant();
+    const dto = approval();
+    const stored = await service.create(t.organizationId, t.human.id, 'OWNER', dto);
+    await prisma.user.update({ where: { id: t.human.id }, data: { role: 'MEMBER' } });
+    await expect(service.create(t.organizationId, t.human.id, 'OWNER', approval())).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.create(t.organizationId, t.human.id, 'OWNER', dto)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.revoke(t.organizationId, t.human.id, stored.id)).rejects.toBeInstanceOf(ForbiddenException);
+    expect((await prisma.codeBuildApproval.findUniqueOrThrow({ where: { id: stored.id } })).revokedAt).toBeNull();
+    expect(await prisma.auditEvent.count({ where: { organizationId: t.organizationId, action: 'CODE_BUILD_APPROVAL_REVOKED' } })).toBe(0);
+    await prisma.user.update({ where: { id: t.human.id }, data: { role: 'ADMIN' } });
+    const adminApproval = await service.create(t.organizationId, t.human.id, 'ADMIN', approval());
+    expect(adminApproval.approvedByUserId).toBe(t.human.id);
+    await service.revoke(t.organizationId, t.human.id, stored.id);
+  });
+
   it('binds consumption to tenant, mission, repository and branch and fails closed on mismatch', async () => {
     const owner = await tenant();
     const other = await tenant();
