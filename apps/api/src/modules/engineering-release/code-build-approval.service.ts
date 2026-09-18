@@ -15,7 +15,9 @@ export class CodeBuildApprovalService {
 
   private async requireHuman(tx: Prisma.TransactionClient, organizationId: string, userId: string) {
     const user = await tx.user.findFirst({ where: { id: userId, organizationId, status: 'ACTIVE', deletedAt: null } });
-    if (!user || user.isMachineIdentity) throw new ForbiddenException('A currently authenticated human identity is required.');
+    if (!user || user.isMachineIdentity || (user.role !== UserRole.OWNER && user.role !== UserRole.ADMIN)) {
+      throw new ForbiddenException('An active human OWNER or ADMIN identity is required.');
+    }
     return user;
   }
 
@@ -24,14 +26,14 @@ export class CodeBuildApprovalService {
     if (expiresAt.getTime() <= Date.now()) throw new UnprocessableEntityException('Approval expiry must be in the future.');
     const requestHash = this.hash({ missionId: dto.missionId, repository: dto.repository, branch: dto.branch, expiresAt: expiresAt.toISOString() });
     return this.prisma.$transaction(async (tx) => {
-      await this.requireHuman(tx, organizationId, userId);
+      const approver = await this.requireHuman(tx, organizationId, userId);
       const existing = await tx.codeBuildApproval.findUnique({ where: { organizationId_approvalRequestKey: { organizationId, approvalRequestKey: dto.requestKey } } });
       if (existing) {
         if (existing.approvalRequestHash !== requestHash || existing.approvedByUserId !== userId) throw new ConflictException('Request key was already used with different approval content.');
         return existing;
       }
       const approval = await tx.codeBuildApproval.create({ data: { organizationId, missionId: dto.missionId, repository: dto.repository, branch: dto.branch, expiresAt, approvalRequestKey: dto.requestKey, approvalRequestHash: requestHash, approvedByUserId: userId } });
-      await this.audit.record({ organizationId, actorType: 'USER', actorId: userId, action: 'CODE_BUILD_APPROVAL_GRANTED', entityType: 'CodeBuildApproval', entityId: approval.id, metadata: { missionId: dto.missionId, repository: dto.repository, branch: dto.branch, expiresAt: expiresAt.toISOString(), role } }, tx);
+      await this.audit.record({ organizationId, actorType: 'USER', actorId: userId, action: 'CODE_BUILD_APPROVAL_GRANTED', entityType: 'CodeBuildApproval', entityId: approval.id, metadata: { missionId: dto.missionId, repository: dto.repository, branch: dto.branch, expiresAt: expiresAt.toISOString(), role: approver.role } }, tx);
       return approval;
     });
   }
