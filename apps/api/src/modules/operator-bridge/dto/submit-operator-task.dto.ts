@@ -2,6 +2,7 @@ import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsInt,
+  IsNotEmpty,
   IsObject,
   IsString,
   IsUUID,
@@ -61,6 +62,13 @@ export class SubmitOperatorBudgetDto {
   maxCostMinorUnits?: number;
 }
 
+export class OperatorCodeBuildApprovalDto {
+  @IsUUID() approvalId!: string;
+  @IsString() @IsNotEmpty() @MaxLength(200) missionId!: string;
+  @IsString() @Matches(/^lavolpeofficial\/vito-platform$/) repository!: string;
+  @IsString() @Matches(/^feat\/[a-z0-9][a-z0-9-]*$/) branch!: string;
+}
+
 export class SubmitOperatorTaskDto {
   @ApiProperty({ format: 'uuid', description: 'Client-generated idempotency key.' })
   @preservePlainValue
@@ -95,4 +103,11 @@ export class SubmitOperatorTaskDto {
   @ValidateNested()
   @Type(() => SubmitOperatorBudgetDto)
   budget?: SubmitOperatorBudgetDto;
+
+  @ApiPropertyOptional({ type: OperatorCodeBuildApprovalDto })
+  @ValidateIf((obj) => obj.capabilityCode === 'CODE_BUILD' || obj.codeBuildApproval !== undefined)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => OperatorCodeBuildApprovalDto)
+  codeBuildApproval?: OperatorCodeBuildApprovalDto;
 }

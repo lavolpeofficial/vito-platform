@@ -4,6 +4,7 @@ export interface OperatorFingerprintInput {
   readonly capabilityCode: string;
   readonly prompt: string;
   readonly assuranceLevel?: string;
+  readonly codeBuildApproval?: { readonly approvalId: string; readonly missionId: string; readonly repository: string; readonly branch: string };
   readonly budget?: {
     readonly maxDurationMs?: number;
     readonly maxTokens?: number;
@@ -14,6 +15,7 @@ export interface OperatorFingerprintInput {
 export function computeRequestFingerprint(input: OperatorFingerprintInput): string {
   const canonical = JSON.stringify({
     capabilityCode: input.capabilityCode,
+    codeBuildApproval: input.codeBuildApproval ?? null,
     prompt: input.prompt,
     assuranceLevel: input.assuranceLevel ?? null,
     budget: {

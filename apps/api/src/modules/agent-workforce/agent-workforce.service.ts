@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Optional, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Optional, ServiceUnavailableException } from '@nestjs/common';
 import {
   ExecutionTier,
   ProviderType,
@@ -9,6 +9,8 @@ import {
 } from '@vito/contracts';
 import { randomUUID } from 'node:crypto';
 
+import { CodeBuildApprovalService } from '../engineering-release/code-build-approval.service';
+import { ConsumeCodeBuildApprovalDto } from '../engineering-release/dto/code-build-approval.dto';
 import { ProviderRouterService } from '../provider-registry/provider-router.service';
 import {
   GovernedRuntimeService,
@@ -58,6 +60,7 @@ export interface DispatchAgentTaskInput {
   readonly correlationId?: string;
   readonly independenceContext?: IndependenceContext;
   readonly executionBudget?: ExecutionBudget;
+  readonly codeBuildApproval?: { readonly approvalId: string; readonly machineUserId: string; readonly scope: ConsumeCodeBuildApprovalDto };
 }
 
 /**
@@ -81,6 +84,7 @@ export class AgentWorkforceService {
     private readonly experienceCapture: RuntimeExperienceCaptureService,
     profileRegistry?: CloudExecutionProfileRegistry,
     @Optional() private readonly memory?: MemoryService,
+    @Optional() private readonly codeBuildApprovals?: CodeBuildApprovalService,
   ) {
     this.profileRegistry = profileRegistry ?? new CloudExecutionProfileRegistry([]);
   }
@@ -96,6 +100,19 @@ export class AgentWorkforceService {
     const correlationId = persistedIdentity?.correlationId ?? input.correlationId ?? randomUUID();
     const assuranceLevel = persistedIdentity?.assuranceLevel ?? input.assuranceLevel;
     const capabilityCode = persistedIdentity?.capabilityCode ?? input.capabilityCode;
+
+    // Effective capability is resolved from the persisted execution plan first.
+    // A public consume endpoint response is never sufficient dispatch evidence.
+    if (capabilityCode === 'CODE_BUILD') {
+      const evidence = input.codeBuildApproval;
+      if (!evidence || !this.codeBuildApprovals ||
+          evidence.scope.repository !== 'lavolpeofficial/vito-platform' ||
+          !/^feat\/[a-z0-9][a-z0-9-]*$/.test(evidence.scope.branch) ||
+          !evidence.scope.missionId || !evidence.scope.requestKey || !evidence.approvalId || !evidence.machineUserId) {
+        throw new ForbiddenException('CODE_BUILD_APPROVAL_REQUIRED');
+      }
+      await this.codeBuildApprovals.consumeForDispatch(input.organizationId, evidence.machineUserId, evidence.approvalId, evidence.scope);
+    }
 
     const routing = await this.providerRouter.route({
       organizationId: input.organizationId,

@@ -9,7 +9,7 @@ import {
 describe('SubmitOperatorTaskDto', () => {
   const valid = {
     requestId: '0b31931b-aa1c-4570-bc5d-f9cd90b4970e',
-    capabilityCode: 'CODE_BUILD',
+    capabilityCode: 'CODE_PLAN',
     prompt: 'Implement the bounded task.',
     assuranceLevel: 'AL-3',
     budget: { maxDurationMs: 1000, maxTokens: 1, maxCostMinorUnits: 0 },
@@ -23,6 +23,23 @@ describe('SubmitOperatorTaskDto', () => {
 
   it('accepts the complete bounded request', async () => {
     expect(await errors(valid)).toHaveLength(0);
+  });
+
+  it('rejects CODE_BUILD without explicit scoped approval evidence', async () => {
+    expect(await errors({ ...valid, capabilityCode: 'CODE_BUILD' })).not.toHaveLength(0);
+  });
+
+  it('accepts CODE_BUILD with structurally valid scoped approval evidence', async () => {
+    expect(await errors({ ...valid, capabilityCode: 'CODE_BUILD', codeBuildApproval: {
+      approvalId: '0b31931b-aa1c-4570-bc5d-f9cd90b4970e',
+      missionId: 'mission-1', repository: 'lavolpeofficial/vito-platform', branch: 'feat/approved-build',
+    } })).toHaveLength(0);
+  });
+
+  it('rejects CODE_BUILD with malformed or out-of-scope approval evidence', async () => {
+    expect(await errors({ ...valid, capabilityCode: 'CODE_BUILD', codeBuildApproval: {
+      approvalId: 'not-a-uuid', missionId: 'mission-1', repository: 'other/repo', branch: 'main',
+    } })).not.toHaveLength(0);
   });
 
   it('enforces request UUID, capability, assurance and nested budget bounds', async () => {

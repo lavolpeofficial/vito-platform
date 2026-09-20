@@ -51,6 +51,23 @@ export class CodeBuildApprovalService {
     });
   }
 
+  // Dispatch-only claim: unlike the public idempotent consume endpoint, a replay
+  // must never authorize a second provider invocation.
+  async consumeForDispatch(organizationId: string, machineUserId: string, id: string, dto: ConsumeCodeBuildApprovalDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const actor = await tx.user.findFirst({ where: { id: machineUserId, organizationId, status: 'ACTIVE', deletedAt: null } });
+      if (!actor?.isMachineIdentity || actor.machineScope !== 'vito-bridge') throw new ForbiddenException('Active vito-bridge machine identity required.');
+      const now = new Date();
+      const claimed = await tx.codeBuildApproval.updateMany({
+        where: { id, organizationId, missionId: dto.missionId, repository: dto.repository, branch: dto.branch, consumedAt: null, revokedAt: null, expiresAt: { gt: now } },
+        data: { consumedAt: now, consumedByUserId: machineUserId, consumptionRequestKey: dto.requestKey, consumptionRequestHash: this.hash({ approvalId: id, missionId: dto.missionId, repository: dto.repository, branch: dto.branch }) },
+      });
+      if (claimed.count !== 1) throw new ForbiddenException('No unconsumed CODE_BUILD approval matches this execution.');
+      await this.audit.record({ organizationId, actorType: 'USER', actorId: machineUserId, action: 'CODE_BUILD_APPROVAL_CONSUMED', entityType: 'CodeBuildApproval', entityId: id, metadata: { missionId: dto.missionId, repository: dto.repository, branch: dto.branch, requestKey: dto.requestKey } }, tx);
+      return tx.codeBuildApproval.findUniqueOrThrow({ where: { id } });
+    });
+  }
+
   async consume(organizationId: string, machineUserId: string, id: string, dto: ConsumeCodeBuildApprovalDto) {
     const requestHash = this.hash({ approvalId: id, missionId: dto.missionId, repository: dto.repository, branch: dto.branch });
     return this.prisma.$transaction(async (tx) => {

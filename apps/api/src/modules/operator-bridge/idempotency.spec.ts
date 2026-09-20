@@ -22,6 +22,12 @@ describe('computeRequestFingerprint', () => {
     expect(computeRequestFingerprint(candidate)).not.toBe(computeRequestFingerprint(base));
   });
 
+  it('binds CODE_BUILD approval evidence into the idempotency fingerprint', () => {
+    const evidence = { approvalId: 'approval-a', missionId: 'mission-a', repository: 'lavolpeofficial/vito-platform', branch: 'feat/a' };
+    expect(computeRequestFingerprint({ ...base, codeBuildApproval: evidence })).not.toBe(computeRequestFingerprint(base));
+    expect(computeRequestFingerprint({ ...base, codeBuildApproval: evidence })).not.toBe(computeRequestFingerprint({ ...base, codeBuildApproval: { ...evidence, approvalId: 'approval-b' } }));
+  });
+
   it('treats omitted and empty budgets as the same effective dispatch budget', () => {
     expect(computeRequestFingerprint({ ...base, budget: undefined })).toBe(
       computeRequestFingerprint({ ...base, budget: {} }),

@@ -209,7 +209,16 @@ export class OperatorBridgeService {
     let terminal: TerminalUpdate;
     try {
       const result = await this.agentWorkforceService.dispatch(
-        this.toAgentDispatchRequest(claim.task),
+        {
+          ...this.toAgentDispatchRequest(claim.task),
+          ...(request.capabilityCode === 'CODE_BUILD' && request.codeBuildApproval ? {
+            codeBuildApproval: {
+              approvalId: request.codeBuildApproval.approvalId,
+              machineUserId: userId, // JWT-derived tenant identity, never supplied by the client.
+              scope: { missionId: request.codeBuildApproval.missionId, repository: request.codeBuildApproval.repository, branch: request.codeBuildApproval.branch, requestKey: request.requestId },
+            },
+          } : {}),
+        },
       );
       terminal = this.mapDispatchResult(result);
     } catch (error) {

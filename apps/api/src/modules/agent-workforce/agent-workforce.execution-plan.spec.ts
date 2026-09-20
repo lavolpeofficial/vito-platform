@@ -2,6 +2,22 @@ import { AgentExecutionStatus, ProviderType } from '@vito/contracts';
 import { AgentWorkforceService } from './agent-workforce.service';
 
 describe('AgentWorkforceService persisted workflow execution plan boundary', () => {
+  it('rejects server-resolved CODE_BUILD before routing even when caller requests another capability', async () => {
+    const route = jest.fn();
+    const executeWorkspaceFileOperation = jest.fn();
+    const resolve = jest.fn().mockResolvedValue({ capabilityCode: 'CODE_BUILD', correlationId: 'server-correlation' });
+    const service = new AgentWorkforceService(
+      { route } as any,
+      { executeWorkspaceFileOperation } as any,
+      { retrieve: jest.fn() } as any,
+      { resolve } as any,
+      { tryRecord: jest.fn() } as any,
+    );
+    await expect(service.dispatch({ organizationId: 'org-1', workflowRunId: 'run-1', workflowStepRunId: 'step-1', capabilityCode: 'CODE_PLAN', prompt: 'build' })).rejects.toMatchObject({ status: 403 });
+    expect(route).not.toHaveBeenCalled();
+    expect(executeWorkspaceFileOperation).not.toHaveBeenCalled();
+  });
+
   it('ignores caller capability and uses the server-owned persisted workflow capability', async () => {
     const route = jest.fn().mockResolvedValue({
       selectedProvider: {
@@ -26,7 +42,7 @@ describe('AgentWorkforceService persisted workflow execution plan boundary', () 
       taskId: 'task-1',
       agentId: 'agent-1',
       stepType: 'BUILD',
-      capabilityCode: 'CODE_BUILD',
+      capabilityCode: 'CODE_PLAN',
       attemptNumber: 1,
       assuranceLevel: 'AL-3',
       correlationId: 'corr-server',
@@ -53,27 +69,27 @@ describe('AgentWorkforceService persisted workflow execution plan boundary', () 
 
     expect(route).toHaveBeenCalledWith(
       expect.objectContaining({
-        capability: 'CODE_BUILD',
+        capability: 'CODE_PLAN',
         assuranceLevel: 'AL-3',
         correlationId: 'corr-server',
       }),
     );
     expect(retrieve).toHaveBeenCalledWith({
-      query: 'CODE_BUILD Build the requested change.',
+      query: 'CODE_PLAN Build the requested change.',
       limit: 8,
     });
     expect(executeWorkspaceFileOperation).toHaveBeenCalledWith(
       expect.objectContaining({
-        capabilityCode: 'CODE_BUILD',
+        capabilityCode: 'CODE_PLAN',
         correlationId: 'corr-server',
       }),
     );
     expect(tryRecord).toHaveBeenCalledWith(
       expect.objectContaining({
-        context: expect.objectContaining({ capabilityCode: 'CODE_BUILD' }),
-        action: expect.objectContaining({ capabilityCode: 'CODE_BUILD' }),
+        context: expect.objectContaining({ capabilityCode: 'CODE_PLAN' }),
+        action: expect.objectContaining({ capabilityCode: 'CODE_PLAN' }),
       }),
     );
-    expect(result.capabilityCode).toBe('CODE_BUILD');
+    expect(result.capabilityCode).toBe('CODE_PLAN');
   });
 });

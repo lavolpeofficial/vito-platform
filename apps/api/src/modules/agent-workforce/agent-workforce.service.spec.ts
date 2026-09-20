@@ -1,4 +1,4 @@
-import { ServiceUnavailableException } from '@nestjs/common';
+import { ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { AgentExecutionStatus, ProviderType } from '@vito/contracts';
 import type { CloudExecutionProfile } from '@vito/contracts';
 
@@ -32,7 +32,7 @@ describe('AgentWorkforceService', () => {
     organizationId: 'org-1',
     workflowRunId: 'run-1',
     workflowStepRunId: 'step-1',
-    capabilityCode: 'CODE_BUILD',
+    capabilityCode: 'CODE_PLAN',
     prompt: 'Implement the bounded task and run tests.',
     assuranceLevel: 'AL-3',
     correlationId: 'corr-1',
@@ -63,6 +63,31 @@ describe('AgentWorkforceService', () => {
     };
   }
 
+  it('fails closed for CODE_BUILD before provider routing without consumed execution evidence', async () => {
+    await expect(service().dispatch({ ...input, capabilityCode: 'CODE_BUILD' })).rejects.toThrow(ForbiddenException);
+    expect(route).not.toHaveBeenCalled();
+    expect(executeWorkspaceFileOperation).not.toHaveBeenCalled();
+  });
+
+  it('atomically consumes scoped CODE_BUILD approval before routing and rejects a replay', async () => {
+    const consumeForDispatch = jest.fn().mockResolvedValueOnce({ id: 'approval-1' }).mockRejectedValueOnce(new ForbiddenException('already consumed'));
+    const workforce = new AgentWorkforceService(
+      { route } as any, { executeWorkspaceFileOperation } as any, { retrieve } as any,
+      { resolve: resolveWorkflowIdentity } as any, { tryRecord: tryRecordExperience } as any,
+      undefined, undefined, { consumeForDispatch } as any,
+    );
+    const evidence = { approvalId: 'approval-1', machineUserId: 'machine-1', scope: {
+      missionId: 'mission-1', repository: 'lavolpeofficial/vito-platform', branch: 'feat/approved', requestKey: 'request-1',
+    } };
+    route.mockResolvedValue({ selectedProvider: null, routingDecisionId: 'r', decisionReason: 'none', rejectionReasons: {} });
+    await expect(workforce.dispatch({ ...input, capabilityCode: 'CODE_BUILD', codeBuildApproval: evidence })).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(consumeForDispatch).toHaveBeenCalledWith('org-1', 'machine-1', 'approval-1', evidence.scope);
+    route.mockClear();
+    await expect(workforce.dispatch({ ...input, capabilityCode: 'CODE_BUILD', codeBuildApproval: evidence })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(route).not.toHaveBeenCalled();
+    expect(executeWorkspaceFileOperation).not.toHaveBeenCalled();
+  });
+
   it('routes by capability and dispatches prior learning with the selected local tool', async () => {
     route.mockResolvedValue({
       selectedProvider: {
@@ -86,7 +111,7 @@ describe('AgentWorkforceService', () => {
     expect(route).toHaveBeenCalledWith(
       expect.objectContaining({
         organizationId: 'org-1',
-        capability: 'CODE_BUILD',
+        capability: 'CODE_PLAN',
         assuranceLevel: 'AL-3',
         workflowRunId: 'run-1',
         workflowStepRunId: 'step-1',
@@ -102,7 +127,7 @@ describe('AgentWorkforceService', () => {
       trustOrigin: 'SERVER_RUNTIME',
       organizationId: 'org-1',
       providerId: 'provider-1',
-      capabilityCode: 'CODE_BUILD',
+      capabilityCode: 'CODE_PLAN',
       requestedAction: 'RUN_COMMAND',
       command: 'opencode',
       governedInputPayload: {

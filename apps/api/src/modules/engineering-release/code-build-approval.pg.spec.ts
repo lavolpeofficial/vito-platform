@@ -105,6 +105,18 @@ describePg('CODE_BUILD approval PostgreSQL security gate', () => {
     expect(await prisma.auditEvent.count({ where: { organizationId: t.organizationId, action: 'CODE_BUILD_APPROVAL_CONSUMED', entityId: stored.id } })).toBe(1);
   });
 
+  it('dispatch consumption is single-use, scope-bound, and rejects replay before execution', async () => {
+    const t = await tenant();
+    const dto = approval();
+    const stored = await service.create(t.organizationId, t.human.id, 'OWNER', dto);
+    const scope = consumption(dto);
+    await expect(service.consumeForDispatch(t.organizationId, t.machine.id, stored.id, { ...scope, branch: 'feat/other' })).rejects.toBeInstanceOf(ForbiddenException);
+    const consumed = await service.consumeForDispatch(t.organizationId, t.machine.id, stored.id, scope);
+    expect(consumed.consumedByUserId).toBe(t.machine.id);
+    await expect(service.consumeForDispatch(t.organizationId, t.machine.id, stored.id, scope)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(await prisma.auditEvent.count({ where: { organizationId: t.organizationId, action: 'CODE_BUILD_APPROVAL_CONSUMED', entityId: stored.id } })).toBe(1);
+  });
+
   it('allows exactly one winner under concurrent consumption', async () => {
     const t = await tenant();
     const dto = approval();
