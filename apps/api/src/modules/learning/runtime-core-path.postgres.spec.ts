@@ -58,11 +58,11 @@ describePg('VITO core path · PostgreSQL proof v2', () => {
   const capabilityIds = {
     CODE_PLAN: randomUUID(),
     CODE_BUILD: randomUUID(),
-    TEST_EXECUTION: randomUID(),
+    TEST_EXECUTION: randomUUID(),
   };
 
   const tenantContext = {
-    getOrgThrow: () => organizationId,
+    getOrThrow: () => organizationId,
     getUserId: () => userId,
     getAuthenticationMethod: () => 'jwt',
   } as any;
