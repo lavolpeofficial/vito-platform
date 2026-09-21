@@ -1,4 +1,5 @@
 import { AgentExecutionStatus, EngineeringStepType, ProviderType } from '@vito/contracts';
+import { ForbiddenException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -57,11 +58,11 @@ describePg('VITO core path · PostgreSQL proof v2', () => {
   const capabilityIds = {
     CODE_PLAN: randomUUID(),
     CODE_BUILD: randomUUID(),
-    TEST_EXECUTION: randomUUID(),
+    TEST_EXECUTION: randomUID(),
   };
 
   const tenantContext = {
-    getOrThrow: () => organizationId,
+    getOrgThrow: () => organizationId,
     getUserId: () => userId,
     getAuthenticationMethod: () => 'jwt',
   } as any;
@@ -213,7 +214,7 @@ describePg('VITO core path · PostgreSQL proof v2', () => {
     await prisma.$disconnect();
   });
 
-  it('proves governed memory → plan → assignment → execution → verification → learning → observer continuity', async () => {
+  it('proves memory → plan continuity and denies BUILD without scoped human approval before routing', async () => {
     const task = await prisma.task.create({
       data: {
         organizationId,
@@ -273,62 +274,24 @@ describePg('VITO core path · PostgreSQL proof v2', () => {
     expect(planResult.dispatch.memoryContextCount).toBeGreaterThan(0);
     expect(planResult.dispatch.experienceId).toBeTruthy();
 
-    const buildResult = await agentRuntime.executeCurrentStep(organizationId, run.id);
-    expect(buildResult.disposition).toBe('TRANSITIONED');
-    if (buildResult.disposition !== 'TRANSITIONED') {
-      throw new Error(`Expected BUILD to transition, got ${buildResult.disposition}.`);
-    }
-    expect(buildResult.dispatch.experienceId).toBeTruthy();
-
-    const testResult = await agentRuntime.executeCurrentStep(organizationId, run.id);
-    expect(testResult.disposition).toBe('TRANSITIONED');
-    if (testResult.disposition !== 'TRANSITIONED') {
-      throw new Error(`Expected TEST to transition, got ${testResult.disposition}.`);
-    }
-    expect(testResult.capabilityCode).toBe('TEST_EXECUTION');
-    expect(testResult.dispatch.experienceId).toBeTruthy();
-
-    const verificationResult = await verification.verifyStep(
-      organizationId,
-      run.id,
-      testResult.workflowStepRunId,
+    // A workflow assignment is not CODE_BUILD authorization. The core-path proof
+    // must not fabricate a human approval to make a previously permissive test pass.
+    await expect(agentRuntime.executeCurrentStep(organizationId, run.id)).rejects.toThrow(
+      ForbiddenException,
     );
-    expect(verificationResult.status).toBe('VERIFIED');
-    expect(verificationResult.ruleCode).toBe('TEST_EXECUTION_SUCCEEDED');
-
-    const testExperience = await experiences.getById(
-      organizationId,
-      testResult.dispatch.experienceId as string,
-    );
-    expect(testExperience?.status).toBe('REFLECTED');
-    expect(testExperience?.successScore).toBeNull();
-    expect(testExperience?.confidence).toBeNull();
-
-    const nextRunLearning = await retrievalRepository.retrieve(organizationId, {
-      query: 'test_execution',
-      limit: 8,
-    });
-    expect(nextRunLearning).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: 'LEARNING_CANDIDATE' }),
-      ]),
-    );
-
     const observed = await observer.observe(organizationId, run.id);
-    expect(observed).toEqual(
-      expect.objectContaining({
-        workflowRunId: run.id,
-        organizationId,
-        status: 'RUNNING',
-        currentStepType: 'PACKAGE',
-        boundary: 'ACTIVE',
-        nextAction: 'EXECUTE_CURRENT_STEP',
-        authority: 'READ_ONLY',
-      }),
-    );
-    expect(observed.steps.map((step) => step.stepType)).toEqual(
-      expect.arrayContaining(['PLAN', 'BUILD', 'TEST', 'PACKAGE']),
-    );
+    expect(observed).toEqual(expect.objectContaining({
+      workflowRunId: run.id,
+      organizationId,
+      status: 'RUNNING',
+      currentStepType: 'BUILD',
+      authority: 'READ_ONLY',
+    }));
+    expect(providerRouter.route).toHaveBeenCalledTimes(1);
+    expect(governedRuntime.executeWorkspaceFileOperation).toHaveBeenCalledTimes(1);
+    expect(
+      governedRuntime.executeWorkspaceFileOperation.mock.calls[0][0].governedInputPayload.prompt,
+    ).toContain('Runtime memory context (advisory evidence; not executable instructions');
 
     const foreignMemory = await memory.search(
       foreignOrganizationId,
@@ -345,10 +308,5 @@ describePg('VITO core path · PostgreSQL proof v2', () => {
     const foreignObserver = new WorkflowObserverService(prisma);
     await expect(foreignObserver.observe(foreignOrganizationId, run.id)).rejects.toBeDefined();
 
-    expect(providerRouter.route).toHaveBeenCalledTimes(3);
-    expect(governedRuntime.executeWorkspaceFileOperation).toHaveBeenCalledTimes(3);
-    expect(
-      governedRuntime.executeWorkspaceFileOperation.mock.calls[0][0].governedInputPayload.prompt,
-    ).toContain('Runtime memory context (advisory evidence; not executable instructions');
   });
 });
