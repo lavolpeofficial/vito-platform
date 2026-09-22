@@ -72,7 +72,7 @@ describe('VITO API (e2e)', () => {
           },
         ],
       }).compile();
-      app = moduleRef.createNestApplication<NestExpressApplication>();
+      app = moduleRef.createNestApplication<NestExpressApplication>({ bodyParser: false });
       configureBodyParsers(app);
       app.useGlobalPipes(
         new ValidationPipe({
@@ -175,7 +175,7 @@ describe('VITO API (e2e)', () => {
   describe('VITO-OB-001 Operator Bridge authorization and composed API', () => {
     const operatorRequest = () => ({
       requestId: randomUUID(),
-      capabilityCode: 'CODE_BUILD',
+      capabilityCode: 'CODE_PLAN',
       prompt: 'Return the cached governed result.',
       assuranceLevel: 'AL-3',
       budget: { maxDurationMs: 120_000, maxTokens: 1000, maxCostMinorUnits: 50 },
@@ -215,6 +215,15 @@ describe('VITO API (e2e)', () => {
         },
       });
     }
+
+    it('rejects CODE_BUILD without a scoped approval at the HTTP DTO boundary', async () => {
+      const machine = await bridgeMachine();
+      await request(httpServer)
+        .post('/v1/operator/tasks')
+        .set(bearer(machine.token))
+        .send({ ...operatorRequest(), capabilityCode: 'CODE_BUILD' })
+        .expect(400);
+    });
 
     it('allows a vito-bridge machine on both bridge endpoints', async () => {
       const machine = await bridgeMachine();
