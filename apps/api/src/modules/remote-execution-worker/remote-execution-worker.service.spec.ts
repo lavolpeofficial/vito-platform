@@ -7,6 +7,7 @@ import type {
   SandboxExecutionResult,
 } from './types';
 import { ChangeSetCaptureError } from './change-set-capture';
+import { ExecutionCancellationRegistry } from '../execution-cancellation/execution-cancellation.registry';
 
 jest.mock('./change-set-capture', () => ({
   captureGovernedResultSettling: jest.fn().mockResolvedValue({
@@ -400,6 +401,41 @@ describe('RemoteExecutionWorkerService', () => {
       expect(error).toBeInstanceOf(WorkerExecutionError);
       expect((error as WorkerExecutionError).code).toBe('CHANGESET_TOO_LARGE');
     }
+    expect(provisioner.cleanup).toHaveBeenCalledWith(workspace);
+  });
+
+  it('propagates workflow cancellation as a server-owned AbortSignal before provider execution', async () => {
+    const registry = makeMockRegistry();
+    const provisioner = makeMockProvisioner();
+    const executor = makeMockExecutor();
+    const workspace = makeWorkspaceHandle();
+    const cancellations = new ExecutionCancellationRegistry();
+
+    setupSuccessfulMocks(registry, provisioner, executor, workspace);
+    (executor.execute as jest.Mock).mockImplementation(async (request: any) => ({
+      ...makeSandboxResult(),
+      exitCode: null,
+      cancelled: request.cancellationSignal?.aborted === true,
+    }));
+
+    const service = new RemoteExecutionWorkerService(
+      registry,
+      provisioner,
+      executor,
+      cancellations,
+    );
+
+    const pending = service.executeSandboxed(baseInput());
+    const cancellation = cancellations.cancelWorkflow('org-123', 'run-abc');
+    const result = await pending;
+
+    expect(cancellation.matchedExecutionCount).toBe(1);
+    expect(cancellation.signalAttemptCount).toBe(1);
+    expect(executor.execute).toHaveBeenCalledWith(expect.objectContaining({
+      cancellationSignal: expect.any(Object),
+    }));
+    expect((executor.execute as jest.Mock).mock.calls[0][0].cancellationSignal.aborted).toBe(true);
+    expect(result.cancelled).toBe(true);
     expect(provisioner.cleanup).toHaveBeenCalledWith(workspace);
   });
 
