@@ -13,3 +13,12 @@
 .workflow-emergency-stop input[type="checkbox"]{margin-top:.2rem}
 .workflow-emergency-stop button{justify-self:start;border:1px solid rgba(220,80,80,.55);background:transparent;color:inherit;padding:.65rem .8rem;border-radius:9px;font-weight:700}
 .workflow-emergency-stop small{color:var(--muted)}
+
+.code-build-approval{display:grid;gap:.65rem;margin-top:.5rem;padding:.85rem;border:1px solid var(--line);border-radius:10px}
+.code-build-approval-row{display:flex;justify-content:space-between;gap:.8rem;align-items:center;padding:.65rem;border:1px solid var(--line);border-radius:9px}
+.code-build-approval-row>div{display:grid;gap:.2rem;overflow-wrap:anywhere}.code-build-approval-row small{color:var(--muted)}
+.code-build-approval-row button,.code-build-approval-form button{padding:.6rem .75rem;border:1px solid var(--line);border-radius:9px;background:transparent;color:inherit;font-weight:700}
+.code-build-approval-form{display:grid;gap:.6rem}.code-build-approval-form label{display:grid;gap:.35rem;font-size:.85rem}
+.code-build-approval-form input{width:100%;padding:.65rem;border:1px solid var(--line);border-radius:9px;background:transparent;color:inherit}
+.code-build-approval-form small{color:var(--muted);line-height:1.45}
+@media(max-width:900px){.code-build-approval-row{align-items:stretch;flex-direction:column}.code-build-approval-row button{width:100%}}
