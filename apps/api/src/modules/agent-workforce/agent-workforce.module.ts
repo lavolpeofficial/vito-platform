@@ -7,6 +7,7 @@ import { ProviderRegistryModule } from '../provider-registry/provider-registry.m
 import { CloudGovernedExecutionModule } from '../cloud-governed-execution/cloud-governed-execution.module';
 import { LearningModule } from '../learning/learning.module';
 import { MemoryModule } from '../memory/memory.module';
+import { MissionContextModule } from '../mission-context/mission-context.module';
 import { AgentWorkforceController } from './agent-workforce.controller';
 import { AgentWorkforceService } from './agent-workforce.service';
 import { EngineeringAgentProvisioningService } from './engineering-agent-provisioning.service';
@@ -24,6 +25,7 @@ import { WorkflowExecutionPlanService } from './workflow-execution-plan.service'
     CloudGovernedExecutionModule,
     LearningModule,
     MemoryModule,
+    MissionContextModule,
   ],
   controllers: [AgentWorkforceController, WorkflowAgentAssignmentController],
   providers: [
