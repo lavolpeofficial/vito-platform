@@ -1,3 +1,5 @@
+[Reading 67 lines from start (total: 67 lines, 0 remaining)]
+
 FROM node:22-bookworm-slim AS builder
 
 ENV PNPM_HOME="/pnpm"
@@ -46,14 +48,18 @@ RUN corepack enable \
 # Server-owned coding launcher. The exact OpenCode version is pinned so the
 # governed executable identity is reproducible. The wrapper and its runtime
 # both live beneath the trusted launcher root; callers never resolve from PATH.
+#
+# The reviewed wrapper pins the server-owned OpenCode model for run invocations
+# and emits bounded provider/model identity evidence from the ephemeral SQLite
+# session database after execution.
 RUN mkdir -p /opt/vito/trusted-launchers/opencode-runtime \
- && npm install --prefix /opt/vito/trusted-launchers/opencode-runtime --omit=dev --no-audit --no-fund @opencode/cli@2.0.3 \
- && printf '%s\n' \
-      '#!/bin/sh' \
-      'set -eu' \
-      'exec /opt/vito/trusted-launchers/opencode-runtime/node_modules/.bin/opencode "$@"' \
-      > /opt/vito/trusted-launchers/opencode \
- && chmod 0755 /opt/vito/trusted-launchers/opencode \
+ && npm install --prefix /opt/vito/trusted-launchers/opencode-runtime --omit=dev --no-audit --no-fund @opencode/cli@2.0.3
+
+COPY deploy/staging/trusted-launchers/opencode /opt/vito/trusted-launchers/opencode
+COPY deploy/staging/trusted-launchers/opencode-sqlite-identity-evidence.mjs /opt/vito/trusted-launchers/opencode-sqlite-identity-evidence.mjs
+
+RUN chmod 0755 /opt/vito/trusted-launchers/opencode \
+ && chmod 0644 /opt/vito/trusted-launchers/opencode-sqlite-identity-evidence.mjs \
  && /opt/vito/trusted-launchers/opencode --version
 
 COPY --from=builder /app /app
@@ -61,3 +67,5 @@ COPY --from=builder /app /app
 EXPOSE 3000 3001
 
 CMD ["pnpm", "start"]
+
+[executed on device: ubuntu-4gb-hel1-1 (fe3754ea-5627-4a36-b351-e958ef584b11)]
