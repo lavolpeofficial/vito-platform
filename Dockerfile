@@ -65,5 +65,3 @@ COPY --from=builder /app /app
 EXPOSE 3000 3001
 
 CMD ["pnpm", "start"]
-
-[executed on device: ubuntu-4gb-hel1-1 (fe3754ea-5627-4a36-b351-e958ef584b11)]
