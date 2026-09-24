@@ -20,7 +20,10 @@ import { CloudExecutionProfileRegistry } from '../cloud-governed-execution/cloud
 import { LearningRetrievalService } from '../learning/learning-retrieval.service';
 import type { RetrievedLearningItem } from '../learning/learning-retrieval.types';
 import { RuntimeExperienceCaptureService } from '../learning/runtime-experience-capture.service';
-import { buildCodeBuildExecutionTarget } from '../governed-runtime/adapters/code-build-execution-target';
+import {
+  CODE_BUILD_REPOSITORY,
+  buildCodeBuildExecutionTarget,
+} from '../governed-runtime/adapters/code-build-execution-target';
 import { MemoryService, type MemoryEntry } from '../memory/memory.service';
 import {
   PersistedWorkflowExecutionIdentity,
@@ -160,7 +163,7 @@ export class AgentWorkforceService {
           missionId: codeBuildEvidence.scope.missionId,
           workflowRunId: input.workflowRunId,
           workflowStepRunId: input.workflowStepRunId,
-          repository: codeBuildEvidence.scope.repository,
+          repository: CODE_BUILD_REPOSITORY,
           publicationBranch: codeBuildEvidence.scope.branch,
           providerId: provider.id,
           providerCode: provider.providerCode,
