@@ -11,6 +11,22 @@ export type WorkflowSnapshot = Readonly<{
   steps: readonly WorkflowStepSnapshot[]; timeline: readonly WorkflowTimelineEvent[]; timelineTruncated: boolean; observedAt: string; authority: 'READ_ONLY';
 }>;
 
+export type WorkflowCancellationResult = Readonly<{
+  idempotent: boolean;
+  executionTriggered: false;
+  executionCancellationRequested: true;
+  authority: 'HUMAN_EXPLICIT';
+  executionCancellation: Readonly<{
+    organizationId: string;
+    workflowRunId: string;
+    matchedExecutionCount: number;
+    signalAttemptCount: number;
+    signalFailureCount: number;
+    signalledExecutionIds: readonly string[];
+    deferredCancellationArmed: true;
+  }>;
+}>;
+
 export type HumanReleaseApprovalResult = Readonly<{
   disposition: 'HUMAN_RELEASE_APPROVED';
   workflowRunId: string;
@@ -35,6 +51,34 @@ export function parseWorkflowSnapshot(input: unknown): WorkflowSnapshot | null {
 }
 
 export function parseMutationResult(input: unknown): Record<string, unknown> | null { return record(input); }
+
+export function parseWorkflowCancellationResult(input: unknown): WorkflowCancellationResult | null {
+  const root = record(input);
+  const cancellation = record(root?.executionCancellation);
+  if (!root || !cancellation) return null;
+  if (typeof root.idempotent !== 'boolean' || root.executionTriggered !== false || root.executionCancellationRequested !== true || root.authority !== 'HUMAN_EXPLICIT') return null;
+  if (!text(cancellation.organizationId) || !text(cancellation.workflowRunId)) return null;
+  if (!integer(cancellation.matchedExecutionCount) || !integer(cancellation.signalAttemptCount) || !integer(cancellation.signalFailureCount)) return null;
+  if (cancellation.deferredCancellationArmed !== true || !Array.isArray(cancellation.signalledExecutionIds) || cancellation.signalledExecutionIds.length > 100) return null;
+  if (!cancellation.signalledExecutionIds.every(text)) return null;
+  if (cancellation.signalAttemptCount > cancellation.matchedExecutionCount || cancellation.signalFailureCount > cancellation.signalAttemptCount) return null;
+
+  return {
+    idempotent: root.idempotent,
+    executionTriggered: false,
+    executionCancellationRequested: true,
+    authority: 'HUMAN_EXPLICIT',
+    executionCancellation: {
+      organizationId: cancellation.organizationId,
+      workflowRunId: cancellation.workflowRunId,
+      matchedExecutionCount: cancellation.matchedExecutionCount,
+      signalAttemptCount: cancellation.signalAttemptCount,
+      signalFailureCount: cancellation.signalFailureCount,
+      signalledExecutionIds: cancellation.signalledExecutionIds as string[],
+      deferredCancellationArmed: true,
+    },
+  };
+}
 
 export function parseHumanReleaseApprovalResult(input: unknown): HumanReleaseApprovalResult | null {
   const root = record(input);
