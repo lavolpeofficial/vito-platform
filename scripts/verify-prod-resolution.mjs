@@ -1,5 +1,3 @@
-[Reading 127 lines from start (total: 127 lines, 0 remaining)]
-
 #!/usr/bin/env node
 // Production build/start resolution gate (regression for VITO-OB packaging).
 //
