@@ -1,4 +1,4 @@
-import { ProviderType } from '@vito/contracts';
+import { CloudCredentialMode, ProviderType } from '@vito/contracts';
 import type { CloudExecutionProfile, ProviderDeclaration } from '@vito/contracts';
 import {
   CloudExecutionProfileRegistry,
@@ -204,6 +204,22 @@ describe('CloudCredentialBroker (authorization-bound ref resolution)', () => {
 
   it('returns null when the credential store cannot satisfy the profile credentialRef', async () => {
     const { broker } = makeBroker(cloudProvider, [makeProfile()], new Map());
+    await expect(broker.getCredentialReference('p-1', 'org-1')).resolves.toBeNull();
+  });
+
+  it('never resolves a secret for an explicit credential-free cloud profile', async () => {
+    const profile = makeProfile({
+      credentialMode: CloudCredentialMode.NONE,
+      credentialRef: undefined,
+      expectedProviderId: 'opencode',
+      allowedModelIds: ['big-pickle'],
+    });
+    const secret = 'MUST_NOT_BE_USED';
+    const { broker } = makeBroker(
+      cloudProvider,
+      [profile],
+      new Map([[CREDENTIAL_REF, secret]]),
+    );
     await expect(broker.getCredentialReference('p-1', 'org-1')).resolves.toBeNull();
   });
 
