@@ -56,6 +56,60 @@ export class CodeBuildApprovalService {
     });
   }
 
+  async workflowDispatchStatus(organizationId: string, missionId: string) {
+    const now = new Date();
+    const approvals = await this.prisma.codeBuildApproval.findMany({
+      where: {
+        organizationId,
+        missionId,
+        repository: 'lavolpeofficial/vito-platform',
+        consumedAt: null,
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+      orderBy: { approvedAt: 'desc' },
+      take: 10,
+      select: {
+        id: true,
+        branch: true,
+        approvedAt: true,
+        expiresAt: true,
+        approvedByUserId: true,
+      },
+    });
+    const machineIdentityCount = await this.prisma.user.count({
+      where: {
+        organizationId,
+        status: 'ACTIVE',
+        deletedAt: null,
+        isMachineIdentity: true,
+        machineScope: 'vito-bridge',
+      },
+    });
+
+    const state =
+      approvals.length === 0 ? 'APPROVAL_REQUIRED'
+        : approvals.length > 1 ? 'APPROVAL_AMBIGUOUS'
+          : machineIdentityCount === 0 ? 'MACHINE_IDENTITY_REQUIRED'
+            : machineIdentityCount > 1 ? 'MACHINE_IDENTITY_AMBIGUOUS'
+              : 'READY';
+
+    return Object.freeze({
+      missionId,
+      repository: 'lavolpeofficial/vito-platform' as const,
+      state,
+      machineIdentityCount,
+      approvals: Object.freeze(approvals.map((approval) => Object.freeze({
+        id: approval.id,
+        branch: approval.branch,
+        approvedAt: approval.approvedAt,
+        expiresAt: approval.expiresAt,
+        approvedByUserId: approval.approvedByUserId,
+      }))),
+      authority: 'READ_ONLY' as const,
+    });
+  }
+
   async resolveForWorkflowDispatch(
     organizationId: string,
     missionId: string,
