@@ -3,8 +3,9 @@ import { createAuthenticatedVitoApiClient } from '@/lib/api/server';
 import { VitoApiError } from '@/lib/api/error';
 import { parseMissionContextSnapshot, type MissionContextSnapshot } from '@/lib/missions/contracts';
 import { parseOperationsSummary, type OperationsAttentionRun } from '@/lib/operations/contracts';
-import { workflowAction } from '@/lib/workflows/actions';
+import { grantCodeBuildApprovalAction, revokeCodeBuildApprovalAction, workflowAction } from '@/lib/workflows/actions';
 import { parseWorkflowSnapshot, type WorkflowSnapshot } from '@/lib/workflows/contracts';
+import { parseCodeBuildApprovalStatus, type CodeBuildApprovalStatus } from '@/lib/workflows/code-build-approval-contracts';
 
 export const metadata = { title: 'Workflows' };
 
@@ -17,6 +18,8 @@ const NOTICE_COPY: Readonly<Record<string, string>> = {
   AL4_REVIEWS_COORDINATED: 'Die zwei AL4-Reviews wurden serverseitig über den governeden Review Coordinator koordiniert. Provider- und Model-Family-Unabhängigkeit bleiben Backend-owned.',
   VERDICT_PROCESSED: 'Persistiertes Review-Verdict wurde serverseitig gegen die governte RED_TEAM-Evidenz validiert und durch die bestehende State Machine verarbeitet.',
   RELEASE_APPROVED: 'Human Release wurde ausdrücklich freigegeben. Der Workflow steht jetzt bei RELEASE_EXECUTION; die Release-Ausführung wurde nicht automatisch gestartet.',
+  BUILD_APPROVED: 'CODE_BUILD wurde für die angegebene Feature-Branch menschlich freigegeben. Die Freigabe ist einmalig und wird erst unmittelbar vor Provider-Ausführung konsumiert.',
+  BUILD_APPROVAL_REVOKED: 'CODE_BUILD-Freigabe wurde widerrufen. Eine Build-Ausführung ist damit wieder blockiert.',
   CANCELLED: 'Emergency Stop ausgeführt. Der Run und alle noch aktiven Steps wurden abgebrochen; es wurde keine weitere Ausführung gestartet.',
 };
 
@@ -29,6 +32,7 @@ export default async function WorkflowsPage({ searchParams }: Readonly<{ searchP
   let attention: readonly OperationsAttentionRun[] = [];
   let snapshot: WorkflowSnapshot | null = null;
   let mission: MissionContextSnapshot | null = null;
+  let buildApprovalStatus: CodeBuildApprovalStatus | null = null;
   let loadError: string | null = null;
 
   try {
@@ -37,9 +41,10 @@ export default async function WorkflowsPage({ searchParams }: Readonly<{ searchP
     attention = operations.workflows.recentAttention;
     if (requestedRun) {
       const encodedRun = encodeURIComponent(requestedRun);
-      [snapshot, mission] = await Promise.all([
+      [snapshot, mission, buildApprovalStatus] = await Promise.all([
         client.get(`/workflow-observer/${encodedRun}`, parseWorkflowSnapshot),
         client.get(`/mission-context/${encodedRun}`, parseMissionContextSnapshot),
+        client.get(`/engineering-release/code-build-approvals/mission/${encodedRun}/status`, parseCodeBuildApprovalStatus),
       ]);
     }
   } catch (caught) {
@@ -57,7 +62,7 @@ export default async function WorkflowsPage({ searchParams }: Readonly<{ searchP
       {mission ? <MissionContextView mission={mission} /> : null}
       <section className="workflow-grid">
         <div className="workflow-panel"><span className="eyebrow">01 · Select</span><h2>Run öffnen</h2><form method="get" className="workflow-search"><input name="run" defaultValue={requestedRun} maxLength={512} placeholder="Workflow Run ID" required /><button type="submit">Beobachten</button></form><p className="workflow-muted">Alternativ einen Run aus der aktuellen Attention-Liste auswählen.</p><div className="workflow-attention-list">{attention.length === 0 ? <p className="workflow-muted">Keine Attention-Runs gemeldet.</p> : attention.map((run) => <AttentionRun key={run.id} run={run} />)}</div></div>
-        <div className="workflow-panel"><span className="eyebrow">02 · Governed action</span><h2>Nächste Aktion</h2>{snapshot ? <ActionPanel snapshot={snapshot} /> : <p className="workflow-muted">Run auswählen, um die serverseitig klassifizierte nächste Aktion zu sehen.</p>}</div>
+        <div className="workflow-panel"><span className="eyebrow">02 · Governed action</span><h2>Nächste Aktion</h2>{snapshot ? <ActionPanel snapshot={snapshot} buildApprovalStatus={buildApprovalStatus} /> : <p className="workflow-muted">Run auswählen, um die serverseitig klassifizierte nächste Aktion zu sehen.</p>}</div>
       </section>
       {snapshot ? <SnapshotView snapshot={snapshot} /> : null}
     </main>
@@ -86,14 +91,65 @@ function MissionContextView({ mission }: Readonly<{ mission: MissionContextSnaps
 
 function AttentionRun({ run }: Readonly<{ run: OperationsAttentionRun }>) { return <a className="workflow-attention" href={`/workflows?run=${encodeURIComponent(run.id)}`}><div><strong>{run.status}</strong><span>{run.currentStepType ?? 'no current step'}</span></div><small>{run.blockReasonCode ?? run.failureReasonCode ?? run.id}</small></a>; }
 
-function ActionPanel({ snapshot }: Readonly<{ snapshot: WorkflowSnapshot }>) {
-  const actionable = snapshot.nextAction === 'START_RUN' || snapshot.nextAction === 'RESUME_RUN' || snapshot.nextAction === 'EXECUTE_CURRENT_STEP' || snapshot.nextAction === 'COORDINATE_AL4_REVIEWS' || snapshot.nextAction === 'PROCESS_REVIEW_VERDICT' || snapshot.nextAction === 'APPROVE_HUMAN_RELEASE';
+
+function ActionPanel({
+  snapshot,
+  buildApprovalStatus,
+}: Readonly<{ snapshot: WorkflowSnapshot; buildApprovalStatus: CodeBuildApprovalStatus | null }>) {
+  const nextActionAllowed = snapshot.nextAction === 'START_RUN' || snapshot.nextAction === 'RESUME_RUN' || snapshot.nextAction === 'EXECUTE_CURRENT_STEP' || snapshot.nextAction === 'COORDINATE_AL4_REVIEWS' || snapshot.nextAction === 'PROCESS_REVIEW_VERDICT' || snapshot.nextAction === 'APPROVE_HUMAN_RELEASE';
   const labels: Readonly<Record<string, string>> = { START_RUN: 'Workflow starten', RESUME_RUN: 'Workflow resumieren', EXECUTE_CURRENT_STEP: 'Aktuellen Agent-Step ausführen', COORDINATE_AL4_REVIEWS: 'AL4 Reviews serverseitig koordinieren', PROCESS_REVIEW_VERDICT: 'Review-Verdict serverseitig verarbeiten', APPROVE_HUMAN_RELEASE: 'Human Release ausdrücklich freigeben', HUMAN_REVIEW_REQUIRED: 'Human Review erforderlich', NONE: 'Keine Aktion' };
   const isAl4ReviewCoordination = snapshot.nextAction === 'COORDINATE_AL4_REVIEWS';
   const isReleaseApproval = snapshot.nextAction === 'APPROVE_HUMAN_RELEASE';
   const isVerdictProcessing = snapshot.nextAction === 'PROCESS_REVIEW_VERDICT';
+  const isCodeBuildStep = snapshot.currentStepType === 'BUILD' || snapshot.currentStepType === 'CORRECTION';
+  const buildReady = !isCodeBuildStep || buildApprovalStatus?.state === 'READY';
+  const actionable = nextActionAllowed && buildReady;
   const canCancel = snapshot.status === 'CREATED' || snapshot.status === 'RUNNING' || snapshot.status === 'WAITING_FOR_HUMAN' || snapshot.status === 'BLOCKED';
-  return <div className="workflow-action-card"><div className="workflow-state-row"><span>Status</span><strong>{snapshot.status}</strong></div><div className="workflow-state-row"><span>Boundary</span><strong>{snapshot.boundary}</strong></div><div className="workflow-state-row"><span>Next action</span><strong>{snapshot.nextAction}</strong></div>{snapshot.blockReasonCode ? <div className="workflow-reason">Block: {snapshot.blockReasonCode}</div> : null}{snapshot.failureReasonCode ? <div className="workflow-reason">Failure: {snapshot.failureReasonCode}</div> : null}{isAl4ReviewCoordination ? <div className="workflow-reason"><strong>Server-owned AL4 Review:</strong> Der Browser wählt weder Provider noch Modellfamilie. Der Backend-Coordinator erzeugt die erforderlichen unabhängigen RED_TEAM-Reviews und persistiert ausschließlich governte Evidence-Lineage.</div> : null}{isVerdictProcessing ? <div className="workflow-reason"><strong>Server-owned Review:</strong> Der Browser liefert kein Verdict. Das Backend validiert ausschließlich die bereits persistierte typed ReviewResult-Projektion gegen die governte RED_TEAM-Evidenz und delegiert an die bestehende State Machine.</div> : null}{isReleaseApproval ? <div className="workflow-reason"><strong>Explizite Human-Freigabe:</strong> Dieser Klick bestätigt nur den HUMAN_RELEASE_GATE und setzt RELEASE_EXECUTION bereit. Er startet keine Release-Ausführung.</div> : null}{actionable ? <form action={workflowAction}><input type="hidden" name="workflowRunId" value={snapshot.workflowRunId} /><input type="hidden" name="action" value={snapshot.nextAction} /><button className="primary-button" type="submit">{labels[snapshot.nextAction]}</button></form> : <div className="workflow-governance-stop"><strong>{labels[snapshot.nextAction] ?? snapshot.nextAction}</strong><p>Keine mutierende Aktion wird angeboten. Andere Human Reviews bleiben harte Governance-Grenzen.</p></div>}{canCancel ? <form action={workflowAction} className="workflow-emergency-stop"><input type="hidden" name="workflowRunId" value={snapshot.workflowRunId} /><input type="hidden" name="action" value="CANCEL_RUN" /><label><input type="checkbox" name="confirmCancel" value="YES" required /> Ich bestätige den Abbruch dieses Runs.</label><button type="submit">Emergency Stop · Run abbrechen</button><small>Bricht den Run und aktive Steps ab. Startet keine weitere Ausführung.</small></form> : null}</div>;
+  const currentStep = [...snapshot.steps].reverse().find((step) => step.stepType === snapshot.currentStepType && step.status === 'READY') ?? null;
+
+  return <div className="workflow-action-card">
+    <div className="workflow-state-row"><span>Status</span><strong>{snapshot.status}</strong></div>
+    <div className="workflow-state-row"><span>Boundary</span><strong>{snapshot.boundary}</strong></div>
+    <div className="workflow-state-row"><span>Next action</span><strong>{snapshot.nextAction}</strong></div>
+    {snapshot.blockReasonCode ? <div className="workflow-reason">Block: {snapshot.blockReasonCode}</div> : null}
+    {snapshot.failureReasonCode ? <div className="workflow-reason">Failure: {snapshot.failureReasonCode}</div> : null}
+    {isAl4ReviewCoordination ? <div className="workflow-reason"><strong>Server-owned AL4 Review:</strong> Der Browser wählt weder Provider noch Modellfamilie. Der Backend-Coordinator erzeugt die erforderlichen unabhängigen RED_TEAM-Reviews und persistiert ausschließlich governte Evidence-Lineage.</div> : null}
+    {isVerdictProcessing ? <div className="workflow-reason"><strong>Server-owned Review:</strong> Der Browser liefert kein Verdict. Das Backend validiert ausschließlich die bereits persistierte typed ReviewResult-Projektion gegen die governte RED_TEAM-Evidenz und delegiert an die bestehende State Machine.</div> : null}
+    {isReleaseApproval ? <div className="workflow-reason"><strong>Explizite Human-Freigabe:</strong> Dieser Klick bestätigt nur den HUMAN_RELEASE_GATE und setzt RELEASE_EXECUTION bereit. Er startet keine Release-Ausführung.</div> : null}
+    {isCodeBuildStep ? <CodeBuildApprovalPanel snapshot={snapshot} status={buildApprovalStatus} workflowStepRunId={currentStep?.id ?? null} /> : null}
+    {actionable ? <form action={workflowAction}><input type="hidden" name="workflowRunId" value={snapshot.workflowRunId} /><input type="hidden" name="action" value={snapshot.nextAction} /><button className="primary-button" type="submit">{labels[snapshot.nextAction]}</button></form> : <div className="workflow-governance-stop"><strong>{isCodeBuildStep && !buildReady ? 'CODE_BUILD wartet auf gültige Freigabe' : labels[snapshot.nextAction] ?? snapshot.nextAction}</strong><p>{isCodeBuildStep && !buildReady ? 'Keine Build-Ausführung wird angeboten, bis genau eine gültige Human-Freigabe und genau eine vertrauenswürdige Bridge-Identität vorhanden sind.' : 'Keine mutierende Aktion wird angeboten. Andere Human Reviews bleiben harte Governance-Grenzen.'}</p></div>}
+    {canCancel ? <form action={workflowAction} className="workflow-emergency-stop"><input type="hidden" name="workflowRunId" value={snapshot.workflowRunId} /><input type="hidden" name="action" value="CANCEL_RUN" /><label><input type="checkbox" name="confirmCancel" value="YES" required /> Ich bestätige den Abbruch dieses Runs.</label><button type="submit">Emergency Stop · Run abbrechen</button><small>Bricht den Run und aktive Steps ab. Startet keine weitere Ausführung.</small></form> : null}
+  </div>;
+}
+
+function CodeBuildApprovalPanel({
+  snapshot,
+  status,
+  workflowStepRunId,
+}: Readonly<{ snapshot: WorkflowSnapshot; status: CodeBuildApprovalStatus | null; workflowStepRunId: string | null }>) {
+  if (!status || !workflowStepRunId) {
+    return <div className="workflow-governance-stop"><strong>CODE_BUILD Status nicht verfügbar</strong><p>Fail closed: Ohne serverseitigen Approval-Status wird keine Build-Ausführung angeboten.</p></div>;
+  }
+  const defaultBranch = 'feat/vito-' + snapshot.workflowRunId.slice(0, 8).toLowerCase();
+  return <section className="code-build-approval">
+    <div className="workflow-state-row"><span>CODE_BUILD authority</span><strong>{status.state}</strong></div>
+    <div className="workflow-state-row"><span>Trusted bridge identities</span><strong>{status.machineIdentityCount}</strong></div>
+    {status.approvals.map((approval) => <article key={approval.id} className="code-build-approval-row">
+      <div><strong>{approval.branch}</strong><small>gültig bis {formatDate(approval.expiresAt)}</small></div>
+      <form action={revokeCodeBuildApprovalAction}><input type="hidden" name="workflowRunId" value={snapshot.workflowRunId} /><input type="hidden" name="approvalId" value={approval.id} /><button type="submit">Freigabe widerrufen</button></form>
+    </article>)}
+    {status.state === 'APPROVAL_REQUIRED' ? <form action={grantCodeBuildApprovalAction} className="code-build-approval-form">
+      <input type="hidden" name="workflowRunId" value={snapshot.workflowRunId} />
+      <input type="hidden" name="workflowStepRunId" value={workflowStepRunId} />
+      <label>Feature-Branch<input name="branch" defaultValue={defaultBranch} pattern="feat/[a-z0-9][a-z0-9-]*" maxLength={200} required /></label>
+      <button type="submit">CODE_BUILD einmalig freigeben</button>
+      <small>Die Freigabe ist missions- und branchgebunden, zeitlich begrenzt und wird vor genau einer Provider-Ausführung konsumiert.</small>
+    </form> : null}
+    {status.state === 'APPROVAL_AMBIGUOUS' ? <p className="workflow-reason">Mehr als eine aktive Freigabe vorhanden. Widerrufe überzählige Freigaben; VITO bleibt bis dahin fail closed.</p> : null}
+    {status.state === 'MACHINE_IDENTITY_REQUIRED' ? <p className="workflow-reason">Keine aktive vito-bridge-Maschinenidentität vorhanden. VITO bleibt fail closed.</p> : null}
+    {status.state === 'MACHINE_IDENTITY_AMIGUOUS' ? <p className="workflow-reason">Mehr als eine aktive vito-bridge-Identität vorhanden. VITO bleibt bis zur eindeutigen Zuordnung fail closed.</p> : null}
+    {status.state === 'READY' ? <p className="workflow-muted">Freigabe und Bridge-Identität sind eindeutig. Der separate Ausführen-Button darf jetzt den serverseitig gebundenen Dispatch anstoßen.</p> : null}
+  </section>;
 }
 
 function SnapshotView({ snapshot }: Readonly<{ snapshot: WorkflowSnapshot }>) { return <section className="workflow-detail"><div className="workflow-section-head"><div><span className="eyebrow">03 · Observer</span><h2>Persistierter Run</h2></div><span className="status-chip">READ ONLY SNAPSHOT</span></div><div className="workflow-summary"><Metric label="Run" value={snapshot.workflowRunId} /><Metric label="Current step" value={snapshot.currentStepType ?? '—'} /><Metric label="Correction loops" value={`${snapshot.correctionLoopCount} / ${snapshot.maxCorrectionLoops}`} /><Metric label="Observed" value={formatDate(snapshot.observedAt)} /></div><h3>Steps</h3><div className="workflow-step-list">{snapshot.steps.map((step) => <article className="workflow-step" key={step.id}><div><strong>{step.stepType}</strong><span>attempt {step.attemptNumber}</span></div><span className="workflow-step-status">{step.status}</span><small>{formatDate(step.startedAt)}{step.finishedAt ? ` → ${formatDate(step.finishedAt)}` : ''}</small></article>)}</div><h3>Audit timeline</h3><div className="workflow-timeline">{snapshot.timeline.map((event) => <article key={event.id}><time>{formatDate(event.createdAt)}</time><strong>{event.action}</strong><span>{event.actorType} · {event.entityType}</span></article>)}{snapshot.timeline.length === 0 ? <p className="workflow-muted">Keine Audit-Events im Snapshot.</p> : null}</div>{snapshot.timelineTruncated ? <p className="workflow-muted">Timeline auf die serverseitige Maximalzahl begrenzt.</p> : null}</section>; }
