@@ -107,6 +107,7 @@ describe('AgentWorkforceService runtime memory context', () => {
       observation: {
         priorLearningItemsRetrieved: 0,
         priorMemoryItemsRetrieved: 1,
+        missionContextIncluded: false,
       },
     }));
     expect(result.capabilityCode).toBe('CODE_PLAN');
