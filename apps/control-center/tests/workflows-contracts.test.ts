@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseHumanReleaseApprovalResult, parseWorkflowSnapshot } from '../lib/workflows/contracts.ts';
+import { parseHumanReleaseApprovalResult, parseWorkflowCancellationResult, parseWorkflowSnapshot } from '../lib/workflows/contracts.ts';
 
 const BASE = {
   workflowRunId: 'run-1', organizationId: 'org-1', correlationId: 'corr-1', status: 'RUNNING', currentStepType: 'PLAN', boundary: 'ACTIVE', nextAction: 'EXECUTE_CURRENT_STEP', blockReasonCode: null, failureReasonCode: null,
@@ -52,4 +52,48 @@ test('accepts only a non-executing explicit human approval response', () => {
 
 test('rejects unbounded timelines', () => {
   assert.equal(parseWorkflowSnapshot({ ...BASE, timeline: Array.from({ length: 201 }, () => BASE.timeline[0]) }), null);
+});
+
+test('accepts only an explicit human live-cancellation response', () => {
+  const parsed = parseWorkflowCancellationResult({
+    idempotent: false,
+    executionTriggered: false,
+    executionCancellationRequested: true,
+    authority: 'HUMAN_EXPLICIT',
+    executionCancellation: {
+      organizationId: 'org-1',
+      workflowRunId: 'run-1',
+      matchedExecutionCount: 1,
+      signalAttemptCount: 1,
+      signalFailureCount: 0,
+      signalledExecutionIds: ['exec-1'],
+      deferredCancellationArmed: true,
+    },
+  });
+  assert.ok(parsed);
+  assert.equal(parsed.executionCancellation.signalAttemptCount, 1);
+});
+
+test('rejects cancellation responses that claim execution or inconsistent signal counts', () => {
+  const base = {
+    idempotent: false,
+    executionTriggered: false,
+    executionCancellationRequested: true,
+    authority: 'HUMAN_EXPLICIT',
+    executionCancellation: {
+      organizationId: 'org-1',
+      workflowRunId: 'run-1',
+      matchedExecutionCount: 1,
+      signalAttemptCount: 1,
+      signalFailureCount: 0,
+      signalledExecutionIds: ['exec-1'],
+      deferredCancellationArmed: true,
+    },
+  } as const;
+
+  assert.equal(parseWorkflowCancellationResult({ ...base, executionTriggered: true }), null);
+  assert.equal(parseWorkflowCancellationResult({
+    ...base,
+    executionCancellation: { ...base.executionCancellation, signalAttemptCount: 2 },
+  }), null);
 });
