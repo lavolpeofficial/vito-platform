@@ -1,6 +1,7 @@
 import {
   AgentExecutionStatus,
   ExecutionAction,
+  ExecutionTier,
   ProviderType,
   type GovernedAdapterRequest,
   type GovernedAdapterResult,
@@ -16,6 +17,12 @@ import { WorkerExecutionError } from '../../remote-execution-worker/remote-execu
 import { CloudExecutionProfileRegistry } from '../../cloud-governed-execution/cloud-execution-profile.registry';
 import { CloudSandboxError } from '../../cloud-governed-execution/cloud-governed-sandbox-executor';
 import { evaluateFlight001Acceptance } from '../../cloud-governed-execution/flight-001-acceptance';
+import {
+  CODE_BUILD_BASE_REF,
+  CODE_BUILD_REPOSITORY,
+  codeBuildTargetMatchesContext,
+  readCodeBuildExecutionTarget,
+} from './code-build-execution-target';
 
 const MAX_ARGS = 64;
 const MAX_ARG_LENGTH = 4096;
@@ -100,6 +107,20 @@ export class CloudGovernedAgentAdapter implements GovernedProviderAdapter {
     const payload = parsePayload(request.governedInputPayload);
     if (!payload.ok) return failed(payload.code, payload.message);
 
+    const codeBuildTarget = context.capabilityCode === 'CODE_BUILD'
+      ? readCodeBuildExecutionTarget(request.governedInputPayload?.codeBuildExecutionTarget)
+      : null;
+    if (
+      context.capabilityCode === 'CODE_BUILD' &&
+      (!codeBuildTarget ||
+        !codeBuildTargetMatchesContext(codeBuildTarget, context, ExecutionTier.CLOUD_GOVERNED))
+    ) {
+      return failed(
+        'CODE_BUILD_EXECUTION_TARGET_MISMATCH',
+        'CODE_BUILD execution target is missing or does not match the governed cloud context',
+      );
+    }
+
     const timeoutMs = Math.max(
       MIN_EXECUTION_DURATION_MS,
       Math.min(context.timeoutMs, profile.maxDurationMs),
@@ -121,8 +142,8 @@ export class CloudGovernedAgentAdapter implements GovernedProviderAdapter {
         organizationId: context.organizationId,
         workflowRunId: context.workflowRunId,
         workflowStepRunId: context.workflowStepRunId,
-        repositoryId: 'lavolpeofficial/vito-platform',
-        baseRef: 'main',
+        repositoryId: codeBuildTarget?.repository ?? CODE_BUILD_REPOSITORY,
+        baseRef: codeBuildTarget?.baseRef ?? CODE_BUILD_BASE_REF,
         executable: trustedExecutable,
         args: payload.value.args,
         prompt: payload.value.prompt,

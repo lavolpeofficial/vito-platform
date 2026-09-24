@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Optional, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Optional, ServiceUnavailableException } from '@nestjs/common';
 import {
   ExecutionTier,
   ProviderType,
@@ -9,6 +9,8 @@ import {
 } from '@vito/contracts';
 import { randomUUID } from 'node:crypto';
 
+import { CodeBuildApprovalService } from '../engineering-release/code-build-approval.service';
+import { ConsumeCodeBuildApprovalDto } from '../engineering-release/dto/code-build-approval.dto';
 import { ProviderRouterService } from '../provider-registry/provider-router.service';
 import {
   GovernedRuntimeService,
@@ -18,6 +20,10 @@ import { CloudExecutionProfileRegistry } from '../cloud-governed-execution/cloud
 import { LearningRetrievalService } from '../learning/learning-retrieval.service';
 import type { RetrievedLearningItem } from '../learning/learning-retrieval.types';
 import { RuntimeExperienceCaptureService } from '../learning/runtime-experience-capture.service';
+import {
+  CODE_BUILD_REPOSITORY,
+  buildCodeBuildExecutionTarget,
+} from '../governed-runtime/adapters/code-build-execution-target';
 import { MemoryService, type MemoryEntry } from '../memory/memory.service';
 import {
   PersistedWorkflowExecutionIdentity,
@@ -58,6 +64,7 @@ export interface DispatchAgentTaskInput {
   readonly correlationId?: string;
   readonly independenceContext?: IndependenceContext;
   readonly executionBudget?: ExecutionBudget;
+  readonly codeBuildApproval?: { readonly approvalId: string; readonly machineUserId: string; readonly scope: ConsumeCodeBuildApprovalDto };
 }
 
 /**
@@ -81,6 +88,7 @@ export class AgentWorkforceService {
     private readonly experienceCapture: RuntimeExperienceCaptureService,
     profileRegistry?: CloudExecutionProfileRegistry,
     @Optional() private readonly memory?: MemoryService,
+    @Optional() private readonly codeBuildApprovals?: CodeBuildApprovalService,
   ) {
     this.profileRegistry = profileRegistry ?? new CloudExecutionProfileRegistry([]);
   }
@@ -96,6 +104,21 @@ export class AgentWorkforceService {
     const correlationId = persistedIdentity?.correlationId ?? input.correlationId ?? randomUUID();
     const assuranceLevel = persistedIdentity?.assuranceLevel ?? input.assuranceLevel;
     const capabilityCode = persistedIdentity?.capabilityCode ?? input.capabilityCode;
+
+    // Effective capability is resolved from the persisted execution plan first.
+    // Presence/syntax of approval evidence is checked before routing. The approval
+    // itself is consumed only after the server has resolved the immutable execution
+    // target, and still before any provider invocation.
+    const codeBuildEvidence = capabilityCode === 'CODE_BUILD' ? input.codeBuildApproval : undefined;
+    if (capabilityCode === 'CODE_BUILD') {
+      if (!codeBuildEvidence || !this.codeBuildApprovals ||
+          codeBuildEvidence.scope.repository !== 'lavolpeofficial/vito-platform' ||
+          !/^feat\/[a-z0-9][a-z0-9-]*$/.test(codeBuildEvidence.scope.branch) ||
+          !codeBuildEvidence.scope.missionId || !codeBuildEvidence.scope.requestKey ||
+          !codeBuildEvidence.approvalId || !codeBuildEvidence.machineUserId) {
+        throw new ForbiddenException('CODE_BUILD_APPROVAL_REQUIRED');
+      }
+    }
 
     const routing = await this.providerRouter.route({
       organizationId: input.organizationId,
@@ -133,6 +156,32 @@ export class AgentWorkforceService {
 
     const commandAlias = this.providerCommandAlias(provider.metadata);
     const defaultArgs = this.providerDefaultArgs(provider.metadata);
+
+    const codeBuildExecutionTarget = codeBuildEvidence
+      ? buildCodeBuildExecutionTarget({
+          organizationId: input.organizationId,
+          missionId: codeBuildEvidence.scope.missionId,
+          workflowRunId: input.workflowRunId,
+          workflowStepRunId: input.workflowStepRunId,
+          repository: CODE_BUILD_REPOSITORY,
+          publicationBranch: codeBuildEvidence.scope.branch,
+          providerId: provider.id,
+          providerCode: provider.providerCode,
+          executionTier: tier,
+          commandAlias,
+        })
+      : undefined;
+
+    if (codeBuildEvidence && this.codeBuildApprovals && codeBuildExecutionTarget) {
+      await this.codeBuildApprovals.consumeForDispatch(
+        input.organizationId,
+        codeBuildEvidence.machineUserId,
+        codeBuildEvidence.approvalId,
+        codeBuildEvidence.scope,
+        codeBuildExecutionTarget,
+      );
+    }
+
     const learningContext = await this.retrieveLearningContext(input.prompt, capabilityCode);
     const memoryContext = await this.retrieveMemoryContext(
       input.organizationId,
@@ -168,6 +217,7 @@ export class AgentWorkforceService {
       workflowRunId: input.workflowRunId,
       workflowStepRunId: input.workflowStepRunId,
       executionBudget: input.executionBudget,
+      ...(codeBuildExecutionTarget ? { codeBuildExecutionTarget } : {}),
     });
 
     const experience = persistedIdentity

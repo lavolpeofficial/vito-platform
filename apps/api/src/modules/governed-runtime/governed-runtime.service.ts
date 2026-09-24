@@ -16,6 +16,10 @@ import { GovernedInvocationServiceImpl } from '../governed-invocation/governed-i
 import { mapGovernedExecutionResultToRecordInput } from './persistence/governed-persistence.mappers';
 import { governedOrgDirectoryName } from './resolvers/governed-workspace.resolvers';
 import { GOVERNED_WORKSPACE_ROOT } from './governed-runtime.tokens';
+import {
+  isCodeBuildExecutionTarget,
+  type CodeBuildExecutionTarget,
+} from './adapters/code-build-execution-target';
 
 export const TRUSTED_RUNTIME_ORIGIN = 'SERVER_RUNTIME' as const;
 export const GOVERNED_RUNTIME_PURPOSE_CODE = 'INTERNAL_WORKSPACE_FILE_TOOL' as const;
@@ -43,6 +47,7 @@ export interface TrustedGovernedWorkspaceFileOperation {
   readonly workflowRunId?: string;
   readonly workflowStepRunId?: string;
   readonly executionBudget?: ExecutionBudget;
+  readonly codeBuildExecutionTarget?: CodeBuildExecutionTarget;
 }
 
 @Injectable()
@@ -82,10 +87,7 @@ export class GovernedRuntimeService {
         requestedAction: input.requestedAction as ExecutionAction,
         requestedPath: input.relativePath,
         requestedCommand: input.command,
-        governedInputPayload:
-          input.content !== undefined
-            ? { content: input.content }
-            : input.governedInputPayload,
+        governedInputPayload: this.governedPayload(input),
         requestedAt: new Date(),
       });
 
@@ -131,6 +133,17 @@ export class GovernedRuntimeService {
     });
   }
 
+  private governedPayload(input: TrustedGovernedWorkspaceFileOperation): Record<string, unknown> | undefined {
+    const base = input.content !== undefined
+      ? { content: input.content }
+      : input.governedInputPayload;
+    if (!input.codeBuildExecutionTarget) return base;
+    return {
+      ...(base ?? {}),
+      codeBuildExecutionTarget: input.codeBuildExecutionTarget,
+    };
+  }
+
   private ensureGovernedOrgWorkspace(organizationId: string): void {
     const orgDir = join(this.workspaceRoot, 'orgs', governedOrgDirectoryName(organizationId));
     mkdirSync(orgDir, { recursive: true });
@@ -145,6 +158,23 @@ export class GovernedRuntimeService {
 
     if (!input.organizationId || !input.providerId || !input.capabilityCode) {
       throw new Error('GOVERNED_RUNTIME_MALFORMED_OPERATION: Missing required identifiers');
+    }
+
+    if (input.capabilityCode === 'CODE_BUILD' && input.requestedAction === 'RUN_COMMAND') {
+      const target = input.codeBuildExecutionTarget;
+      if (
+        !target ||
+        !isCodeBuildExecutionTarget(target) ||
+        target.organizationId !== input.organizationId ||
+        target.workflowRunId !== input.workflowRunId ||
+        target.workflowStepRunId !== input.workflowStepRunId ||
+        target.providerId !== input.providerId ||
+        target.commandAlias !== input.command
+      ) {
+        throw new Error(
+          'GOVERNED_RUNTIME_CODE_BUILD_TARGET_MISMATCH: CODE_BUILD requires the consumed server-owned execution target',
+        );
+      }
     }
 
     if (typeof input.organizationId !== 'string' || typeof input.providerId !== 'string') {

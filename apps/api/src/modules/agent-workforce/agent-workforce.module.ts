@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { AuditModule } from '../audit/audit.module';
+import { EngineeringReleaseModule } from '../engineering-release/engineering-release.module';
 import { GovernedRuntimeModule } from '../governed-runtime/governed-runtime.module';
 import { ProviderRegistryModule } from '../provider-registry/provider-registry.module';
 import { CloudGovernedExecutionModule } from '../cloud-governed-execution/cloud-governed-execution.module';
@@ -17,6 +18,7 @@ import { WorkflowExecutionPlanService } from './workflow-execution-plan.service'
 @Module({
   imports: [
     AuditModule,
+    EngineeringReleaseModule,
     ProviderRegistryModule,
     GovernedRuntimeModule,
     CloudGovernedExecutionModule,

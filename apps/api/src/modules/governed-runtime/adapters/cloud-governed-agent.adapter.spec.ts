@@ -1,4 +1,4 @@
-import { AgentExecutionStatus, ExecutionAction, ProviderType } from '@vito/contracts';
+import { AgentExecutionStatus, ExecutionAction, ExecutionTier, ProviderType } from '@vito/contracts';
 import type { CloudExecutionProfile, GovernedAdapterRequest, GovernedExecutionContext, TrustedExecutable } from '@vito/contracts';
 import { CloudGovernedAgentAdapter } from './cloud-governed-agent.adapter';
 import { CloudExecutionProfileRegistry } from '../../cloud-governed-execution/cloud-execution-profile.registry';
@@ -10,6 +10,7 @@ import type {
   RemoteExecutionWorkerService,
   ExecuteSandboxedResult,
 } from '../../remote-execution-worker/remote-execution-worker.service';
+import { buildCodeBuildExecutionTarget } from './code-build-execution-target';
 
 const PROVIDER_CODE = 'cloud.openai.main';
 const CREDENTIAL_REF = 'cloud:test-main';
@@ -110,6 +111,40 @@ function makeAdapter(
 }
 
 describe('CloudGovernedAgentAdapter (CLOUD_GOVERNED tier, §9 gates)', () => {
+  it('fails closed for CODE_BUILD unless the server-bound cloud execution target matches', async () => {
+    const worker = makeMockWorkerService();
+    const adapter = makeAdapter(worker);
+    const context = makeContext({ capabilityCode: 'CODE_BUILD' });
+
+    const missing = await adapter.execute({ governedInputPayload: {} }, context);
+    expect(missing.status).toBe(AgentExecutionStatus.FAILED);
+    expect(missing.error?.code).toBe('CODE_BUILD_EXECUTION_TARGET_MISMATCH');
+    expect(worker.executeSandboxed).not.toHaveBeenCalled();
+
+    const target = buildCodeBuildExecutionTarget({
+      organizationId: context.organizationId,
+      missionId: 'mission-1',
+      workflowRunId: context.workflowRunId,
+      workflowStepRunId: context.workflowStepRunId,
+      repository: 'lavolpeofficial/vito-platform',
+      publicationBranch: 'feat/approved',
+      providerId: context.providerId,
+      providerCode: PROVIDER_CODE,
+      executionTier: ExecutionTier.CLOUD_GOVERNED,
+      commandAlias: 'worker-agent',
+    });
+    (worker.executeSandboxed as jest.Mock).mockResolvedValue(makeWorkerResult());
+    const ok = await adapter.execute({
+      governedInputPayload: { codeBuildExecutionTarget: target },
+    }, context);
+    expect(ok.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(worker.executeSandboxed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositoryId: 'lavolpeofficial/vito-platform',
+        baseRef: 'main',
+      }),
+    );
+  });
   it('providerType is CLOUD_LLM and the cloud boundary is used', async () => {
     const adapter = makeAdapter();
     expect(adapter.providerType).toBe(ProviderType.CLOUD_LLM);

@@ -1,4 +1,4 @@
-import { AgentExecutionStatus, ExecutionAction, ProviderType } from '@vito/contracts';
+import { AgentExecutionStatus, ExecutionAction, ExecutionTier, ProviderType } from '@vito/contracts';
 import type {
   GovernedAdapterRequest,
   GovernedExecutionContext,
@@ -12,6 +12,7 @@ import type {
   RemoteExecutionWorkerService,
   ExecuteSandboxedResult,
 } from '../../remote-execution-worker/remote-execution-worker.service';
+import { buildCodeBuildExecutionTarget } from './code-build-execution-target';
 
 function makeMockWorkerService(): RemoteExecutionWorkerService {
   return {
@@ -40,7 +41,7 @@ function makeContext(
     workflowRunId: 'run-abc',
     workflowStepRunId: 'step-1',
     correlationId: 'corr-1',
-    capabilityCode: 'CODE_BUILD',
+    capabilityCode: 'CODE_PLAN',
     providerId: 'provider-1',
     providerType: ProviderType.LOCAL_TOOL,
     executionProfile: 'BUILDER' as never,
@@ -86,6 +87,44 @@ function makeWorkerResult(overrides = {}): ExecuteSandboxedResult {
 }
 
 describe('HeadlessLocalAgentAdapter', () => {
+  it('fails closed for CODE_BUILD when the consumed execution target is missing or mismatched', async () => {
+    const workerService = makeMockWorkerService();
+    const adapter = new HeadlessLocalAgentAdapter(workerService);
+    const context = makeContext({
+      capabilityCode: 'CODE_BUILD',
+      providerCode: 'opencode-local',
+      trustedExecutable: makeTrustedExecutable({ commandName: 'opencode' }),
+    });
+
+    const missing = await adapter.execute({ governedInputPayload: {} }, context);
+    expect(missing.status).toBe(AgentExecutionStatus.FAILED);
+    expect(missing.error?.code).toBe('CODE_BUILD_EXECUTION_TARGET_MISMATCH');
+    expect(workerService.executeSandboxed).not.toHaveBeenCalled();
+
+    const target = buildCodeBuildExecutionTarget({
+      organizationId: context.organizationId,
+      missionId: 'mission-1',
+      workflowRunId: context.workflowRunId,
+      workflowStepRunId: context.workflowStepRunId,
+      repository: 'lavolpeofficial/vito-platform',
+      publicationBranch: 'feat/approved',
+      providerId: context.providerId,
+      providerCode: 'opencode-local',
+      executionTier: ExecutionTier.LOCAL_ISOLATED,
+      commandAlias: 'opencode',
+    });
+    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(makeWorkerResult());
+    const ok = await adapter.execute({
+      governedInputPayload: { codeBuildExecutionTarget: target },
+    }, context);
+    expect(ok.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(workerService.executeSandboxed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositoryId: 'lavolpeofficial/vito-platform',
+        baseRef: 'main',
+      }),
+    );
+  });
   it('delegates to workerService.executeSandboxed', async () => {
     const workerService = makeMockWorkerService();
     (workerService.executeSandboxed as jest.Mock).mockResolvedValue(
