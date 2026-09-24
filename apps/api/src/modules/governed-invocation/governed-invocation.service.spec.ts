@@ -3754,6 +3754,34 @@ describe('OB-002A: exact trusted coding-agent alias authorization (Decision B)',
     expect(executionContext.policyDecision.reasonCode).toBe('POLICY_ALLOWED');
   });
 
+  it('allows the exact trusted alias for a CODE_PLAN builder run', async () => {
+    const provider = makeLocalToolProvider({
+      capabilityAssignments: [
+        {
+          capabilityCode: EngineeringCapability.CODE_PLAN,
+          isEnabled: true,
+        },
+      ],
+    });
+    const harness = buildHarness({
+      provider,
+      fakeAdapter: buildFakeAdapter(ProviderType.LOCAL_TOOL),
+    });
+    const request = makeInvocationRequest({
+      invocationId: 'code-plan-alias-allow-1',
+      capabilityCode: EngineeringCapability.CODE_PLAN,
+      requestedAction: ExecutionAction.RUN_COMMAND,
+      requestedCommand: 'opencode',
+      requestedPath: undefined,
+    });
+
+    const result = await harness.service.invoke(request);
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    const [, executionContext] = harness.fakeAdapter.execute.mock.calls[0];
+    expect(executionContext.policyDecision.allowed).toBe(true);
+  });
+
   it('fails closed when the trusted executable resolver cannot resolve the alias', async () => {
     const resolver: TrustedExecutableResolver = {
       resolve: jest.fn().mockResolvedValue(null),
@@ -3813,7 +3841,7 @@ describe('OB-002A: exact trusted coding-agent alias authorization (Decision B)',
     );
   });
 
-  it('does not authorize the alias outside the CODE_BUILD capability', async () => {
+  it('does not authorize the alias outside the CODE_PLAN/CODE_BUILD capabilities', async () => {
     const provider = makeLocalToolProvider({
       capabilityAssignments: [
         {
