@@ -116,6 +116,10 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
   }
 
   async execute(request: SandboxExecutionRequest): Promise<SandboxExecutionResult> {
+    if (request.cancellationSignal?.aborted) {
+      return cancelledCloudResult(0);
+    }
+
     if (request.executable.resolvedPath.length === 0) {
       throw new SandboxStartupError(
         'CLOUD_EXECUTABLE_EMPTY',
@@ -147,6 +151,7 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
         startedAt,
         timeoutMs,
         request.expectedProviderIdentity,
+        request.cancellationSignal,
       );
     } catch (error) {
       if (error instanceof SandboxStartupError || error instanceof CloudSandboxError) {
@@ -453,6 +458,7 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
     startedAt: number,
     timeoutMs: number,
     expectedProviderIdentity?: ExpectedProviderIdentity,
+    cancellationSignal?: AbortSignal,
   ): Promise<SandboxExecutionResult> {
     return new Promise<SandboxExecutionResult>((resolve) => {
       const child = spawn(executablePath, [...args], {
@@ -467,7 +473,25 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
       child.stderr.on('data', (chunk: Buffer) => capture.appendStderr(chunk));
 
       let timedOut = false;
+      let cancelled = false;
       let settled = false;
+      let cancellationKillTimer: NodeJS.Timeout | null = null;
+
+      const cancelExecution = () => {
+        if (settled || cancelled) return;
+        cancelled = true;
+        this.logger.warn(
+          'Cloud-governed execution cancellation requested; terminating process group',
+        );
+        killProcessGroup(child.pid, 'SIGTERM');
+        cancellationKillTimer = setTimeout(
+          () => killProcessGroup(child.pid, 'SIGKILL'),
+          SIGTERM_GRACE_MS,
+        );
+        cancellationKillTimer.unref();
+      };
+      cancellationSignal?.addEventListener('abort', cancelExecution, { once: true });
+      if (cancellationSignal?.aborted) cancelExecution();
 
       const timer = setTimeout(() => {
         timedOut = true;
@@ -483,6 +507,8 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        if (cancellationKillTimer) clearTimeout(cancellationKillTimer);
+        cancellationSignal?.removeEventListener('abort', cancelExecution);
 
         const output = `${capture.getStdout()}\n${capture.getStderr()}`;
         const identityOutcome = this.evaluateProviderIdentity(expectedProviderIdentity, output);
@@ -495,6 +521,7 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
 
         resolve({
           ...result,
+          ...(cancelled ? { cancelled: true } : {}),
           ...(identityOutcome.observedProviderIdentity
             ? { observedProviderIdentity: identityOutcome.observedProviderIdentity }
             : {}),
@@ -573,6 +600,19 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
       );
     }
   }
+}
+
+function cancelledCloudResult(durationMs: number): SandboxExecutionResult {
+  return {
+    exitCode: null,
+    stdout: '',
+    stderr: '',
+    durationMs,
+    timedOut: false,
+    oomKilled: false,
+    cancelled: true,
+    sandboxLog: 'cloud execution cancelled before spawn',
+  };
 }
 
 /**
