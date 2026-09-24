@@ -79,21 +79,28 @@ export class ExecutionCancellationRegistry {
     );
 
     const signalledExecutionIds: string[] = [];
+    let signalAttemptCount = 0;
     let signalFailureCount = 0;
 
     for (const entry of matches) {
       const outcome = this.signal(entry);
-      if (outcome === 'SIGNALLED' && signalledExecutionIds.length < MAX_REPORTED_EXECUTION_IDS) {
-        signalledExecutionIds.push(entry.executionId);
+      if (outcome === 'SIGNALLED') {
+        signalAttemptCount += 1;
+        if (signalledExecutionIds.length < MAX_REPORTED_EXECUTION_IDS) {
+          signalledExecutionIds.push(entry.executionId);
+        }
       }
-      if (outcome === 'FAILED') signalFailureCount += 1;
+      if (outcome === 'FAILED') {
+        signalAttemptCount += 1;
+        signalFailureCount += 1;
+      }
     }
 
     return Object.freeze({
       organizationId,
       workflowRunId,
       matchedExecutionCount: matches.length,
-      signalAttemptCount: signalledExecutionIds.length + signalFailureCount,
+      signalAttemptCount,
       signalFailureCount,
       signalledExecutionIds: Object.freeze(signalledExecutionIds),
       deferredCancellationArmed: true as const,
