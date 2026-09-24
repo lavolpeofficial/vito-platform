@@ -34,7 +34,27 @@ export class ProviderRegistryController {
     qualityScore?: number; latencyScore?: number; costScore?: number;
     costMetadata?: Record<string, unknown>; assuranceLevels?: string[]; metadata?: Record<string, unknown>;
   }) {
-    return this.registryService.createProvider({ organizationId: this.tenantContext.getOrThrow(), ...body });
+    // Explicit allowlist: caller input must never set the persisted credentialRequirement.
+    return this.registryService.createProvider({
+      organizationId: this.tenantContext.getOrThrow(),
+      providerCode: body.providerCode,
+      displayName: body.displayName,
+      providerType: body.providerType,
+      status: body.status,
+      modelFamily: body.modelFamily,
+      modelName: body.modelName,
+      modelCode: body.modelCode,
+      supportedCapabilities: body.supportedCapabilities,
+      estimatedCostMinorUnits: body.estimatedCostMinorUnits,
+      healthStatus: body.healthStatus,
+      quotaStatus: body.quotaStatus,
+      qualityScore: body.qualityScore,
+      latencyScore: body.latencyScore,
+      costScore: body.costScore,
+      costMetadata: body.costMetadata,
+      assuranceLevels: body.assuranceLevels,
+      metadata: body.metadata,
+    });
   }
 
   @Get('providers')
