@@ -18,6 +18,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { randomUUID } from 'crypto';
+import { ExecutionCancellationRegistry } from '../execution-cancellation/execution-cancellation.registry';
 
 export interface CreateWorkflowRunInput {
   organizationId: string;
@@ -47,6 +48,7 @@ export class WorkflowRuntimeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly executionCancellations: ExecutionCancellationRegistry = new ExecutionCancellationRegistry(),
   ) {}
 
   async createRun(input: CreateWorkflowRunInput) {
@@ -447,10 +449,16 @@ export class WorkflowRuntimeService {
     });
     if (!run) throw new NotFoundException('WorkflowRun nicht gefunden.');
     if (run.status === 'CANCELLED') {
+      const executionCancellation = this.executionCancellations.cancelWorkflow(
+        input.organizationId,
+        input.workflowRunId,
+      );
       return Object.freeze({
         run,
         idempotent: true,
         executionTriggered: false,
+        executionCancellationRequested: true,
+        executionCancellation,
         authority: 'HUMAN_EXPLICIT' as const,
       });
     }
@@ -458,7 +466,7 @@ export class WorkflowRuntimeService {
       throw new ConflictException(`WorkflowRun ist terminal (Status: ${run.status}).`);
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const committed = await this.prisma.$transaction(async (tx) => {
       const now = new Date();
       const claim = await tx.workflowRun.updateMany({
         where: {
@@ -526,6 +534,33 @@ export class WorkflowRuntimeService {
         executionTriggered: false,
         authority: 'HUMAN_EXPLICIT' as const,
       });
+    });
+
+    const executionCancellation = this.executionCancellations.cancelWorkflow(
+      input.organizationId,
+      input.workflowRunId,
+    );
+
+    await this.auditService.record({
+      organizationId: input.organizationId,
+      actorType: 'USER',
+      actorId: input.cancelledByUserId,
+      action: 'WORKFLOW_EXECUTION_CANCELLATION_REQUESTED',
+      entityType: 'WorkflowRun',
+      entityId: input.workflowRunId,
+      metadata: {
+        matchedExecutionCount: executionCancellation.matchedExecutionCount,
+        signalAttemptCount: executionCancellation.signalAttemptCount,
+        signalFailureCount: executionCancellation.signalFailureCount,
+        deferredCancellationArmed: executionCancellation.deferredCancellationArmed,
+        executionIds: executionCancellation.signalledExecutionIds,
+      },
+    });
+
+    return Object.freeze({
+      ...committed,
+      executionCancellationRequested: true,
+      executionCancellation,
     });
   }
 
