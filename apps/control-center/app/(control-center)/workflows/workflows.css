@@ -7,3 +7,9 @@
 .mission-context-body small{color:var(--muted)}
 .mission-context-body p{margin:.35rem 0 0;line-height:1.5}
 @media(max-width:900px){.mission-context-grid,.mission-context-body{grid-template-columns:1fr}}
+
+.workflow-emergency-stop{display:grid;gap:.65rem;margin-top:.5rem;padding:.85rem;border:1px solid rgba(220,80,80,.35);border-radius:10px;background:rgba(220,80,80,.06)}
+.workflow-emergency-stop label{display:flex;gap:.55rem;align-items:flex-start;font-size:.85rem;line-height:1.4}
+.workflow-emergency-stop input[type="checkbox"]{margin-top:.2rem}
+.workflow-emergency-stop button{justify-self:start;border:1px solid rgba(220,80,80,.55);background:transparent;color:inherit;padding:.65rem .8rem;border-radius:9px;font-weight:700}
+.workflow-emergency-stop small{color:var(--muted)}
