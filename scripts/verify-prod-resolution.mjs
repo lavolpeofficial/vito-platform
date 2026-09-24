@@ -125,5 +125,3 @@ console.log(
 function contractsResolvedDifference(resolved) {
   return resolved.slice(resolved.indexOf('packages/contracts'));
 }
-
-[executed on device: ubuntu-4gb-hel1-1 (fe3754ea-5627-4a36-b351-e958ef584b11)]
