@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { AgentExecutionStatus, EngineeringStepType } from '@vito/contracts';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AgentWorkforceService } from '../agent-workforce/agent-workforce.service';
@@ -6,6 +6,7 @@ import { WorkflowExecutionPlanService } from '../agent-workforce/workflow-execut
 import { RuntimeOutcomeEvaluationService } from '../learning/runtime-outcome-evaluation.service';
 import { RuntimeReflectionLearningService } from '../learning/runtime-reflection-learning.service';
 import { WorkflowRuntimeService } from '../workflow-runtime/workflow-runtime.service';
+import { CodeBuildApprovalService } from '../engineering-release/code-build-approval.service';
 import { WorkflowReviewResultProjectorService } from './workflow-review-result-projector.service';
 
 const MAX_TASK_CONTEXT_CHARS = 32_000;
@@ -24,6 +25,7 @@ export class WorkflowAgentRuntimeService {
     private readonly workflowRuntime: WorkflowRuntimeService,
     private readonly runtimeOutcome?: RuntimeOutcomeEvaluationService,
     private readonly runtimeReflectionLearning?: RuntimeReflectionLearningService,
+    @Optional() private readonly codeBuildApprovals?: CodeBuildApprovalService,
   ) {}
 
   async executeCurrentStep(organizationId: string, workflowRunId: string) {
@@ -69,6 +71,10 @@ export class WorkflowAgentRuntimeService {
       });
     }
 
+    const codeBuildApproval = capabilityCode === 'CODE_BUILD'
+      ? await this.resolveCodeBuildApproval(organizationId, workflowRunId, step.id)
+      : undefined;
+
     if (!run.taskId) throw new ConflictException('Agent-executable workflow requires a task identity.');
     const task = await this.prisma.task.findFirst({
       where: { id: run.taskId, organizationId },
@@ -85,6 +91,7 @@ export class WorkflowAgentRuntimeService {
       prompt,
       assuranceLevel: run.assuranceLevel,
       correlationId: run.correlationId,
+      ...(codeBuildApproval ? { codeBuildApproval } : {}),
     });
 
     const executionStatus = dispatch.execution.status as AgentExecutionStatus;
@@ -245,6 +252,21 @@ export class WorkflowAgentRuntimeService {
       transition,
       outcomeEvaluation,
     });
+  }
+
+  private async resolveCodeBuildApproval(
+    organizationId: string,
+    workflowRunId: string,
+    workflowStepRunId: string,
+  ) {
+    if (!this.codeBuildApprovals) {
+      throw new ForbiddenException('CODE_BUILD_APPROVAL_RESOLVER_UNAVAILABLE');
+    }
+    return this.codeBuildApprovals.resolveForWorkflowDispatch(
+      organizationId,
+      workflowRunId,
+      workflowStepRunId,
+    );
   }
 
   private async recordOutcome(input: {
