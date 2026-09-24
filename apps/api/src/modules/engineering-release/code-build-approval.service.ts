@@ -6,6 +6,7 @@ import { AuditService } from '../audit/audit.service';
 import { ConsumeCodeBuildApprovalDto, CreateCodeBuildApprovalDto } from './dto/code-build-approval.dto';
 import {
   codeBuildTargetMatchesApprovalScope,
+  isCodeBuildExecutionTarget,
   type CodeBuildExecutionTarget,
 } from '../governed-runtime/adapters/code-build-execution-target';
 
@@ -64,12 +65,15 @@ export class CodeBuildApprovalService {
     dto: ConsumeCodeBuildApprovalDto,
     executionTarget: CodeBuildExecutionTarget,
   ) {
-    if (!codeBuildTargetMatchesApprovalScope(executionTarget, {
+    if (
+      !isCodeBuildExecutionTarget(executionTarget) ||
+      !codeBuildTargetMatchesApprovalScope(executionTarget, {
       organizationId,
       missionId: dto.missionId,
       repository: dto.repository,
-      branch: dto.branch,
-    })) {
+        branch: dto.branch,
+      })
+    ) {
       throw new ForbiddenException('CODE_BUILD execution target does not match approval scope.');
     }
     const executionTargetHash = this.hash(executionTarget);
