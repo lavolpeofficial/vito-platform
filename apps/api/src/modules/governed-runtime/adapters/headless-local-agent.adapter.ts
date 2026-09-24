@@ -134,6 +134,33 @@ function mapWorkerResult(
 ): GovernedAdapterResult {
   const commandSummary = `${trustedExecutable.commandName}${args.length ? ' ' + args.join(' ') : ''}`;
 
+  if (result.cancelled === true) {
+    return {
+      status: AgentExecutionStatus.CANCELLED,
+      providerExecutionMetadata: {
+        executableIntegrityHash: trustedExecutable.integrityHash ?? null,
+        exitCode: result.exitCode,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        governedResultSettling: result.governedResultSettling,
+        workspaceDisposition: result.workspaceDisposition,
+        sideEffects: {
+          filesCreated: [],
+          filesModified: result.governedResultSettling?.changedFiles ?? [],
+          filesDeleted: [],
+          commandsExecuted: [commandSummary],
+        },
+      },
+      usageMetadata: { durationMs: result.durationMs },
+      error: {
+        code: 'LOCAL_AGENT_CANCELLED',
+        message: 'Headless local agent was cancelled by an explicit workflow stop',
+        retryable: false,
+      },
+      completedAt: new Date(),
+    };
+  }
+
   if (result.timedOut) {
     return {
       status: AgentExecutionStatus.TIMED_OUT,
