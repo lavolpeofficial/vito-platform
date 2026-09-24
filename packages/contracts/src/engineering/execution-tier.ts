@@ -20,6 +20,13 @@ export enum ExecutionTier {
   CLOUD_GOVERNED = 'CLOUD_GOVERNED',
 }
 
+export enum CloudCredentialMode {
+  /** A server-owned opaque credential reference is mandatory. */
+  REFERENCE = 'REFERENCE',
+  /** The provider is explicitly authorized to run without credential material. */
+  NONE = 'NONE',
+}
+
 /**
  * Server-owned, immutable profile binding a provider code to CLOUD_GOVERNED
  * execution.
@@ -31,8 +38,14 @@ export enum ExecutionTier {
 export interface CloudExecutionProfile {
   readonly profileId: string;
   readonly providerCode: string;
+  /**
+   * Credential semantics are server-owned. Legacy profiles omit the mode and
+   * therefore resolve to REFERENCE. NONE is an explicit opt-in and requires
+   * credentialRef to be absent.
+   */
+  readonly credentialMode?: CloudCredentialMode;
   /** Opaque reference into the server-owned credential store. Never a value. */
-  readonly credentialRef: string;
+  readonly credentialRef?: string;
   /**
    * The exact trusted-agent launcher alias this profile may authorize.
    * Must resolve through TrustedExecutableResolver; mismatch fails closed.
@@ -64,6 +77,13 @@ export interface CloudExecutionProfile {
  */
 export function isCloudGovernedProviderType(providerType: ProviderType): boolean {
   return providerType === ProviderType.CLOUD_LLM;
+}
+
+/** Missing mode preserves the legacy fail-closed credential-reference contract. */
+export function resolveCloudCredentialMode(
+  profile: CloudExecutionProfile,
+): CloudCredentialMode {
+  return profile.credentialMode ?? CloudCredentialMode.REFERENCE;
 }
 
 /**
@@ -127,8 +147,29 @@ export function toValidatedCloudExecutionProfile(
     return null;
   }
 
-  const credentialRef = value.credentialRef;
-  if (typeof credentialRef !== 'string' || !CREDENTIAL_REF_PATTERN.test(credentialRef)) {
+  const rawCredentialMode = value.credentialMode;
+  const credentialMode =
+    rawCredentialMode === undefined
+      ? CloudCredentialMode.REFERENCE
+      : rawCredentialMode === CloudCredentialMode.REFERENCE ||
+          rawCredentialMode === CloudCredentialMode.NONE
+        ? rawCredentialMode
+        : null;
+  if (credentialMode === null) {
+    return null;
+  }
+
+  let credentialRef: string | undefined;
+  if (credentialMode === CloudCredentialMode.REFERENCE) {
+    if (
+      typeof value.credentialRef !== 'string' ||
+      !CREDENTIAL_REF_PATTERN.test(value.credentialRef)
+    ) {
+      return null;
+    }
+    credentialRef = value.credentialRef;
+  } else if (value.credentialRef !== undefined) {
+    // Credential-free profiles must be unambiguous: no dormant credential ref.
     return null;
   }
 
@@ -201,7 +242,8 @@ export function toValidatedCloudExecutionProfile(
   return Object.freeze({
     profileId,
     providerCode,
-    credentialRef,
+    ...(rawCredentialMode !== undefined ? { credentialMode } : {}),
+    ...(credentialRef !== undefined ? { credentialRef } : {}),
     trustedLauncherAlias,
     expectedProviderId,
     ...(allowedModelIds !== undefined ? { allowedModelIds } : {}),
