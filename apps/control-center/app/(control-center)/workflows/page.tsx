@@ -5,7 +5,7 @@ import { parseMissionContextSnapshot, type MissionContextSnapshot } from '@/lib/
 import { parseOperationsSummary, type OperationsAttentionRun } from '@/lib/operations/contracts';
 import { grantCodeBuildApprovalAction, revokeCodeBuildApprovalAction, workflowAction } from '@/lib/workflows/actions';
 import { parseWorkflowSnapshot, type WorkflowSnapshot } from '@/lib/workflows/contracts';
-import { parseCodeBuildApprovalStatus, type CodeBuildApprovalStatus } from '@/lib/workflows/code-build-approval-contracts';
+import { isCodeBuildExecutionReady, parseCodeBuildApprovalStatus, type CodeBuildApprovalStatus } from '@/lib/workflows/code-build-approval-contracts';
 
 export const metadata = { title: 'Workflows' };
 
@@ -102,10 +102,14 @@ function ActionPanel({
   const isReleaseApproval = snapshot.nextAction === 'APPROVE_HUMAN_RELEASE';
   const isVerdictProcessing = snapshot.nextAction === 'PROCESS_REVIEW_VERDICT';
   const isCodeBuildStep = snapshot.currentStepType === 'BUILD' || snapshot.currentStepType === 'CORRECTION';
-  const buildReady = !isCodeBuildStep || buildApprovalStatus?.state === 'READY';
+  const currentStep = [...snapshot.steps].reverse().find((step) => step.stepType === snapshot.currentStepType && step.status === 'READY') ?? null;
+  const buildReady = isCodeBuildExecutionReady({
+    currentStepType: snapshot.currentStepType,
+    readyStepId: currentStep?.id ?? null,
+    status: buildApprovalStatus,
+  });
   const actionable = nextActionAllowed && buildReady;
   const canCancel = snapshot.status === 'CREATED' || snapshot.status === 'RUNNING' || snapshot.status === 'WAITING_FOR_HUMAN' || snapshot.status === 'BLOCKED';
-  const currentStep = [...snapshot.steps].reverse().find((step) => step.stepType === snapshot.currentStepType && step.status === 'READY') ?? null;
 
   return <div className="workflow-action-card">
     <div className="workflow-state-row"><span>Status</span><strong>{snapshot.status}</strong></div>
