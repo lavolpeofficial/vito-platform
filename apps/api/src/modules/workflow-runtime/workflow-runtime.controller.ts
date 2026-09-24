@@ -25,6 +25,22 @@ export class WorkflowRuntimeController {
     return this.service.startRun(this.tenantContext.getOrThrow(), workflowRunId);
   }
 
+  @Post(':workflowRunId/cancel')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ description: 'Explicit human emergency stop. Cancels the run and active steps without triggering further execution.' })
+  cancel(
+    @Param('workflowRunId') workflowRunId: string,
+    @Req() request: { user: AuthenticatedUser },
+  ) {
+    return this.service.cancelRun({
+      organizationId: this.tenantContext.getOrThrow(),
+      workflowRunId,
+      cancelledByUserId: request.user.userId,
+      isMachineIdentity: request.user.isMachineIdentity,
+    });
+  }
+
   @Post(':workflowRunId/resume')
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   @HttpCode(HttpStatus.OK)

@@ -1,4 +1,4 @@
-import { Body, Controller, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { AuthenticatedUser } from '../../common/auth/authenticated-user.interface';
@@ -13,6 +13,12 @@ import { CodeBuildApprovalService } from './code-build-approval.service';
 @Controller('engineering-release/code-build-approvals')
 export class CodeBuildApprovalController {
   constructor(private readonly approvals: CodeBuildApprovalService) {}
+
+  @Get('mission/:missionId/status')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  status(@CurrentUser() user: AuthenticatedUser, @Param('missionId') missionId: string) {
+    return this.approvals.workflowDispatchStatus(user.organizationId, missionId);
+  }
 
   @Post()
   @Roles(UserRole.OWNER, UserRole.ADMIN)

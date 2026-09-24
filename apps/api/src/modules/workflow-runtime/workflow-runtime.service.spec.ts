@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { WorkflowRuntimeService, type CompleteStepInput } from './workflow-runtime.service';
 import { randomUUID } from 'crypto';
 import type { TransitionOutcome } from '@vito/contracts';
@@ -67,6 +67,7 @@ function buildService(opts: {
       findFirst: jest.fn(),
       create: jest.fn().mockImplementation((args: any) => Promise.resolve({ ...createdRun, ...args.data })),
       update: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     workflowStepRun: {
       findFirst: jest.fn(),
@@ -517,6 +518,63 @@ describe('WorkflowRuntimeService', () => {
       const result = await service.resumeRun(ORG_A, run.id);
       expect(result.status).toBe('RUNNING');
       expect(auditService.record).toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // Emergency stop is explicit, human-only and audited
+  // =========================================================================
+  describe('emergency stop', () => {
+    it('cancels an active run and its non-terminal steps without triggering execution', async () => {
+      const run = makeRun({ status: 'RUNNING', currentStepType: 'BUILD' });
+      const { service, tx, auditService } = buildService({ findFirstRun: run });
+      const cancelled = { ...run, status: 'CANCELLED', currentStepType: null, completedAt: new Date() };
+      tx.workflowRun.updateMany.mockResolvedValue({ count: 1 });
+      tx.workflowRun.findFirst.mockResolvedValue(cancelled);
+
+      const result = await service.cancelRun({
+        organizationId: ORG_A,
+        workflowRunId: run.id,
+        cancelledByUserId: 'user-1',
+        isMachineIdentity: false,
+      });
+
+      expect(tx.workflowRun.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ id: run.id, organizationId: ORG_A }),
+        data: expect.objectContaining({ status: 'CANCELLED', currentStepType: null }),
+      }));
+      expect(tx.workflowStepRun.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ status: 'CANCELLED' }),
+      }));
+      expect(auditService.record).toHaveBeenCalledWith(expect.objectContaining({
+        actorType: 'USER',
+        actorId: 'user-1',
+        action: 'WORKFLOW_RUN_CANCELLED',
+      }), tx);
+      expect(result.executionTriggered).toBe(false);
+      expect(result.authority).toBe('HUMAN_EXPLICIT');
+    });
+
+    it('rejects machine identities before any mutation', async () => {
+      const { service, tx } = buildService({});
+      await expect(service.cancelRun({
+        organizationId: ORG_A,
+        workflowRunId: 'run-1',
+        cancelledByUserId: 'machine-1',
+        isMachineIdentity: true,
+      })).rejects.toBeInstanceOf(ForbiddenException);
+      expect(tx.workflowRun.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects cancellation of a completed run', async () => {
+      const run = makeRun({ status: 'COMPLETED' });
+      const { service } = buildService({ findFirstRun: run });
+      await expect(service.cancelRun({
+        organizationId: ORG_A,
+        workflowRunId: run.id,
+        cancelledByUserId: 'user-1',
+        isMachineIdentity: false,
+      })).rejects.toBeInstanceOf(ConflictException);
     });
   });
 

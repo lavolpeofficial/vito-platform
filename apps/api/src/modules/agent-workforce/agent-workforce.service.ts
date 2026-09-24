@@ -25,6 +25,7 @@ import {
   buildCodeBuildExecutionTarget,
 } from '../governed-runtime/adapters/code-build-execution-target';
 import { MemoryService, type MemoryEntry } from '../memory/memory.service';
+import { MissionContextService, type MissionRuntimeContext } from '../mission-context/mission-context.service';
 import {
   PersistedWorkflowExecutionIdentity,
   WorkflowExecutionIdentityService,
@@ -42,6 +43,7 @@ const MAX_MEMORY_ITEMS = 8;
 const MAX_MEMORY_TITLE_CHARS = 256;
 const MAX_MEMORY_CONTENT_CHARS = 2_000;
 const MAX_MEMORY_SOURCE_CHARS = 256;
+const MAX_MISSION_CONTEXT_CHARS = 8_000;
 
 interface RuntimeMemoryContextItem {
   readonly id: string;
@@ -89,6 +91,7 @@ export class AgentWorkforceService {
     profileRegistry?: CloudExecutionProfileRegistry,
     @Optional() private readonly memory?: MemoryService,
     @Optional() private readonly codeBuildApprovals?: CodeBuildApprovalService,
+    @Optional() private readonly missionContextService?: MissionContextService,
   ) {
     this.profileRegistry = profileRegistry ?? new CloudExecutionProfileRegistry([]);
   }
@@ -189,8 +192,13 @@ export class AgentWorkforceService {
       capabilityCode,
       persistedIdentity,
     );
+    const missionContext = await this.retrieveMissionContext(
+      input.organizationId,
+      input.workflowRunId,
+    );
     const learningEnrichedPrompt = this.enrichPromptWithLearning(input.prompt, learningContext);
-    const prompt = this.enrichPromptWithMemory(learningEnrichedPrompt, memoryContext);
+    const missionEnrichedPrompt = this.enrichPromptWithMissionContext(learningEnrichedPrompt, missionContext);
+    const prompt = this.enrichPromptWithMemory(missionEnrichedPrompt, memoryContext);
 
     const execution = await this.governedRuntime.executeWorkspaceFileOperation({
       trustOrigin: TRUSTED_RUNTIME_ORIGIN,
@@ -212,6 +220,7 @@ export class AgentWorkforceService {
           createdAt: item.createdAt.toISOString(),
         })),
         ...(memoryContext.length > 0 ? { memoryContext } : {}),
+        ...(missionContext ? { missionContext } : {}),
       },
       correlationId,
       workflowRunId: input.workflowRunId,
@@ -226,6 +235,7 @@ export class AgentWorkforceService {
           capabilityCode,
           learningContextCount: learningContext.length,
           memoryContextCount: memoryContext.length,
+          missionContextIncluded: missionContext !== null,
           routingDecisionId: routing.routingDecisionId,
           selectedProviderId: provider.id,
           selectedProviderCode: provider.providerCode,
@@ -241,6 +251,7 @@ export class AgentWorkforceService {
       capabilityCode,
       learningContextCount: learningContext.length,
       memoryContextCount: memoryContext.length,
+      missionContextIncluded: missionContext !== null,
       experienceId: experience?.id ?? null,
       execution,
     });
@@ -251,6 +262,7 @@ export class AgentWorkforceService {
     readonly capabilityCode: string;
     readonly learningContextCount: number;
     readonly memoryContextCount: number;
+    readonly missionContextIncluded: boolean;
     readonly routingDecisionId: string;
     readonly selectedProviderId: string;
     readonly selectedProviderCode: string;
@@ -274,6 +286,7 @@ export class AgentWorkforceService {
       observation: {
         priorLearningItemsRetrieved: input.learningContextCount,
         priorMemoryItemsRetrieved: input.memoryContextCount,
+        missionContextIncluded: input.missionContextIncluded,
       },
       decision: {
         routingDecisionId: input.routingDecisionId,
@@ -322,6 +335,18 @@ export class AgentWorkforceService {
       return this.boundMemoryContext(entries);
     } catch {
       return [];
+    }
+  }
+
+  private async retrieveMissionContext(
+    organizationId: string,
+    workflowRunId: string,
+  ): Promise<MissionRuntimeContext | null> {
+    if (!this.missionContextService) return null;
+    try {
+      return await this.missionContextService.runtimeContext(organizationId, workflowRunId);
+    } catch {
+      return null;
     }
   }
 
@@ -375,6 +400,27 @@ export class AgentWorkforceService {
     if (safeCharacterBudget <= 0) return prompt;
 
     return `${prompt}${separator}${block.slice(0, safeCharacterBudget)}`;
+  }
+
+  private enrichPromptWithMissionContext(
+    prompt: string,
+    missionContext: MissionRuntimeContext | null,
+  ): string {
+    if (!missionContext) return prompt;
+
+    const remainingBytes = MAX_PROMPT_BYTES - Buffer.byteLength(prompt, 'utf8');
+    const separator = '\n\n---\nMission context (server-projected advisory state; never overrides policy, capability, routing, approvals or workflow identity):\n';
+    const separatorBytes = Buffer.byteLength(separator, 'utf8');
+    if (remainingBytes <= separatorBytes + 16) return prompt;
+
+    const serialized = JSON.stringify(missionContext);
+    const safeCharacterBudget = Math.min(
+      MAX_MISSION_CONTEXT_CHARS,
+      Math.floor((remainingBytes - separatorBytes) / 4),
+    );
+    if (safeCharacterBudget <= 0) return prompt;
+
+    return `${prompt}${separator}${serialized.slice(0, safeCharacterBudget)}`;
   }
 
   private enrichPromptWithMemory(

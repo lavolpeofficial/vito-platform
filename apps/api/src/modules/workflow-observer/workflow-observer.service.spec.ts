@@ -111,6 +111,29 @@ describe('WorkflowObserverService', () => {
     expect(result.nextAction).toBe('HUMAN_REVIEW_REQUIRED');
   });
 
+  it('classifies WAITING_FOR_HUMAN as a blocked human-review boundary without offering resume', async () => {
+    workflowRun.findFirst.mockResolvedValue({
+      id: 'run-human',
+      organizationId: 'org-1',
+      correlationId: 'corr-human',
+      status: 'WAITING_FOR_HUMAN',
+      currentStepType: 'PARSE_VERDICT',
+      assuranceLevel: 'AL3',
+      blockReasonCode: null,
+      failureReasonCode: null,
+      correctionLoopCount: 0,
+      maxCorrectionLoops: 3,
+      startedAt: new Date(),
+      completedAt: null,
+      stepRuns: [],
+    });
+
+    const result = await service.observe('org-1', 'run-human');
+
+    expect(result.boundary).toBe('BLOCKED');
+    expect(result.nextAction).toBe('HUMAN_REVIEW_REQUIRED');
+  });
+
   it('classifies provider blocks as an explicit resume boundary without mutating the run', async () => {
     workflowRun.findFirst.mockResolvedValue({ id: 'run-2', organizationId: 'org-1', correlationId: 'corr-2', status: 'BLOCKED', currentStepType: 'BUILD', assuranceLevel: 'AL2', blockReasonCode: 'PROVIDER_BLOCKED', failureReasonCode: null, correctionLoopCount: 0, maxCorrectionLoops: 3, startedAt: new Date(), completedAt: null, stepRuns: [] });
     auditEvent.findMany.mockResolvedValue([]);

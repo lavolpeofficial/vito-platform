@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { AgentExecutionStatus, EngineeringCapability, EngineeringStepType } from '@vito/contracts';
 import { WorkflowAgentRuntimeService } from './workflow-agent-runtime.service';
 
@@ -10,6 +10,7 @@ describe('WorkflowAgentRuntimeService', () => {
   const capabilityForStep = jest.fn();
   const completeStep = jest.fn();
   const tryRecordOutcome = jest.fn();
+  const resolveForWorkflowDispatch = jest.fn();
 
   const prisma = {
     workflowRun: { findFirst: findRun },
@@ -23,6 +24,8 @@ describe('WorkflowAgentRuntimeService', () => {
     { capabilityForStep } as any,
     { completeStep } as any,
     { tryRecord: tryRecordOutcome } as any,
+    undefined,
+    { resolveForWorkflowDispatch } as any,
   );
 
   beforeEach(() => {
@@ -39,6 +42,16 @@ describe('WorkflowAgentRuntimeService', () => {
     capabilityForStep.mockReturnValue(EngineeringCapability.CODE_BUILD);
     completeStep.mockResolvedValue({ idempotent: false, outcome: { kind: 'NEXT_STEP' } });
     tryRecordOutcome.mockResolvedValue({ id: 'outcome-1', score: 1 });
+    resolveForWorkflowDispatch.mockResolvedValue({
+      approvalId: 'approval-1',
+      machineUserId: 'machine-1',
+      scope: {
+        missionId: 'run-1',
+        repository: 'lavolpeofficial/vito-platform',
+        branch: 'feat/workflow-build',
+        requestKey: 'workflow-step:step-1',
+      },
+    });
   });
 
   it('dispatches, binds governed evidence references, transitions, then objectively evaluates the persisted runtime Experience', async () => {
@@ -61,6 +74,15 @@ describe('WorkflowAgentRuntimeService', () => {
       organizationId: 'org-1', workflowRunId: 'run-1', workflowStepRunId: 'step-1',
       capabilityCode: EngineeringCapability.CODE_BUILD, assuranceLevel: 'AL-3', correlationId: 'corr-1',
       prompt: expect.stringContaining('Implement bounded change'),
+      codeBuildApproval: expect.objectContaining({
+        approvalId: 'approval-1',
+        machineUserId: 'machine-1',
+        scope: expect.objectContaining({
+          missionId: 'run-1',
+          branch: 'feat/workflow-build',
+          requestKey: 'workflow-step:step-1',
+        }),
+      }),
     }));
     expect(completeStep).toHaveBeenCalledWith(expect.objectContaining({
       stepStatus: 'SUCCEEDED',
@@ -84,6 +106,16 @@ describe('WorkflowAgentRuntimeService', () => {
     expect(result.disposition).toBe('TRANSITIONED');
     if (result.disposition !== 'TRANSITIONED') throw new Error('expected transitioned result');
     expect(result.outcomeEvaluation).toEqual(expect.objectContaining({ id: 'outcome-1' }));
+  });
+
+  it('fails closed before CODE_BUILD dispatch when server-side approval resolution fails', async () => {
+    resolveForWorkflowDispatch.mockRejectedValueOnce(new ForbiddenException('CODE_BUILD_APPROVAL_REQUIRED'));
+
+    await expect(service.executeCurrentStep('org-1', 'run-1')).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(resolveForWorkflowDispatch).toHaveBeenCalledWith('org-1', 'run-1', 'step-1');
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(completeStep).not.toHaveBeenCalled();
   });
 
   it('bounds execution evidence instead of persisting arbitrary or oversized provider output', async () => {
