@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
   nextEngineeringStep,
@@ -430,6 +430,103 @@ export class WorkflowRuntimeService {
     });
     if (!run) throw new NotFoundException('WorkflowRun nicht gefunden.');
     return run;
+  }
+
+  async cancelRun(input: {
+    organizationId: string;
+    workflowRunId: string;
+    cancelledByUserId: string;
+    isMachineIdentity: boolean;
+  }) {
+    if (input.isMachineIdentity) {
+      throw new ForbiddenException('HUMAN_USER_REQUIRED');
+    }
+
+    const run = await this.prisma.workflowRun.findFirst({
+      where: { id: input.workflowRunId, organizationId: input.organizationId },
+    });
+    if (!run) throw new NotFoundException('WorkflowRun nicht gefunden.');
+    if (run.status === 'CANCELLED') {
+      return Object.freeze({
+        run,
+        idempotent: true,
+        executionTriggered: false,
+        authority: 'HUMAN_EXPLICIT' as const,
+      });
+    }
+    if (run.status === 'COMPLETED' || run.status === 'FAILED') {
+      throw new ConflictException(`WorkflowRun ist terminal (Status: ${run.status}).`);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const now = new Date();
+      const claim = await tx.workflowRun.updateMany({
+        where: {
+          id: input.workflowRunId,
+          organizationId: input.organizationId,
+          status: { in: ['CREATED', 'RUNNING', 'WAITING_FOR_HUMAN', 'BLOCKED'] },
+        },
+        data: {
+          status: 'CANCELLED',
+          currentStepType: null,
+          completedAt: now,
+        },
+      });
+
+      if (claim.count === 0) {
+        const fresh = await tx.workflowRun.findFirst({
+          where: { id: input.workflowRunId, organizationId: input.organizationId },
+        });
+        if (fresh?.status === 'CANCELLED') {
+          return Object.freeze({
+            run: fresh,
+            idempotent: true,
+            executionTriggered: false,
+            authority: 'HUMAN_EXPLICIT' as const,
+          });
+        }
+        throw new ConflictException('WorkflowRun konnte nicht atomar abgebrochen werden.');
+      }
+
+      await tx.workflowStepRun.updateMany({
+        where: {
+          organizationId: input.organizationId,
+          workflowRunId: input.workflowRunId,
+          status: { in: ['PENDING', 'READY', 'RUNNING', 'WAITING'] },
+        },
+        data: { status: 'CANCELLED', finishedAt: now },
+      });
+
+      const cancelled = await tx.workflowRun.findFirst({
+        where: { id: input.workflowRunId, organizationId: input.organizationId },
+      });
+      if (!cancelled) throw new NotFoundException('WorkflowRun nicht gefunden.');
+
+      await this.auditService.record(
+        {
+          organizationId: input.organizationId,
+          actorType: 'USER',
+          actorId: input.cancelledByUserId,
+          action: 'WORKFLOW_RUN_CANCELLED',
+          entityType: 'WorkflowRun',
+          entityId: input.workflowRunId,
+          metadata: {
+            previousStatus: run.status,
+            previousStepType: run.currentStepType,
+            executionTriggered: false,
+            authority: 'HUMAN_EXPLICIT',
+          },
+        },
+        tx,
+      );
+
+      return Object.freeze({
+        run: cancelled,
+        idempotent: false,
+        executionTriggered: false,
+        authority: 'HUMAN_EXPLICIT' as const,
+      });
+    });
   }
 
   async resumeRun(organizationId: string, workflowRunId: string) {
