@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 const CANCELLATION_TOMBSTONE_TTL_MS = 60 * 60 * 1000;
 const MAX_CANCELLATION_TOMBSTONES = 1_000;
+const MAX_REPORTED_EXECUTION_IDS = 100;
 
 export interface ExecutionCancellationRegistration {
   readonly organizationId: string;
@@ -82,7 +83,9 @@ export class ExecutionCancellationRegistry {
 
     for (const entry of matches) {
       const outcome = this.signal(entry);
-      if (outcome === 'SIGNALLED') signalledExecutionIds.push(entry.executionId);
+      if (outcome === 'SIGNALLED' && signalledExecutionIds.length < MAX_REPORTED_EXECUTION_IDS) {
+        signalledExecutionIds.push(entry.executionId);
+      }
       if (outcome === 'FAILED') signalFailureCount += 1;
     }
 
