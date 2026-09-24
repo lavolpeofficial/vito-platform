@@ -66,7 +66,7 @@ export class MissionContextService {
       where: { id: workflowRunId, organizationId },
       include: {
         stepRuns: {
-          orderBy: [{ startedAt: 'asc' }, { createdAt: 'asc' }],
+          orderBy: { startedAt: 'asc' },
           select: {
             id: true,
             stepType: true,
