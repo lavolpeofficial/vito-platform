@@ -82,6 +82,10 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
   }
 
   async execute(request: SandboxExecutionRequest): Promise<SandboxExecutionResult> {
+    if (request.cancellationSignal?.aborted) {
+      return cancelledResult(0);
+    }
+
     if (this.technology === 'none') {
       if (this.nodeEnv === 'production') {
         throw new SandboxStartupError(
@@ -227,6 +231,21 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
 
       let timedOut = false;
       let oomKilled = false;
+      let cancelled = false;
+      let cancellationKillTimer: NodeJS.Timeout | null = null;
+
+      const cancelExecution = () => {
+        if (cancelled) return;
+        cancelled = true;
+        child.kill('SIGTERM');
+        cancellationKillTimer = setTimeout(() => {
+          try { child.kill('SIGKILL'); } catch { /* already dead */ }
+        }, SIGTERM_GRACE_MS);
+        cancellationKillTimer.unref();
+      };
+      const cancellationSignal = request.cancellationSignal;
+      cancellationSignal?.addEventListener('abort', cancelExecution, { once: true });
+      if (cancellationSignal?.aborted) cancelExecution();
 
       const timer = setTimeout(() => {
         timedOut = true;
@@ -239,6 +258,8 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
 
       child.on('error', () => {
         clearTimeout(timer);
+        if (cancellationKillTimer) clearTimeout(cancellationKillTimer);
+        cancellationSignal?.removeEventListener('abort', cancelExecution);
         resolve({
           exitCode: null,
           stdout: capture.getStdout(),
@@ -246,12 +267,15 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
           durationMs: Date.now() - startedAt,
           timedOut,
           oomKilled,
+          ...(cancelled ? { cancelled: true } : {}),
           sandboxLog: 'bwrap process error',
         });
       });
 
       child.on('close', (code) => {
         clearTimeout(timer);
+        if (cancellationKillTimer) clearTimeout(cancellationKillTimer);
+        cancellationSignal?.removeEventListener('abort', cancelExecution);
         resolve({
           exitCode: code,
           stdout: capture.getStdout(),
@@ -259,6 +283,7 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
           durationMs: Date.now() - startedAt,
           timedOut,
           oomKilled,
+          ...(cancelled ? { cancelled: true } : {}),
         });
       });
 
@@ -291,6 +316,21 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
       child.stderr.on('data', (chunk: Buffer) => capture.appendStderr(chunk));
 
       let timedOut = false;
+      let cancelled = false;
+      let cancellationKillTimer: NodeJS.Timeout | null = null;
+
+      const cancelExecution = () => {
+        if (cancelled) return;
+        cancelled = true;
+        child.kill('SIGTERM');
+        cancellationKillTimer = setTimeout(() => {
+          try { child.kill('SIGKILL'); } catch { /* already dead */ }
+        }, SIGTERM_GRACE_MS);
+        cancellationKillTimer.unref();
+      };
+      const cancellationSignal = request.cancellationSignal;
+      cancellationSignal?.addEventListener('abort', cancelExecution, { once: true });
+      if (cancellationSignal?.aborted) cancelExecution();
 
       const timer = setTimeout(() => {
         timedOut = true;
@@ -303,6 +343,8 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
 
       child.on('error', () => {
         clearTimeout(timer);
+        if (cancellationKillTimer) clearTimeout(cancellationKillTimer);
+        cancellationSignal?.removeEventListener('abort', cancelExecution);
         resolve({
           exitCode: null,
           stdout: capture.getStdout(),
@@ -310,12 +352,15 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
           durationMs: Date.now() - startedAt,
           timedOut,
           oomKilled: false,
+          ...(cancelled ? { cancelled: true } : {}),
           sandboxLog: 'unsandboxed process error',
         });
       });
 
       child.on('close', (code) => {
         clearTimeout(timer);
+        if (cancellationKillTimer) clearTimeout(cancellationKillTimer);
+        cancellationSignal?.removeEventListener('abort', cancelExecution);
         resolve({
           exitCode: code,
           stdout: capture.getStdout(),
@@ -323,6 +368,7 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
           durationMs: Date.now() - startedAt,
           timedOut,
           oomKilled: false,
+          ...(cancelled ? { cancelled: true } : {}),
         });
       });
 
@@ -333,6 +379,19 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
       }
     });
   }
+}
+
+function cancelledResult(durationMs: number): SandboxExecutionResult {
+  return {
+    exitCode: null,
+    stdout: '',
+    stderr: '',
+    durationMs,
+    timedOut: false,
+    oomKilled: false,
+    cancelled: true,
+    sandboxLog: 'execution cancelled before spawn',
+  };
 }
 
 function mkdirSafe(path: string): void {
