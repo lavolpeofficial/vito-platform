@@ -1,5 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ProviderType, type CredentialBroker } from '@vito/contracts';
+import {
+  CloudCredentialMode,
+  ProviderType,
+  resolveCloudCredentialMode,
+  type CredentialBroker,
+} from '@vito/contracts';
 import type { ProviderResolver } from '../governed-invocation/governed-invocation.service';
 import { CloudExecutionProfileRegistry } from './cloud-execution-profile.registry';
 
@@ -134,7 +139,14 @@ export class CloudCredentialBroker implements CredentialBroker {
       return null;
     }
 
-    if (!this.credentialResolver.has(profile.credentialRef)) {
+    // Explicit credential-free cloud profiles never receive or resolve secrets.
+    // A REQUIRED provider bound to such a profile therefore fails closed in the
+    // caller because no credential reference can be produced.
+    if (resolveCloudCredentialMode(profile) === CloudCredentialMode.NONE) {
+      return null;
+    }
+
+    if (!profile.credentialRef || !this.credentialResolver.has(profile.credentialRef)) {
       return null;
     }
 
