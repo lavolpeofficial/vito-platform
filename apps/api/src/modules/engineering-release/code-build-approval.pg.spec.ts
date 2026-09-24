@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CodeBuildApprovalService } from './code-build-approval.service';
+import { ExecutionTier } from '@vito/contracts';
+import { buildCodeBuildExecutionTarget } from '../governed-runtime/adapters/code-build-execution-target';
 
 const DATABASE_URL = process.env.CODE_BUILD_TEST_DATABASE_URL;
 const describePg = DATABASE_URL ? describe : describe.skip;
@@ -41,6 +43,21 @@ describePg('CODE_BUILD approval PostgreSQL security gate', () => {
 
   const approval = (requestKey = randomUUID()) => ({ missionId: `mission-${randomUUID()}`, repository: 'lavolpeofficial/vito-platform', branch: `feat/test-${randomUUID()}`, expiresAt: new Date(Date.now() + 60_000).toISOString(), requestKey });
   const consumption = (source: ReturnType<typeof approval>, requestKey = randomUUID()) => ({ missionId: source.missionId, repository: source.repository, branch: source.branch, requestKey });
+  const executionTarget = (
+    organizationId: string,
+    source: ReturnType<typeof approval>,
+  ) => buildCodeBuildExecutionTarget({
+    organizationId,
+    missionId: source.missionId,
+    workflowRunId: 'workflow-run-1',
+    workflowStepRunId: 'workflow-step-1',
+    repository: 'lavolpeofficial/vito-platform',
+    publicationBranch: source.branch,
+    providerId: 'provider-build',
+    providerCode: 'opencode-local',
+    executionTier: ExecutionTier.LOCAL_ISOLATED,
+    commandAlias: 'opencode',
+  });
 
   it('requires a real human and makes approval requests idempotent while rejecting changed replay content', async () => {
     const t = await tenant();
@@ -105,15 +122,45 @@ describePg('CODE_BUILD approval PostgreSQL security gate', () => {
     expect(await prisma.auditEvent.count({ where: { organizationId: t.organizationId, action: 'CODE_BUILD_APPROVAL_CONSUMED', entityId: stored.id } })).toBe(1);
   });
 
-  it('dispatch consumption is single-use, scope-bound, and rejects replay before execution', async () => {
+  it('dispatch consumption is single-use, scope-bound, execution-target-bound, and rejects replay before execution', async () => {
     const t = await tenant();
     const dto = approval();
     const stored = await service.create(t.organizationId, t.human.id, 'OWNER', dto);
     const scope = consumption(dto);
-    await expect(service.consumeForDispatch(t.organizationId, t.machine.id, stored.id, { ...scope, branch: 'feat/other' })).rejects.toBeInstanceOf(ForbiddenException);
-    const consumed = await service.consumeForDispatch(t.organizationId, t.machine.id, stored.id, scope);
+    const target = executionTarget(t.organizationId, dto);
+
+    await expect(service.consumeForDispatch(
+      t.organizationId,
+      t.machine.id,
+      stored.id,
+      { ...scope, branch: 'feat/other' },
+      target,
+    )).rejects.toBeInstanceOf(ForbiddenException);
+
+    const consumed = await service.consumeForDispatch(
+      t.organizationId,
+      t.machine.id,
+      stored.id,
+      scope,
+      target,
+    );
     expect(consumed.consumedByUserId).toBe(t.machine.id);
-    await expect(service.consumeForDispatch(t.organizationId, t.machine.id, stored.id, scope)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(consumed.executionTargetHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(consumed.executionTarget).toEqual(expect.objectContaining({
+      providerId: 'provider-build',
+      providerCode: 'opencode-local',
+      workflowRunId: 'workflow-run-1',
+      workflowStepRunId: 'workflow-step-1',
+      baseRef: 'main',
+    }));
+
+    await expect(service.consumeForDispatch(
+      t.organizationId,
+      t.machine.id,
+      stored.id,
+      scope,
+      target,
+    )).rejects.toBeInstanceOf(ForbiddenException);
     expect(await prisma.auditEvent.count({ where: { organizationId: t.organizationId, action: 'CODE_BUILD_APPROVAL_CONSUMED', entityId: stored.id } })).toBe(1);
   });
 
