@@ -1,58 +1,59 @@
-import { parseMissionContextSnapshot } from '../lib/missions/contracts';
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { parseMissionContextSnapshot } from '../lib/missions/contracts.ts';
 
-describe('mission context contracts', () => {
-  const valid = {
-    missionId: 'run-1',
-    objective: 'Finish VITO safely.',
-    workflow: {
-      definitionCode: 'ENGINEERING_CHANGE',
-      definitionVersion: '1',
-      status: 'RUNNING',
-      currentStepType: 'TEST',
-      assuranceLevel: 'AL4',
-    },
-    progress: {
-      completedSteps: ['PLAN', 'BUILD'],
-      currentStepType: 'TEST',
-      correctionLoopCount: 0,
-      maxCorrectionLoops: 3,
-    },
-    governance: {
-      waitingForHuman: false,
-      recentEvents: [{ action: 'WORKFLOW_STEP_ACTIVATED', createdAt: '2026-09-24T08:00:00.000Z' }],
-    },
-    memoryRefs: [{
-      id: 'memory-1',
-      kind: 'ORGANIZATIONAL',
-      title: 'Release rule',
-      sourceType: 'POLICY',
-      sourceRef: 'policy-1',
-      confidence: 1,
-    }],
-    outcome: {
-      terminal: false,
-      status: 'RUNNING',
-      blockReasonCode: null,
-      failureReasonCode: null,
-    },
-    authority: 'ADVISORY_CONTEXT',
-  };
+const VALID = {
+  missionId: 'run-1',
+  objective: 'Finish VITO safely.',
+  workflow: {
+    definitionCode: 'ENGINEERING_CHANGE',
+    definitionVersion: '1',
+    status: 'RUNNING',
+    currentStepType: 'TEST',
+    assuranceLevel: 'AL4',
+  },
+  progress: {
+    completedSteps: ['PLAN', 'BUILD'],
+    currentStepType: 'TEST',
+    correctionLoopCount: 0,
+    maxCorrectionLoops: 3,
+  },
+  governance: {
+    waitingForHuman: false,
+    recentEvents: [{ action: 'WORKFLOW_STEP_ACTIVATED', createdAt: '2026-09-24T08:00:00.000Z' }],
+  },
+  memoryRefs: [{
+    id: 'memory-1',
+    kind: 'ORGANIZATIONAL',
+    title: 'Release rule',
+    sourceType: 'POLICY',
+    sourceRef: 'policy-1',
+    confidence: 1,
+  }],
+  outcome: {
+    terminal: false,
+    status: 'RUNNING',
+    blockReasonCode: null,
+    failureReasonCode: null,
+  },
+  authority: 'ADVISORY_CONTEXT',
+} as const;
 
-  it('accepts the bounded advisory mission projection', () => {
-    const result = parseMissionContextSnapshot(valid);
-    expect(result?.missionId).toBe('run-1');
-    expect(result?.progress.completedSteps).toEqual(['PLAN', 'BUILD']);
-    expect(result?.memoryRefs).toHaveLength(1);
-  });
+test('accepts the bounded advisory mission projection', () => {
+  const result = parseMissionContextSnapshot(VALID);
+  assert.ok(result);
+  assert.equal(result.missionId, 'run-1');
+  assert.deepEqual(result.progress.completedSteps, ['PLAN', 'BUILD']);
+  assert.equal(result.memoryRefs.length, 1);
+});
 
-  it('rejects a mission projection that claims execution authority', () => {
-    expect(parseMissionContextSnapshot({ ...valid, authority: 'EXECUTION_AUTHORITY' })).toBeNull();
-  });
+test('rejects a mission projection that claims execution authority', () => {
+  assert.equal(parseMissionContextSnapshot({ ...VALID, authority: 'EXECUTION_AUTHORITY' }), null);
+});
 
-  it('rejects unbounded shared memory references', () => {
-    expect(parseMissionContextSnapshot({
-      ...valid,
-      memoryRefs: Array.from({ length: 9 }, (_, index) => ({ ...valid.memoryRefs[0], id: `memory-${index}` })),
-    })).toBeNull();
-  });
+test('rejects unbounded shared memory references', () => {
+  assert.equal(parseMissionContextSnapshot({
+    ...VALID,
+    memoryRefs: Array.from({ length: 9 }, (_, index) => ({ ...VALID.memoryRefs[0], id: 'memory-' + index })),
+  }), null);
 });
