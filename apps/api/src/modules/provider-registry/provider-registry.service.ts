@@ -13,6 +13,8 @@ export interface CreateProviderInput {
   displayName: string;
   providerType?: string;
   status?: string;
+  /** Internal governed bootstrap only; generic HTTP creation does not expose this field. */
+  credentialRequirement?: string;
   modelFamily?: string;
   modelName?: string;
   modelCode?: string;
@@ -100,6 +102,7 @@ export class ProviderRegistryService {
           displayName: input.displayName,
           providerType: (input.providerType ?? 'CLOUD_LLM') as any,
           status: (input.status ?? 'DISABLED') as any,
+          credentialRequirement: (input.credentialRequirement ?? 'UNKNOWN') as any,
           modelFamily: input.modelFamily ?? null,
           modelName: input.modelName ?? null,
           modelCode: input.modelCode ?? null,
@@ -127,6 +130,7 @@ export class ProviderRegistryService {
             providerCode: provider.providerCode,
             displayName: provider.displayName,
             providerType: provider.providerType,
+            credentialRequirement: provider.credentialRequirement,
             supportedCapabilities: input.supportedCapabilities,
           },
         },
