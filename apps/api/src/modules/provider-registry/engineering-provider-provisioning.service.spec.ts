@@ -128,7 +128,6 @@ describe('EngineeringProviderProvisioningService', () => {
         EngineeringCapability.REVIEW_PACKAGE,
       ],
     });
-    listCapabilities.mockResolvedValueOnce([]);
 
     await expect(service().provision()).rejects.toBeInstanceOf(ConflictException);
     expect(assignCapability).not.toHaveBeenCalled();
