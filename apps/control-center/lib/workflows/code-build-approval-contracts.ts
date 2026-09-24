@@ -55,6 +55,16 @@ export function parseCodeBuildApprovalStatus(input: unknown): CodeBuildApprovalS
   };
 }
 
+
+export function isCodeBuildExecutionReady(input: Readonly<{
+  currentStepType: string | null;
+  readyStepId: string | null;
+  status: CodeBuildApprovalStatus | null;
+}>): boolean {
+  if (input.currentStepType !== 'BUILD' && input.currentStepType !== 'CORRECTION') return true;
+  return input.readyStepId !== null && input.status?.state === 'READY';
+}
+
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
