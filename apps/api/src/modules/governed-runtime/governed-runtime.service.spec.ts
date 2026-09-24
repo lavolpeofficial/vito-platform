@@ -461,7 +461,7 @@ describe('GovernedRuntimeService (B2c internal runtime entry)', () => {
           requestedAction: 'RUN_COMMAND',
           relativePath: undefined,
           content: undefined,
-          command: 'npm',
+          command: 'jest',
           workflowRunId,
           workflowStepRunId,
           codeBuildExecutionTarget: buildCodeBuildExecutionTarget({
@@ -474,7 +474,7 @@ describe('GovernedRuntimeService (B2c internal runtime entry)', () => {
             providerId: declaration.id,
             providerCode: declaration.providerCode,
             executionTier: ExecutionTier.LOCAL_ISOLATED,
-            commandAlias: 'npm',
+            commandAlias: 'jest',
           }),
         }),
       ),
