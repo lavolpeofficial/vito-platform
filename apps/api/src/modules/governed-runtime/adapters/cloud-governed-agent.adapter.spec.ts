@@ -314,6 +314,29 @@ describe('CloudGovernedAgentAdapter (CLOUD_GOVERNED tier, §9 gates)', () => {
     expect(meta.flight001Acceptance).toMatchObject({ checked: true, passed: false });
   });
 
+  it('maps explicit cloud cancellation to CANCELLED before provider-identity failure handling', async () => {
+    const worker = makeMockWorkerService();
+    (worker.executeSandboxed as jest.Mock).mockResolvedValue(
+      makeWorkerResult({
+        cancelled: true,
+        exitCode: null,
+        providerIdentityError: {
+          code: 'PROVIDER_IDENTITY_MISSING',
+          message: 'cancelled before identity was observed',
+        },
+      }),
+    );
+
+    const result = await makeAdapter(worker).execute(
+      { governedInputPayload: {} },
+      makeContext(),
+    );
+
+    expect(result.status).toBe(AgentExecutionStatus.CANCELLED);
+    expect(result.error?.code).toBe('CLOUD_AGENT_CANCELLED');
+    expect(result.error?.retryable).toBe(false);
+  });
+
   it('maps timeout to CLOUD_AGENT_TIMEOUT (retryable)', async () => {
     const worker = makeMockWorkerService();
     (worker.executeSandboxed as jest.Mock).mockResolvedValue(

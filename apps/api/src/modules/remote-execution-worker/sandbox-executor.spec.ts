@@ -238,6 +238,41 @@ describe('BubblewrapSandboxExecutor', () => {
     });
   });
 
+  describe('live cancellation', () => {
+    it('terminates a running bubblewrap process and reports cancellation separately from timeout', async () => {
+      const child = makeMockChild();
+      mockSpawn.mockReturnValue(child);
+      const controller = new AbortController();
+      const executor = new BubblewrapSandboxExecutor('bubblewrap', 'development', 'bwrap');
+
+      const resultPromise = executor.execute(makeRequest({
+        cancellationSignal: controller.signal,
+      }));
+      controller.abort();
+
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+      child.emit('close', null);
+      const result = await resultPromise;
+
+      expect(result.cancelled).toBe(true);
+      expect(result.timedOut).toBe(false);
+    });
+
+    it('does not spawn when cancellation was already requested', async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const executor = new BubblewrapSandboxExecutor('bubblewrap', 'development', 'bwrap');
+
+      const result = await executor.execute(makeRequest({
+        cancellationSignal: controller.signal,
+      }));
+
+      expect(result.cancelled).toBe(true);
+      expect(result.timedOut).toBe(false);
+      expect(mockSpawn).not.toHaveBeenCalled();
+    });
+  });
+
   describe('system-managed env override denial', () => {
     it('CRITICAL: Rejects HOME override attempt (ENV_OVERRIDE_DENIED)', async () => {
       const executor = new BubblewrapSandboxExecutor('bubblewrap', 'development', 'bwrap');

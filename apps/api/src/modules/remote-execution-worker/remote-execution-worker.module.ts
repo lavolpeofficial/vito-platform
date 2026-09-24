@@ -6,13 +6,15 @@ import { RemoteExecutionWorkerService } from './remote-execution-worker.service'
 import type { RepositoryRegistry, WorkspaceProvisioner, SandboxExecutor } from './types';
 import { GOVERNED_WORKSPACE_ROOT } from '../governed-runtime/governed-runtime.tokens';
 import { GovernedWorkspaceConfigModule } from '../governed-runtime/governed-workspace-config.module';
+import { ExecutionCancellationModule } from '../execution-cancellation/execution-cancellation.module';
+import { ExecutionCancellationRegistry } from '../execution-cancellation/execution-cancellation.registry';
 
 export const REPOSITORY_REGISTRY = 'REPOSITORY_REGISTRY';
 export const WORKSPACE_PROVISIONER = 'WORKSPACE_PROVISIONER';
 export const SANDBOX_EXECUTOR = 'SANDBOX_EXECUTOR';
 
 @Module({
-  imports: [GovernedWorkspaceConfigModule],
+  imports: [GovernedWorkspaceConfigModule, ExecutionCancellationModule],
   providers: [
     {
       provide: REPOSITORY_REGISTRY,
@@ -30,13 +32,14 @@ export const SANDBOX_EXECUTOR = 'SANDBOX_EXECUTOR';
     },
     {
       provide: RemoteExecutionWorkerService,
-      inject: [REPOSITORY_REGISTRY, WORKSPACE_PROVISIONER, SANDBOX_EXECUTOR],
+      inject: [REPOSITORY_REGISTRY, WORKSPACE_PROVISIONER, SANDBOX_EXECUTOR, ExecutionCancellationRegistry],
       useFactory: (
         registry: RepositoryRegistry,
         provisioner: WorkspaceProvisioner,
         executor: SandboxExecutor,
+        cancellationRegistry: ExecutionCancellationRegistry,
       ): RemoteExecutionWorkerService =>
-        new RemoteExecutionWorkerService(registry, provisioner, executor),
+        new RemoteExecutionWorkerService(registry, provisioner, executor, cancellationRegistry),
     },
   ],
   exports: [

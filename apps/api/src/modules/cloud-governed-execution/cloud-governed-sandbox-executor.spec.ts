@@ -334,6 +334,51 @@ describe('CloudGovernedSandboxExecutor (OB-002D ephemeral boundary)', () => {
     });
   });
 
+  describe('live cancellation', () => {
+    it('CRITICAL: cancellation terminates the cloud process group and removes the ephemeral session', async () => {
+      const controller = new AbortController();
+      const resultPromise = executor().execute(
+        makeRequest(
+          {
+            args: agentArgs('--sleep'),
+            cancellationSignal: controller.signal,
+            sandboxConfig: {
+              technology: 'none',
+              timeoutMs: 30_000,
+              maxMemoryBytes: 0,
+              maxCpuTimeMs: 0,
+              maxWorktreeBytes: 0,
+            },
+          },
+          workspaceRoot,
+        ),
+      );
+
+      setTimeout(() => controller.abort(), 150).unref();
+      const result = await resultPromise;
+
+      expect(result.cancelled).toBe(true);
+      expect(result.timedOut).toBe(false);
+      const pid = Number(result.stdout.match(/self:(\d+)/)?.[1]);
+      expect(Number.isFinite(pid)).toBe(true);
+      await pidEventuallyDead(pid);
+      expect(sessionTreeFreeOfFiles(join(workspaceRoot, SESSION_ROOT))).toBe(true);
+    });
+
+    it('CRITICAL: pre-cancelled cloud work never materializes a session', async () => {
+      const controller = new AbortController();
+      controller.abort();
+
+      const result = await executor().execute(
+        makeRequest({ cancellationSignal: controller.signal }, workspaceRoot),
+      );
+
+      expect(result.cancelled).toBe(true);
+      expect(result.timedOut).toBe(false);
+      expect(sessionTreeFreeOfFiles(join(workspaceRoot, SESSION_ROOT))).toBe(true);
+    });
+  });
+
   describe('failure paths (review §9)', () => {
     it('CRITICAL: timeout kills the whole agent tree and removes the session', async () => {
       const result = await executor().execute(

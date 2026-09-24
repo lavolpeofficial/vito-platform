@@ -297,6 +297,22 @@ describe('HeadlessLocalAgentAdapter', () => {
     expect(result.completedAt).toBeInstanceOf(Date);
   });
 
+  it('maps explicit worker cancellation to CANCELLED without retry', async () => {
+    const workerService = makeMockWorkerService();
+    (workerService.executeSandboxed as jest.Mock).mockResolvedValue(
+      makeWorkerResult({ cancelled: true, exitCode: null }),
+    );
+
+    const result = await new HeadlessLocalAgentAdapter(workerService).execute(
+      { governedInputPayload: {} },
+      makeContext(),
+    );
+
+    expect(result.status).toBe(AgentExecutionStatus.CANCELLED);
+    expect(result.error?.code).toBe('LOCAL_AGENT_CANCELLED');
+    expect(result.error?.retryable).toBe(false);
+  });
+
   it('maps timed out result correctly', async () => {
     const workerService = makeMockWorkerService();
     (workerService.executeSandboxed as jest.Mock).mockResolvedValue(

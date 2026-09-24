@@ -16,6 +16,7 @@ import type { GovernedSandboxConfig, TrustedExecutable } from '@vito/contracts';
 import { captureGovernedResultSettling } from './change-set-capture';
 import type { GovernedResultSettling } from './change-set-capture';
 import { ChangeSetCaptureError } from './change-set-capture';
+import { ExecutionCancellationRegistry } from '../execution-cancellation/execution-cancellation.registry';
 
 /**
  * Audit ownership note:
@@ -63,6 +64,7 @@ export interface ExecuteSandboxedResult {
   readonly durationMs: number;
   readonly timedOut: boolean;
   readonly oomKilled: boolean;
+  readonly cancelled?: boolean;
   readonly baseSha: string;
   readonly repositoryId: string;
   /** Audit-only — workspace is cleaned before this result is returned. */
@@ -80,13 +82,23 @@ export class RemoteExecutionWorkerService {
     private readonly repositoryRegistry: RepositoryRegistry,
     private readonly workspaceProvisioner: WorkspaceProvisioner,
     private readonly sandboxExecutor: SandboxExecutor,
+    private readonly cancellationRegistry: ExecutionCancellationRegistry = new ExecutionCancellationRegistry(),
   ) {}
 
   async executeSandboxed(input: ExecuteSandboxedInput): Promise<ExecuteSandboxedResult> {
     const executionId = randomUUID();
+    const cancellation = new AbortController();
+    const unregisterCancellation = this.cancellationRegistry.register({
+      organizationId: input.organizationId,
+      workflowRunId: input.workflowRunId,
+      workflowStepRunId: input.workflowStepRunId,
+      executionId,
+      cancel: () => cancellation.abort(),
+    });
     this.logger.debug(`Execution ${executionId} starting`);
 
-    await this.sandboxExecutor.validateStartup();
+    try {
+      await this.sandboxExecutor.validateStartup();
 
     const repo = this.repositoryRegistry.resolve(input.repositoryId);
     if (!repo) {
@@ -129,6 +141,7 @@ export class RemoteExecutionWorkerService {
         env: input.env,
         credentialReference: input.credentialReference,
         expectedProviderIdentity: input.expectedProviderIdentity,
+        cancellationSignal: cancellation.signal,
       };
 
       const sandboxResult = await this.sandboxExecutor.execute(sandboxRequest);
@@ -166,6 +179,7 @@ export class RemoteExecutionWorkerService {
         durationMs: sandboxResult.durationMs,
         timedOut: sandboxResult.timedOut,
         oomKilled: sandboxResult.oomKilled,
+        ...(sandboxResult.cancelled === true ? { cancelled: true } : {}),
         baseSha: workspace.baseSha,
         repositoryId: workspace.repositoryId,
         workspaceDisposition: 'CLEANED' as const,
@@ -179,6 +193,9 @@ export class RemoteExecutionWorkerService {
       });
     } finally {
       await this.workspaceProvisioner.cleanup(workspace);
+    }
+    } finally {
+      unregisterCancellation();
     }
   }
 }

@@ -82,6 +82,10 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
   }
 
   async execute(request: SandboxExecutionRequest): Promise<SandboxExecutionResult> {
+    if (request.cancellationSignal?.aborted) {
+      return cancelledResult(0);
+    }
+
     if (this.technology === 'none') {
       if (this.nodeEnv === 'production') {
         throw new SandboxStartupError(
@@ -220,6 +224,8 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
         cwd: request.workspace.worktreePath,
         env: {},
         stdio: ['pipe', 'pipe', 'pipe'],
+        // Own process group so cancellation/timeout can terminate the agent tree.
+        detached: true,
       });
 
       child.stdout.on('data', (chunk: Buffer) => capture.appendStdout(chunk));
@@ -227,18 +233,35 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
 
       let timedOut = false;
       let oomKilled = false;
+      let cancelled = false;
+      let cancellationKillTimer: NodeJS.Timeout | null = null;
+
+      const cancelExecution = () => {
+        if (cancelled) return;
+        cancelled = true;
+        killLocalProcessGroup(child.pid, 'SIGTERM', () => child.kill('SIGTERM'));
+        cancellationKillTimer = setTimeout(() => {
+          killLocalProcessGroup(child.pid, 'SIGKILL', () => { try { child.kill('SIGKILL'); } catch { /* already dead */ } });
+        }, SIGTERM_GRACE_MS);
+        cancellationKillTimer.unref();
+      };
+      const cancellationSignal = request.cancellationSignal;
+      cancellationSignal?.addEventListener('abort', cancelExecution, { once: true });
+      if (cancellationSignal?.aborted) cancelExecution();
 
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill('SIGTERM');
+        killLocalProcessGroup(child.pid, 'SIGTERM', () => child.kill('SIGTERM'));
         setTimeout(() => {
-          try { child.kill('SIGKILL'); } catch { /* already dead */ }
+          killLocalProcessGroup(child.pid, 'SIGKILL', () => { try { child.kill('SIGKILL'); } catch { /* already dead */ } });
         }, SIGTERM_GRACE_MS).unref();
       }, timeoutMs);
       timer.unref();
 
       child.on('error', () => {
         clearTimeout(timer);
+        if (cancellationKillTimer) clearTimeout(cancellationKillTimer);
+        cancellationSignal?.removeEventListener('abort', cancelExecution);
         resolve({
           exitCode: null,
           stdout: capture.getStdout(),
@@ -246,12 +269,15 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
           durationMs: Date.now() - startedAt,
           timedOut,
           oomKilled,
+          ...(cancelled ? { cancelled: true } : {}),
           sandboxLog: 'bwrap process error',
         });
       });
 
       child.on('close', (code) => {
         clearTimeout(timer);
+        if (cancellationKillTimer) clearTimeout(cancellationKillTimer);
+        cancellationSignal?.removeEventListener('abort', cancelExecution);
         resolve({
           exitCode: code,
           stdout: capture.getStdout(),
@@ -259,6 +285,7 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
           durationMs: Date.now() - startedAt,
           timedOut,
           oomKilled,
+          ...(cancelled ? { cancelled: true } : {}),
         });
       });
 
@@ -285,24 +312,43 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
         cwd: request.workspace.worktreePath,
         env: processEnv,
         stdio: ['pipe', 'pipe', 'pipe'],
+        // Development-only direct mode still gets process-group cancellation.
+        detached: true,
       });
 
       child.stdout.on('data', (chunk: Buffer) => capture.appendStdout(chunk));
       child.stderr.on('data', (chunk: Buffer) => capture.appendStderr(chunk));
 
       let timedOut = false;
+      let cancelled = false;
+      let cancellationKillTimer: NodeJS.Timeout | null = null;
+
+      const cancelExecution = () => {
+        if (cancelled) return;
+        cancelled = true;
+        killLocalProcessGroup(child.pid, 'SIGTERM', () => child.kill('SIGTERM'));
+        cancellationKillTimer = setTimeout(() => {
+          killLocalProcessGroup(child.pid, 'SIGKILL', () => { try { child.kill('SIGKILL'); } catch { /* already dead */ } });
+        }, SIGTERM_GRACE_MS);
+        cancellationKillTimer.unref();
+      };
+      const cancellationSignal = request.cancellationSignal;
+      cancellationSignal?.addEventListener('abort', cancelExecution, { once: true });
+      if (cancellationSignal?.aborted) cancelExecution();
 
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill('SIGTERM');
+        killLocalProcessGroup(child.pid, 'SIGTERM', () => child.kill('SIGTERM'));
         setTimeout(() => {
-          try { child.kill('SIGKILL'); } catch { /* already dead */ }
+          killLocalProcessGroup(child.pid, 'SIGKILL', () => { try { child.kill('SIGKILL'); } catch { /* already dead */ } });
         }, SIGTERM_GRACE_MS).unref();
       }, timeoutMs);
       timer.unref();
 
       child.on('error', () => {
         clearTimeout(timer);
+        if (cancellationKillTimer) clearTimeout(cancellationKillTimer);
+        cancellationSignal?.removeEventListener('abort', cancelExecution);
         resolve({
           exitCode: null,
           stdout: capture.getStdout(),
@@ -310,12 +356,15 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
           durationMs: Date.now() - startedAt,
           timedOut,
           oomKilled: false,
+          ...(cancelled ? { cancelled: true } : {}),
           sandboxLog: 'unsandboxed process error',
         });
       });
 
       child.on('close', (code) => {
         clearTimeout(timer);
+        if (cancellationKillTimer) clearTimeout(cancellationKillTimer);
+        cancellationSignal?.removeEventListener('abort', cancelExecution);
         resolve({
           exitCode: code,
           stdout: capture.getStdout(),
@@ -323,6 +372,7 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
           durationMs: Date.now() - startedAt,
           timedOut,
           oomKilled: false,
+          ...(cancelled ? { cancelled: true } : {}),
         });
       });
 
@@ -333,6 +383,40 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
       }
     });
   }
+}
+
+function killLocalProcessGroup(
+  pid: number | undefined,
+  signal: NodeJS.Signals,
+  fallback: () => void,
+): void {
+  if (typeof pid === 'number' && pid > 0) {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+      // Fall through to the child handle if the process group is already gone
+      // or group signalling is unavailable on this platform.
+    }
+  }
+  try {
+    fallback();
+  } catch {
+    // Best effort: the process may already be terminal.
+  }
+}
+
+function cancelledResult(durationMs: number): SandboxExecutionResult {
+  return {
+    exitCode: null,
+    stdout: '',
+    stderr: '',
+    durationMs,
+    timedOut: false,
+    oomKilled: false,
+    cancelled: true,
+    sandboxLog: 'execution cancelled before spawn',
+  };
 }
 
 function mkdirSafe(path: string): void {

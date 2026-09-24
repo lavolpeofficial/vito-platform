@@ -20,7 +20,7 @@ const NOTICE_COPY: Readonly<Record<string, string>> = {
   RELEASE_APPROVED: 'Human Release wurde ausdrücklich freigegeben. Der Workflow steht jetzt bei RELEASE_EXECUTION; die Release-Ausführung wurde nicht automatisch gestartet.',
   BUILD_APPROVED: 'CODE_BUILD wurde für die angegebene Feature-Branch menschlich freigegeben. Die Freigabe ist einmalig und wird erst unmittelbar vor Provider-Ausführung konsumiert.',
   BUILD_APPROVAL_REVOKED: 'CODE_BUILD-Freigabe wurde widerrufen. Eine Build-Ausführung ist damit wieder blockiert.',
-  CANCELLED: 'Workflow Stop ausgeführt. Der Run und alle noch aktiven Steps wurden abgebrochen; es wird kein weiterer Workflow-Step gestartet. Eine bereits laufende Provider-Ausführung bleibt bis zu ihrem eigenen Terminalpfad bzw. Timeout separat gebunden.',
+  CANCELLED: 'Emergency Stop ausgeführt. Der Workflow ist terminal abgebrochen; aktive Provider-Ausführungen werden über die Runtime-Cancellation signalisiert und es werden keine Folgeschritte gestartet.',
 };
 
 export default async function WorkflowsPage({ searchParams }: Readonly<{ searchParams: PageSearchParams }>) {
@@ -122,7 +122,7 @@ function ActionPanel({
     {isReleaseApproval ? <div className="workflow-reason"><strong>Explizite Human-Freigabe:</strong> Dieser Klick bestätigt nur den HUMAN_RELEASE_GATE und setzt RELEASE_EXECUTION bereit. Er startet keine Release-Ausführung.</div> : null}
     {isCodeBuildStep ? <CodeBuildApprovalPanel snapshot={snapshot} status={buildApprovalStatus} workflowStepRunId={currentStep?.id ?? null} /> : null}
     {actionable ? <form action={workflowAction}><input type="hidden" name="workflowRunId" value={snapshot.workflowRunId} /><input type="hidden" name="action" value={snapshot.nextAction} /><button className="primary-button" type="submit">{labels[snapshot.nextAction]}</button></form> : <div className="workflow-governance-stop"><strong>{isCodeBuildStep && !buildReady ? 'CODE_BUILD wartet auf gültige Freigabe' : labels[snapshot.nextAction] ?? snapshot.nextAction}</strong><p>{isCodeBuildStep && !buildReady ? 'Keine Build-Ausführung wird angeboten, bis genau eine gültige Human-Freigabe und genau eine vertrauenswürdige Bridge-Identität vorhanden sind.' : 'Keine mutierende Aktion wird angeboten. Andere Human Reviews bleiben harte Governance-Grenzen.'}</p></div>}
-    {canCancel ? <form action={workflowAction} className="workflow-emergency-stop"><input type="hidden" name="workflowRunId" value={snapshot.workflowRunId} /><input type="hidden" name="action" value="CANCEL_RUN" /><label><input type="checkbox" name="confirmCancel" value="YES" required /> Ich bestätige den Abbruch dieses Runs.</label><button type="submit">Workflow Stop · Run abbrechen</button><small>Bricht den Workflowzustand und aktive Steps ab und verhindert Folgeschritte. Dies ist kein externer Prozess-Kill einer bereits laufenden Provider-Ausführung.</small></form> : null}
+    {canCancel ? <form action={workflowAction} className="workflow-emergency-stop"><input type="hidden" name="workflowRunId" value={snapshot.workflowRunId} /><input type="hidden" name="action" value="CANCEL_RUN" /><label><input type="checkbox" name="confirmCancel" value="YES" required /> Ich bestätige den Abbruch dieses Runs.</label><button type="submit">Emergency Stop · Workflow + Ausführung stoppen</button><small>Setzt den Workflow terminal auf CANCELLED und signalisiert aktive lokale oder Cloud-Ausführungen mit SIGTERM → Grace → SIGKILL.</small></form> : null}
   </div>;
 }
 

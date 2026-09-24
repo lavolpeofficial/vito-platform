@@ -264,6 +264,29 @@ function mapWorkerResult(
     },
   };
 
+  if (result.cancelled === true) {
+    return {
+      status: AgentExecutionStatus.CANCELLED,
+      providerExecutionMetadata: {
+        ...baseMetadata,
+        providerIdentityPostcondition: {
+          enforced: false,
+          passed: false,
+          code: 'EXECUTION_CANCELLED',
+          observedProviderId: result.observedProviderIdentity?.providerId ?? null,
+          observedModelId: result.observedProviderIdentity?.modelId ?? null,
+        },
+      },
+      usageMetadata: { durationMs: result.durationMs },
+      error: {
+        code: 'CLOUD_AGENT_CANCELLED',
+        message: 'Cloud-governed agent was cancelled by an explicit workflow stop',
+        retryable: false,
+      },
+      completedAt: new Date(),
+    };
+  }
+
   if (result.providerIdentityError) {
     return {
       status: AgentExecutionStatus.FAILED,

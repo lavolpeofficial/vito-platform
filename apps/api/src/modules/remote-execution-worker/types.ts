@@ -41,6 +41,11 @@ export interface SandboxExecutionRequest {
   readonly sandboxConfig: GovernedSandboxConfig;
   readonly env?: ReadonlyMap<string, string>;
   /**
+   * Server-owned cancellation signal. It is created and registered by the
+   * RemoteExecutionWorkerService and is never caller-controlled.
+   */
+  readonly cancellationSignal?: AbortSignal;
+  /**
    * Server-owned opaque credential reference (e.g. a cloud auth.json key).
    * NEVER a credential value. Only the cloud-governed boundary resolves this
    * reference into an ephemeral session artifact; everything else ignores it.
@@ -83,6 +88,7 @@ export interface SandboxExecutionResult {
   readonly durationMs: number;
   readonly timedOut: boolean;
   readonly oomKilled: boolean;
+  readonly cancelled?: boolean;
   readonly sandboxLog?: string;
   readonly observedProviderIdentity?: ObservedProviderIdentity;
   readonly providerIdentityError?: ProviderIdentityError;
