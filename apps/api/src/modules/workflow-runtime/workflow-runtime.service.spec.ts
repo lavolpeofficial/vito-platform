@@ -100,9 +100,20 @@ function buildService(opts: {
   const auditService: any = {
     record: jest.fn().mockResolvedValue(undefined),
   };
+  const executionCancellations: any = {
+    cancelWorkflow: jest.fn().mockReturnValue({
+      organizationId: ORG_A,
+      workflowRunId: createdRun.id,
+      matchedExecutionCount: 1,
+      signalAttemptCount: 1,
+      signalFailureCount: 0,
+      signalledExecutionIds: ['exec-live-1'],
+      deferredCancellationArmed: true,
+    }),
+  };
 
-  const service = new WorkflowRuntimeService(prisma, auditService);
-  return { service, prisma, auditService, tx };
+  const service = new WorkflowRuntimeService(prisma, auditService, executionCancellations);
+  return { service, prisma, auditService, executionCancellations, tx };
 }
 
 // ===========================================================================
@@ -527,7 +538,7 @@ describe('WorkflowRuntimeService', () => {
   describe('emergency stop', () => {
     it('cancels an active run and its non-terminal steps without triggering execution', async () => {
       const run = makeRun({ status: 'RUNNING', currentStepType: 'BUILD' });
-      const { service, tx, auditService } = buildService({ findFirstRun: run });
+      const { service, tx, auditService, executionCancellations } = buildService({ findFirstRun: run });
       const cancelled = { ...run, status: 'CANCELLED', currentStepType: null, completedAt: new Date() };
       tx.workflowRun.updateMany.mockResolvedValue({ count: 1 });
       tx.workflowRun.findFirst.mockResolvedValue(cancelled);
@@ -551,8 +562,42 @@ describe('WorkflowRuntimeService', () => {
         actorId: 'user-1',
         action: 'WORKFLOW_RUN_CANCELLED',
       }), tx);
+      expect(executionCancellations.cancelWorkflow).toHaveBeenCalledWith(ORG_A, run.id);
+      expect(auditService.record).toHaveBeenCalledWith(expect.objectContaining({
+        actorType: 'USER',
+        actorId: 'user-1',
+        action: 'WORKFLOW_EXECUTION_CANCELLATION_REQUESTED',
+        metadata: expect.objectContaining({
+          matchedExecutionCount: 1,
+          signalAttemptCount: 1,
+          signalFailureCount: 0,
+          deferredCancellationArmed: true,
+        }),
+      }));
       expect(result.executionTriggered).toBe(false);
+      expect(result.executionCancellationRequested).toBe(true);
+      expect(result.executionCancellation).toEqual(expect.objectContaining({
+        signalledExecutionIds: ['exec-live-1'],
+        deferredCancellationArmed: true,
+      }));
       expect(result.authority).toBe('HUMAN_EXPLICIT');
+    });
+
+    it('re-arms live cancellation idempotently when the workflow is already CANCELLED', async () => {
+      const run = makeRun({ status: 'CANCELLED', currentStepType: null });
+      const { service, executionCancellations, tx } = buildService({ findFirstRun: run });
+
+      const result = await service.cancelRun({
+        organizationId: ORG_A,
+        workflowRunId: run.id,
+        cancelledByUserId: 'user-1',
+        isMachineIdentity: false,
+      });
+
+      expect(executionCancellations.cancelWorkflow).toHaveBeenCalledWith(ORG_A, run.id);
+      expect(tx.workflowRun.updateMany).not.toHaveBeenCalled();
+      expect(result.idempotent).toBe(true);
+      expect(result.executionCancellationRequested).toBe(true);
     });
 
     it('rejects machine identities before any mutation', async () => {
