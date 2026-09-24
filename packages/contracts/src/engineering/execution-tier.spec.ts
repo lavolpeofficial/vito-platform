@@ -12,6 +12,8 @@
 import { ProviderType } from './provider-registry.js';
 import {
   ExecutionTier,
+  CloudCredentialMode,
+  resolveCloudCredentialMode,
   resolveExecutionTier,
   toValidatedCloudExecutionProfile,
   isCloudGovernedProviderType,
@@ -164,6 +166,50 @@ describe('toValidatedCloudExecutionProfile', () => {
     expect(toValidatedCloudExecutionProfile({ ...base, profileId: undefined })).toBeNull();
     expect(toValidatedCloudExecutionProfile({ ...base, profileId: '' })).toBeNull();
     expect(toValidatedCloudExecutionProfile({ ...base, profileId: 'bad profile id' })).toBeNull();
+  });
+
+  it('accepts an explicit credential-free profile only when credentialRef is absent', () => {
+    const profile = toValidatedCloudExecutionProfile({
+      profileId: 'public-plan',
+      providerCode: 'cloud.opencode.public-plan',
+      credentialMode: CloudCredentialMode.NONE,
+      trustedLauncherAlias: 'opencode-public-plan',
+      expectedProviderId: 'opencode',
+      allowedModelIds: ['big-pickle'],
+      maxDurationMs: 600_000,
+      maxParallelism: 1,
+      enabled: true,
+    });
+    expect(profile?.credentialMode).toBe(CloudCredentialMode.NONE);
+    expect(profile?.credentialRef).toBeUndefined();
+    expect(profile && resolveCloudCredentialMode(profile)).toBe(CloudCredentialMode.NONE);
+
+    expect(toValidatedCloudExecutionProfile({
+      profileId: 'public-plan',
+      providerCode: 'cloud.opencode.public-plan',
+      credentialMode: CloudCredentialMode.NONE,
+      credentialRef: 'must-not-exist',
+      trustedLauncherAlias: 'opencode-public-plan',
+      expectedProviderId: 'opencode',
+      maxDurationMs: 600_000,
+      maxParallelism: 1,
+      enabled: true,
+    })).toBeNull();
+  });
+
+  it('keeps legacy profiles credential-reference based and rejects invalid modes', () => {
+    expect(resolveCloudCredentialMode(makeProfile())).toBe(CloudCredentialMode.REFERENCE);
+    const raw = {
+      profileId: 'p',
+      providerCode: 'cloud.example',
+      trustedLauncherAlias: 'opencode',
+      expectedProviderId: 'openai',
+      maxDurationMs: 600_000,
+      maxParallelism: 1,
+      enabled: true,
+    };
+    expect(toValidatedCloudExecutionProfile(raw)).toBeNull();
+    expect(toValidatedCloudExecutionProfile({ ...raw, credentialMode: 'WHATEVER' })).toBeNull();
   });
 
   it('rejects a credentialRef that is not opaque-alphanumeric', () => {
