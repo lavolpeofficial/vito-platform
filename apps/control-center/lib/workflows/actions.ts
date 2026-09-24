@@ -4,14 +4,15 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createAuthenticatedVitoApiClient } from '@/lib/api/server';
 import { VitoApiError } from '@/lib/api/error';
-import { parseHumanReleaseApprovalResult, parseMutationResult, type WorkflowNextAction } from './contracts';
+import { parseHumanReleaseApprovalResult, parseMutationResult, type WorkflowControlAction } from './contracts';
 
 const WORKFLOWS_PATH = '/workflows';
 
 export async function workflowAction(formData: FormData): Promise<void> {
   const workflowRunId = field(formData, 'workflowRunId');
-  const action = field(formData, 'action') as WorkflowNextAction | null;
+  const action = field(formData, 'action') as WorkflowControlAction | null;
   if (!workflowRunId || !action) redirectWorkflow(null, 'INVALID_REQUEST');
+  if (action === 'CANCEL_RUN' && field(formData, 'confirmCancel') !== 'YES') redirectWorkflow(workflowRunId, 'CANCEL_CONFIRMATION_REQUIRED');
 
   const path = mutationPath(workflowRunId, action);
   if (!path) redirectWorkflow(workflowRunId, 'GOVERNANCE_BOUNDARY');
@@ -30,7 +31,8 @@ export async function workflowAction(formData: FormData): Promise<void> {
 
   revalidatePath(WORKFLOWS_PATH);
   const notice =
-    action === 'START_RUN' ? 'STARTED'
+    action === 'CANCEL_RUN' ? 'CANCELLED'
+      : action === 'START_RUN' ? 'STARTED'
       : action === 'RESUME_RUN' ? 'RESUMED'
         : action === 'APPROVE_HUMAN_RELEASE' ? 'RELEASE_APPROVED'
           : action === 'COORDINATE_AL4_REVIEWS' ? 'AL4_REVIEWS_COORDINATED'
@@ -39,8 +41,9 @@ export async function workflowAction(formData: FormData): Promise<void> {
   redirectWorkflow(workflowRunId, notice, false);
 }
 
-function mutationPath(workflowRunId: string, action: WorkflowNextAction): `/${string}` | null {
+function mutationPath(workflowRunId: string, action: WorkflowControlAction): `/${string}` | null {
   const id = encodeURIComponent(workflowRunId);
+  if (action === 'CANCEL_RUN') return `/workflow-runtime/${id}/cancel`;
   if (action === 'START_RUN') return `/workflow-runtime/${id}/start`;
   if (action === 'RESUME_RUN') return `/workflow-runtime/${id}/resume`;
   if (action === 'EXECUTE_CURRENT_STEP') return `/workflow-agent-runtime/${id}/execute-current`;
