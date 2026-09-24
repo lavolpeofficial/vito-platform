@@ -117,7 +117,8 @@ export class WorkflowObserverService {
     switch (status) {
       case 'CREATED': return 'NOT_STARTED';
       case 'RUNNING': return 'ACTIVE';
-      case 'BLOCKED': return 'BLOCKED';
+      case 'BLOCKED':
+      case 'WAITING_FOR_HUMAN': return 'BLOCKED';
       case 'COMPLETED': return 'TERMINAL_COMPLETE';
       case 'FAILED':
       case 'CANCELLED': return 'TERMINAL_FAILURE';
@@ -133,6 +134,7 @@ export class WorkflowObserverService {
     workforceReady: boolean | null,
   ): WorkflowNextAction {
     if (status === 'CREATED') return 'START_RUN';
+    if (status === 'WAITING_FOR_HUMAN') return 'HUMAN_REVIEW_REQUIRED';
     if (status === 'RUNNING' && currentStepType === 'HUMAN_RELEASE_GATE') return 'APPROVE_HUMAN_RELEASE';
     if (status === 'RUNNING' && currentStepType === 'RED_TEAM') {
       const normalized = this.normalizeAssuranceLevel(assuranceLevel);
