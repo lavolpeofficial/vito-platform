@@ -28,5 +28,3 @@ const [tuple] = tuples;
 const [provider, modelId] = tuple.split('\u0000');
 if (!providerPattern.test(provider) || !modelPattern.test(modelId)) process.exit(53);
 process.stderr.write(`message=stream agent=build providerID=${provider} modelID=${modelId}\n`);
-
-[executed on device: ubuntu-4gb-hel1-1 (fe3754ea-5627-4a36-b351-e958ef584b11)]
