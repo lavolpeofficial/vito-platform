@@ -128,7 +128,7 @@ describe('WorkflowObserverService', () => {
       stepRuns: [],
     });
 
-    const result = await service().observe('org-1', 'run-human');
+    const result = await service.observe('org-1', 'run-human');
 
     expect(result.boundary).toBe('BLOCKED');
     expect(result.nextAction).toBe('HUMAN_REVIEW_REQUIRED');
