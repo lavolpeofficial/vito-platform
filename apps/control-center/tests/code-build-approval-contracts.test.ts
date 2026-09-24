@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseCodeBuildApprovalStatus } from '../lib/workflows/code-build-approval-contracts.ts';
+import { isCodeBuildExecutionReady, parseCodeBuildApprovalStatus } from '../lib/workflows/code-build-approval-contracts.ts';
 
 const VALID = {
   missionId: 'run-1',
@@ -34,4 +34,24 @@ test('rejects ungoverned repositories and invalid branches', () => {
     ...VALID,
     approvals: [{ ...VALID.approvals[0], branch: 'main' }],
   }), null);
+});
+
+test('CODE_BUILD UI readiness fails closed without the persisted READY step', () => {
+  const status = parseCodeBuildApprovalStatus(VALID);
+  assert.ok(status);
+  assert.equal(isCodeBuildExecutionReady({
+    currentStepType: 'BUILD',
+    readyStepId: null,
+    status,
+  }), false);
+  assert.equal(isCodeBuildExecutionReady({
+    currentStepType: 'BUILD',
+    readyStepId: 'step-1',
+    status,
+  }), true);
+  assert.equal(isCodeBuildExecutionReady({
+    currentStepType: 'TEST',
+    readyStepId: null,
+    status: null,
+  }), true);
 });
