@@ -1,6 +1,7 @@
 import {
   AgentExecutionStatus,
   ExecutionAction,
+  ExecutionTier,
   ProviderType,
   type GovernedAdapterRequest,
   type GovernedAdapterResult,
@@ -10,6 +11,12 @@ import {
 } from '@vito/contracts';
 import type { RemoteExecutionWorkerService, ExecuteSandboxedResult } from '../../remote-execution-worker/remote-execution-worker.service';
 import { WorkerExecutionError } from '../../remote-execution-worker/remote-execution-worker.service';
+import {
+  CODE_BUILD_BASE_REF,
+  CODE_BUILD_REPOSITORY,
+  codeBuildTargetMatchesContext,
+  readCodeBuildExecutionTarget,
+} from './code-build-execution-target';
 
 const MAX_ARGS = 64;
 const MAX_ARG_LENGTH = 4096;
@@ -62,6 +69,20 @@ export class HeadlessLocalAgentAdapter implements GovernedProviderAdapter {
     const payload = parsePayload(request.governedInputPayload);
     if (!payload.ok) return failed(payload.code, payload.message);
 
+    const codeBuildTarget = context.capabilityCode === 'CODE_BUILD'
+      ? readCodeBuildExecutionTarget(request.governedInputPayload?.codeBuildExecutionTarget)
+      : null;
+    if (
+      context.capabilityCode === 'CODE_BUILD' &&
+      (!codeBuildTarget ||
+        !codeBuildTargetMatchesContext(codeBuildTarget, context, ExecutionTier.LOCAL_ISOLATED))
+    ) {
+      return failed(
+        'CODE_BUILD_EXECUTION_TARGET_MISMATCH',
+        'CODE_BUILD execution target is missing or does not match the governed local context',
+      );
+    }
+
     const sandboxConfig: GovernedSandboxConfig = {
       technology: 'bubblewrap',
       timeoutMs: context.timeoutMs,
@@ -75,8 +96,8 @@ export class HeadlessLocalAgentAdapter implements GovernedProviderAdapter {
         organizationId: context.organizationId,
         workflowRunId: context.workflowRunId,
         workflowStepRunId: context.workflowStepRunId,
-        repositoryId: 'lavolpeofficial/vito-platform',
-        baseRef: 'main',
+        repositoryId: codeBuildTarget?.repository ?? CODE_BUILD_REPOSITORY,
+        baseRef: codeBuildTarget?.baseRef ?? CODE_BUILD_BASE_REF,
         executable: trustedExecutable,
         args: payload.value.args,
         prompt: payload.value.prompt,
