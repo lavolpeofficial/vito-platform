@@ -81,6 +81,26 @@ describe('ExecutionCancellationRegistry', () => {
     expect(sameTenantOtherRun).not.toHaveBeenCalled();
   });
 
+  it('bounds reported execution ids without truncating cancellation counts', () => {
+    const registry = new ExecutionCancellationRegistry();
+    for (let index = 0; index < 101; index += 1) {
+      registry.register({
+        organizationId: 'org-1',
+        workflowRunId: 'run-many',
+        workflowStepRunId: `step-${index}`,
+        executionId: `exec-${index}`,
+        cancel: jest.fn(),
+      });
+    }
+
+    const result = registry.cancelWorkflow('org-1', 'run-many');
+
+    expect(result.matchedExecutionCount).toBe(101);
+    expect(result.signalAttemptCount).toBe(101);
+    expect(result.signalFailureCount).toBe(0);
+    expect(result.signalledExecutionIds).toHaveLength(100);
+  });
+
   it('unregisters terminal executions and reports callback failures without throwing', () => {
     const registry = new ExecutionCancellationRegistry();
     const unregister = registry.register({
