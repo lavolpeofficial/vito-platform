@@ -137,6 +137,14 @@ describePg('CODE_BUILD approval PostgreSQL security gate', () => {
       target,
     )).rejects.toBeInstanceOf(ForbiddenException);
 
+    await expect(service.consumeForDispatch(
+      t.organizationId,
+      t.machine.id,
+      stored.id,
+      scope,
+      { ...target, workflowStepRunId: '' } as never,
+    )).rejects.toBeInstanceOf(ForbiddenException);
+
     const consumed = await service.consumeForDispatch(
       t.organizationId,
       t.machine.id,
