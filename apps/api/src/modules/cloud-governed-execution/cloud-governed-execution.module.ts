@@ -15,6 +15,8 @@ import { parseCloudExecutionProfilesFromEnv } from './cloud-execution-profile.re
 import { CloudCredentialResolver } from './cloud-credential.resolver';
 import { parseCloudCredentialsFromEnv } from './cloud-credential.resolver';
 import { CloudGovernedSandboxExecutor } from './cloud-governed-sandbox-executor';
+import { ExecutionCancellationModule } from '../execution-cancellation/execution-cancellation.module';
+import { ExecutionCancellationRegistry } from '../execution-cancellation/execution-cancellation.registry';
 
 export const CLOUD_EXECUTION_WORKER = 'CLOUD_EXECUTION_WORKER';
 
@@ -29,7 +31,7 @@ export const CLOUD_EXECUTION_WORKER = 'CLOUD_EXECUTION_WORKER';
  * used by the LOCAL_ISOLATED tier.
  */
 @Module({
-  imports: [RemoteExecutionWorkerModule, GovernedWorkspaceConfigModule, PrismaModule],
+  imports: [RemoteExecutionWorkerModule, GovernedWorkspaceConfigModule, PrismaModule, ExecutionCancellationModule],
   providers: [
     {
       provide: CloudExecutionProfileRegistry,
@@ -56,13 +58,14 @@ export const CLOUD_EXECUTION_WORKER = 'CLOUD_EXECUTION_WORKER';
     },
     {
       provide: CLOUD_EXECUTION_WORKER,
-      inject: [REPOSITORY_REGISTRY, WORKSPACE_PROVISIONER, CloudGovernedSandboxExecutor],
+      inject: [REPOSITORY_REGISTRY, WORKSPACE_PROVISIONER, CloudGovernedSandboxExecutor, ExecutionCancellationRegistry],
       useFactory: (
         registry: RepositoryRegistry,
         provisioner: WorkspaceProvisioner,
         executor: CloudGovernedSandboxExecutor,
+        cancellationRegistry: ExecutionCancellationRegistry,
       ): RemoteExecutionWorkerService =>
-        new RemoteExecutionWorkerService(registry, provisioner, executor),
+        new RemoteExecutionWorkerService(registry, provisioner, executor, cancellationRegistry),
     },
   ],
   exports: [
