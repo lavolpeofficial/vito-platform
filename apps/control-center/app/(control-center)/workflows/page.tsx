@@ -1,6 +1,7 @@
 import './workflows.css';
 import { createAuthenticatedVitoApiClient } from '@/lib/api/server';
 import { VitoApiError } from '@/lib/api/error';
+import { parseMissionContextSnapshot, type MissionContextSnapshot } from '@/lib/missions/contracts';
 import { parseOperationsSummary, type OperationsAttentionRun } from '@/lib/operations/contracts';
 import { workflowAction } from '@/lib/workflows/actions';
 import { parseWorkflowSnapshot, type WorkflowSnapshot } from '@/lib/workflows/contracts';
@@ -26,13 +27,20 @@ export default async function WorkflowsPage({ searchParams }: Readonly<{ searchP
 
   let attention: readonly OperationsAttentionRun[] = [];
   let snapshot: WorkflowSnapshot | null = null;
+  let mission: MissionContextSnapshot | null = null;
   let loadError: string | null = null;
 
   try {
     const client = await createAuthenticatedVitoApiClient();
     const operations = await client.get('/operations/summary', parseOperationsSummary);
     attention = operations.workflows.recentAttention;
-    if (requestedRun) snapshot = await client.get(`/workflow-observer/${encodeURIComponent(requestedRun)}`, parseWorkflowSnapshot);
+    if (requestedRun) {
+      const encodedRun = encodeURIComponent(requestedRun);
+      [snapshot, mission] = await Promise.all([
+        client.get(`/workflow-observer/${encodedRun}`, parseWorkflowSnapshot),
+        client.get(`/mission-context/${encodedRun}`, parseMissionContextSnapshot),
+      ]);
+    }
   } catch (caught) {
     loadError = caught instanceof VitoApiError ? caught.code : 'UNEXPECTED_ERROR';
   }
@@ -40,11 +48,12 @@ export default async function WorkflowsPage({ searchParams }: Readonly<{ searchP
   return (
     <main>
       <div className="breadcrumb"><a href="/">Control Center</a><span>/</span><span>Workflows</span></div>
-      <section className="module-heading"><div className="module-icon">WF</div><div><span className="eyebrow">Governed execution</span><h1>Workflow Cockpit</h1><p>Persistierte Runs beobachten, Step-Grenzen verstehen und ausschließlich die vom Backend freigegebene nächste Aktion auslösen.</p></div></section>
+      <section className="module-heading"><div className="module-icon">MI</div><div><span className="eyebrow">Mission · governed execution</span><h1>Mission & Workflow Cockpit</h1><p>Ziel, gemeinsamen Missionskontext und persistierte Ausführung beobachten. Mutierende Aktionen bleiben vollständig backend-gesteuert.</p></div></section>
       <div className="boundary-notice"><span className="system-dot" /><div><strong>Human gates bleiben harte Grenzen</strong><p>Das Cockpit bestätigt niemals selbstständig. Eine Release-Freigabe erscheint nur, wenn das Backend explizit APPROVE_HUMAN_RELEASE meldet, und erfordert einen bewussten Klick eines authentifizierten OWNER/ADMIN.</p></div></div>
       {notice && NOTICE_COPY[notice] ? <div className="workflow-banner workflow-banner-success">{NOTICE_COPY[notice]}</div> : null}
       {error ? <div className="workflow-banner workflow-banner-error">Aktion abgelehnt oder fehlgeschlagen: {error}</div> : null}
       {loadError ? <div className="workflow-banner workflow-banner-error">Workflow-Daten konnten nicht geladen werden: {loadError}</div> : null}
+      {mission ? <MissionContextView mission={mission} /> : null}
       <section className="workflow-grid">
         <div className="workflow-panel"><span className="eyebrow">01 · Select</span><h2>Run öffnen</h2><form method="get" className="workflow-search"><input name="run" defaultValue={requestedRun} maxLength={512} placeholder="Workflow Run ID" required /><button type="submit">Beobachten</button></form><p className="workflow-muted">Alternativ einen Run aus der aktuellen Attention-Liste auswählen.</p><div className="workflow-attention-list">{attention.length === 0 ? <p className="workflow-muted">Keine Attention-Runs gemeldet.</p> : attention.map((run) => <AttentionRun key={run.id} run={run} />)}</div></div>
         <div className="workflow-panel"><span className="eyebrow">02 · Governed action</span><h2>Nächste Aktion</h2>{snapshot ? <ActionPanel snapshot={snapshot} /> : <p className="workflow-muted">Run auswählen, um die serverseitig klassifizierte nächste Aktion zu sehen.</p>}</div>
@@ -52,6 +61,26 @@ export default async function WorkflowsPage({ searchParams }: Readonly<{ searchP
       {snapshot ? <SnapshotView snapshot={snapshot} /> : null}
     </main>
   );
+}
+
+function MissionContextView({ mission }: Readonly<{ mission: MissionContextSnapshot }>) {
+  return <section className="mission-context-panel">
+    <div className="workflow-section-head"><div><span className="eyebrow">Mission · Shared Context</span><h2>{mission.objective}</h2></div><span className="status-chip">ADVISORY CONTEXT</span></div>
+    <div className="mission-context-grid">
+      <Metric label="Mission" value={mission.missionId} />
+      <Metric label="Status" value={mission.workflow.status} />
+      <Metric label="Current step" value={mission.workflow.currentStepType ?? '—'} />
+      <Metric label="Assurance" value={mission.workflow.assuranceLevel} />
+      <Metric label="Completed steps" value={String(mission.progress.completedSteps.length)} />
+      <Metric label="Shared memory" value={String(mission.memoryRefs.length)} />
+    </div>
+    <div className="mission-context-body">
+      <div><small>Progress</small><p>{mission.progress.completedSteps.length ? mission.progress.completedSteps.join(' → ') : 'Noch kein Step abgeschlossen.'}</p></div>
+      <div><small>Governance</small><p>{mission.governance.waitingForHuman ? 'Wartet auf eine menschliche Grenze oder ist blockiert.' : 'Kein aktueller Human-Wait-State.'}</p></div>
+      <div><small>Outcome</small><p>{mission.outcome.terminal ? `Terminal: ${mission.outcome.status}` : `Offen: ${mission.outcome.status}`}{mission.outcome.blockReasonCode ? ` · Block: ${mission.outcome.blockReasonCode}` : ''}{mission.outcome.failureReasonCode ? ` · Failure: ${mission.outcome.failureReasonCode}` : ''}</p></div>
+    </div>
+    <p className="workflow-muted">Dieser Kontext hilft Agenten und Menschen bei der Orientierung. Er verleiht keine Capability, keine Provider-Auswahl und keine Freigabe.</p>
+  </section>;
 }
 
 function AttentionRun({ run }: Readonly<{ run: OperationsAttentionRun }>) { return <a className="workflow-attention" href={`/workflows?run=${encodeURIComponent(run.id)}`}><div><strong>{run.status}</strong><span>{run.currentStepType ?? 'no current step'}</span></div><small>{run.blockReasonCode ?? run.failureReasonCode ?? run.id}</small></a>; }
