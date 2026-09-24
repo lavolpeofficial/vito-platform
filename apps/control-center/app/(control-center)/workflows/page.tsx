@@ -147,7 +147,7 @@ function CodeBuildApprovalPanel({
     </form> : null}
     {status.state === 'APPROVAL_AMBIGUOUS' ? <p className="workflow-reason">Mehr als eine aktive Freigabe vorhanden. Widerrufe überzählige Freigaben; VITO bleibt bis dahin fail closed.</p> : null}
     {status.state === 'MACHINE_IDENTITY_REQUIRED' ? <p className="workflow-reason">Keine aktive vito-bridge-Maschinenidentität vorhanden. VITO bleibt fail closed.</p> : null}
-    {status.state === 'MACHINE_IDENTITY_AMIGUOUS' ? <p className="workflow-reason">Mehr als eine aktive vito-bridge-Identität vorhanden. VITO bleibt bis zur eindeutigen Zuordnung fail closed.</p> : null}
+    {status.state === 'MACHINE_IDENTITY_AMBIGUOUS' ? <p className="workflow-reason">Mehr als eine aktive vito-bridge-Identität vorhanden. VITO bleibt bis zur eindeutigen Zuordnung fail closed.</p> : null}
     {status.state === 'READY' ? <p className="workflow-muted">Freigabe und Bridge-Identität sind eindeutig. Der separate Ausführen-Button darf jetzt den serverseitig gebundenen Dispatch anstoßen.</p> : null}
   </section>;
 }
