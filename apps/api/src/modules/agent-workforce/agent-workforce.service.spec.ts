@@ -1,5 +1,5 @@
 import { ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
-import { AgentExecutionStatus, ProviderType } from '@vito/contracts';
+import { AgentExecutionStatus, ExecutionTier, ProviderType } from '@vito/contracts';
 import type { CloudExecutionProfile } from '@vito/contracts';
 
 import { AgentWorkforceService } from './agent-workforce.service';
@@ -69,8 +69,10 @@ describe('AgentWorkforceService', () => {
     expect(executeWorkspaceFileOperation).not.toHaveBeenCalled();
   });
 
-  it('atomically consumes scoped CODE_BUILD approval before routing and rejects a replay', async () => {
-    const consumeForDispatch = jest.fn().mockResolvedValueOnce({ id: 'approval-1' }).mockRejectedValueOnce(new ForbiddenException('already consumed'));
+  it('binds CODE_BUILD approval to the server-resolved execution target before execution and rejects replay', async () => {
+    const consumeForDispatch = jest.fn()
+      .mockResolvedValueOnce({ id: 'approval-1' })
+      .mockRejectedValueOnce(new ForbiddenException('already consumed'));
     const workforce = new AgentWorkforceService(
       { route } as any, { executeWorkspaceFileOperation } as any, { retrieve } as any,
       { resolve: resolveWorkflowIdentity } as any, { tryRecord: tryRecordExperience } as any,
@@ -79,12 +81,64 @@ describe('AgentWorkforceService', () => {
     const evidence = { approvalId: 'approval-1', machineUserId: 'machine-1', scope: {
       missionId: 'mission-1', repository: 'lavolpeofficial/vito-platform', branch: 'feat/approved', requestKey: 'request-1',
     } };
-    route.mockResolvedValue({ selectedProvider: null, routingDecisionId: 'r', decisionReason: 'none', rejectionReasons: {} });
-    await expect(workforce.dispatch({ ...input, capabilityCode: 'CODE_BUILD', codeBuildApproval: evidence })).rejects.toBeInstanceOf(ServiceUnavailableException);
-    expect(consumeForDispatch).toHaveBeenCalledWith('org-1', 'machine-1', 'approval-1', evidence.scope);
-    route.mockClear();
-    await expect(workforce.dispatch({ ...input, capabilityCode: 'CODE_BUILD', codeBuildApproval: evidence })).rejects.toBeInstanceOf(ForbiddenException);
-    expect(route).not.toHaveBeenCalled();
+    route.mockResolvedValue({
+      selectedProvider: {
+        id: 'provider-build',
+        providerCode: 'opencode-local',
+        providerType: ProviderType.LOCAL_TOOL,
+        metadata: { commandAlias: 'opencode', defaultArgs: ['run'] },
+      },
+      routingDecisionId: 'route-build',
+      decisionReason: 'selected',
+      rejectionReasons: {},
+    });
+    executeWorkspaceFileOperation.mockResolvedValue({
+      invocationId: 'inv-build',
+      status: AgentExecutionStatus.SUCCEEDED,
+    });
+
+    await expect(workforce.dispatch({
+      ...input,
+      capabilityCode: 'CODE_BUILD',
+      codeBuildApproval: evidence,
+    })).resolves.toBeDefined();
+
+    expect(consumeForDispatch).toHaveBeenCalledWith(
+      'org-1',
+      'machine-1',
+      'approval-1',
+      evidence.scope,
+      expect.objectContaining({
+        organizationId: 'org-1',
+        missionId: 'mission-1',
+        workflowRunId: 'run-1',
+        workflowStepRunId: 'step-1',
+        repository: 'lavolpeofficial/vito-platform',
+        publicationBranch: 'feat/approved',
+        providerId: 'provider-build',
+        providerCode: 'opencode-local',
+        executionTier: ExecutionTier.LOCAL_ISOLATED,
+        commandAlias: 'opencode',
+        baseRef: 'main',
+      }),
+    );
+    expect(executeWorkspaceFileOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capabilityCode: 'CODE_BUILD',
+        codeBuildExecutionTarget: expect.objectContaining({
+          providerId: 'provider-build',
+          executionTier: ExecutionTier.LOCAL_ISOLATED,
+        }),
+      }),
+    );
+
+    executeWorkspaceFileOperation.mockClear();
+    await expect(workforce.dispatch({
+      ...input,
+      capabilityCode: 'CODE_BUILD',
+      codeBuildApproval: evidence,
+    })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(route).toHaveBeenCalledTimes(2);
     expect(executeWorkspaceFileOperation).not.toHaveBeenCalled();
   });
 
