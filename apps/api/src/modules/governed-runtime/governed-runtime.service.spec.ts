@@ -9,6 +9,7 @@ import { GovernedInvocationServiceImpl } from '../governed-invocation/governed-i
 import {
   ExecutionAction,
   ExecutionProfile,
+  ExecutionTier,
   GovernedAdapterRegistry,
   ProviderCredentialRequirement,
   ProviderDeclaration,
@@ -27,6 +28,7 @@ import {
   governedOrgDirectoryName,
 } from './resolvers/governed-workspace.resolvers';
 import { WorkspaceFileToolAdapter } from './adapters/workspace-file.adapter';
+import { buildCodeBuildExecutionTarget } from './adapters/code-build-execution-target';
 import {
   GovernedRuntimeService,
   TRUSTED_RUNTIME_ORIGIN,
@@ -451,13 +453,29 @@ describe('GovernedRuntimeService (B2c internal runtime entry)', () => {
   });
 
   it('cannot execute RUN_COMMAND with a null TrustedExecutableResolver (pre-boundary throw)', async () => {
+    const workflowRunId = randomUUID();
+    const workflowStepRunId = randomUUID();
     await expect(
       service.executeWorkspaceFileOperation(
         makeTrustedInput({
           requestedAction: 'RUN_COMMAND',
           relativePath: undefined,
           content: undefined,
-          command: 'npm test',
+          command: 'npm',
+          workflowRunId,
+          workflowStepRunId,
+          codeBuildExecutionTarget: buildCodeBuildExecutionTarget({
+            organizationId: ORG_A,
+            missionId: 'trusted-executable-negative-test',
+            workflowRunId,
+            workflowStepRunId,
+            repository: 'lavolpeofficial/vito-platform',
+            publicationBranch: 'feat/trusted-executable-negative-test',
+            providerId: declaration.id,
+            providerCode: declaration.providerCode,
+            executionTier: ExecutionTier.LOCAL_ISOLATED,
+            commandAlias: 'npm',
+          }),
         }),
       ),
     ).rejects.toThrow(/EXECUTABLE_NOT_TRUSTED/);
