@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AgentWorkforceModule } from '../agent-workforce/agent-workforce.module';
+import { EngineeringReleaseModule } from '../engineering-release/engineering-release.module';
 import { LearningModule } from '../learning/learning.module';
 import { WorkflowRuntimeModule } from '../workflow-runtime/workflow-runtime.module';
 import { WorkflowVerificationModule } from '../workflow-verification/workflow-verification.module';
@@ -11,7 +12,7 @@ import { WorkflowReviewEvidenceService } from './workflow-review-evidence.servic
 import { WorkflowReviewVerdictService } from './workflow-review-verdict.service';
 
 @Module({
-  imports: [AgentWorkforceModule, WorkflowRuntimeModule, LearningModule, WorkflowVerificationModule],
+  imports: [AgentWorkforceModule, EngineeringReleaseModule, WorkflowRuntimeModule, LearningModule, WorkflowVerificationModule],
   controllers: [WorkflowAgentRuntimeController],
   providers: [
     WorkflowAgentRuntimeService,
