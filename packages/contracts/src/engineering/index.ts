@@ -8,7 +8,9 @@
 export { EngineeringCapability } from './capabilities.js';
 export {
   ExecutionTier,
+  CloudCredentialMode,
   isCloudGovernedProviderType,
+  resolveCloudCredentialMode,
   resolveExecutionTier,
   toValidatedCloudExecutionProfile,
   CLOUD_EXECUTION_PROFILE_MIN_DURATION_MS,
