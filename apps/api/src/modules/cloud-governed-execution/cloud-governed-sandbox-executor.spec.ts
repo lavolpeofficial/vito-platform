@@ -675,7 +675,7 @@ describe('CloudGovernedSandboxExecutor (OB-002D ephemeral boundary)', () => {
       });
       expect(result.providerIdentityError).toBeUndefined();
       expect(result.stderr).toContain('--print-logs');
-      expect(result.stderr).toContain('--log-level');
+      expect(result.stderr).toContain('\"--log-level\",\"info\"');
     });
 
     it('fail closed: run-shaped invocation with the embedded fallback identity', async () => {

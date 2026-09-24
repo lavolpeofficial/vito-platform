@@ -22,6 +22,12 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const apiDir = resolve(rootDir, 'apps/api');
 const contractsPkgPath = resolve(rootDir, 'packages/contracts/package.json');
 const contractsPkg = JSON.parse(readFileSync(contractsPkgPath, 'utf8'));
+const dockerfilePath = resolve(rootDir, 'Dockerfile');
+const trustedLauncherPath = resolve(rootDir, 'deploy/staging/trusted-launchers/opencode');
+const identityEvidencePath = resolve(
+  rootDir,
+  'deploy/staging/trusted-launchers/opencode-sqlite-identity-evidence.mjs',
+);
 
 function fail(message) {
   console.error(`verify-prod-resolution: FAILED — ${message}`);
@@ -36,6 +42,41 @@ if (contractsPkg.types !== 'dist/index.d.ts') {
 }
 if (typeof contractsPkg.scripts?.build !== 'string' || !contractsPkg.scripts.build.includes('tsc')) {
   fail('@vito/contracts must expose a tsc-based "build" script');
+}
+
+let dockerfile;
+let trustedLauncher;
+let identityEvidence;
+try {
+  dockerfile = readFileSync(dockerfilePath, 'utf8');
+  trustedLauncher = readFileSync(trustedLauncherPath, 'utf8');
+  identityEvidence = readFileSync(identityEvidencePath, 'utf8');
+} catch (error) {
+  fail(`trusted launcher runtime assets are missing (${error.code ?? error.message})`);
+}
+if (
+  !dockerfile.includes(
+    'COPY deploy/staging/trusted-launchers/opencode /opt/vito/trusted-launchers/opencode',
+  ) ||
+  !dockerfile.includes(
+    'COPY deploy/staging/trusted-launchers/opencode-sqlite-identity-evidence.mjs /opt/vito/trusted-launchers/opencode-sqlite-identity-evidence.mjs',
+  )
+) {
+  fail('Dockerfile must ship the reviewed OpenCode launcher and SQLite identity evidence assets');
+}
+if (
+  !trustedLauncher.includes('XDG_DATA_HOME') ||
+  !trustedLauncher.includes('opencode-sqlite-identity-evidence.mjs') ||
+  !trustedLauncher.includes('model:"openai/gpt-6-astra"')
+) {
+  fail('reviewed OpenCode launcher must pin the server-owned model and enforce SQLite identity evidence');
+}
+if (
+  !identityEvidence.includes("new DatabaseSync(dbPath, { readOnly: true })") ||
+  !identityEvidence.includes('providerID=') ||
+  !identityEvidence.includes('modelID=')
+) {
+  fail('SQLite identity evidence helper must remain read-only and emit provider/model identity evidence');
 }
 
 const requireFromApi = createRequire(resolve(apiDir, 'package.json'));

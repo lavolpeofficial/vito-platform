@@ -180,6 +180,31 @@ describe('ProviderCapability assignment', () => {
 });
 
 describe('provider default-deny provisioning', () => {
+  it('persists UNKNOWN credential requirement unless a governed internal bootstrap supplies one', async () => {
+    const { service, tx } = buildService();
+
+    await service.createProvider({
+      organizationId: ORG_A,
+      providerCode: 'UNKNOWN_CREDENTIAL_PROVIDER',
+      displayName: 'Unknown Credential Provider',
+      supportedCapabilities: [],
+    });
+    expect(tx.agentProvider.create).toHaveBeenLastCalledWith({
+      data: expect.objectContaining({ credentialRequirement: 'UNKNOWN' }),
+    });
+
+    await service.createProvider({
+      organizationId: ORG_A,
+      providerCode: 'REQUIRED_CREDENTIAL_PROVIDER',
+      displayName: 'Required Credential Provider',
+      supportedCapabilities: [],
+      credentialRequirement: 'REQUIRED',
+    });
+    expect(tx.agentProvider.create).toHaveBeenLastCalledWith({
+      data: expect.objectContaining({ credentialRequirement: 'REQUIRED' }),
+    });
+  });
+
   it('creates providers disabled unless status is explicitly supplied', async () => {
     const { service, tx } = buildService();
 

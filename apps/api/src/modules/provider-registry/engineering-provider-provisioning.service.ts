@@ -8,6 +8,7 @@ const ENGINEERING_PROVIDER = Object.freeze({
   displayName: 'OpenAI Cloud Coding',
   providerType: 'CLOUD_LLM',
   status: 'DISABLED',
+  credentialRequirement: 'REQUIRED',
   modelFamily: 'openai',
   capabilities: Object.freeze([
     EngineeringCapability.CODE_PLAN,
@@ -44,6 +45,7 @@ export class EngineeringProviderProvisioningService {
       if (
         provider.status !== ENGINEERING_PROVIDER.status ||
         provider.providerType !== ENGINEERING_PROVIDER.providerType ||
+        provider.credentialRequirement !== ENGINEERING_PROVIDER.credentialRequirement ||
         provider.modelFamily !== ENGINEERING_PROVIDER.modelFamily ||
         !exactCapabilities
       ) {
@@ -56,6 +58,7 @@ export class EngineeringProviderProvisioningService {
         displayName: ENGINEERING_PROVIDER.displayName,
         providerType: ENGINEERING_PROVIDER.providerType,
         status: ENGINEERING_PROVIDER.status,
+        credentialRequirement: ENGINEERING_PROVIDER.credentialRequirement,
         modelFamily: ENGINEERING_PROVIDER.modelFamily,
         supportedCapabilities: ENGINEERING_PROVIDER.capabilities,
         assuranceLevels: ENGINEERING_PROVIDER.assuranceLevels,

@@ -49,7 +49,7 @@ const MAX_OPENCODE_SQLITE_CREDENTIAL_BYTES = 32 * 1024 * 1024;
  * Only log levels that still emit INFO lines are accepted.
  */
 const ALLOWED_LOG_LEVELS = new Set(['trace', 'debug', 'info']);
-const DEFAULT_LOG_LEVEL = 'INFO';
+const DEFAULT_LOG_LEVEL = 'info';
 
 /**
  * CloudGovernedSandboxExecutor — the ephemeral CLOUD_GOVERNED execution
