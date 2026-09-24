@@ -675,6 +675,8 @@ model CodeBuildApproval {
   consumedByUserId       String?
   consumptionRequestKey  String?
   consumptionRequestHash String?
+  executionTargetHash    String?
+  executionTarget        Json?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
@@ -686,6 +688,7 @@ model CodeBuildApproval {
   @@unique([organizationId, approvalRequestKey])
   @@unique([organizationId, consumptionRequestKey])
   @@index([organizationId, missionId, repository, branch])
+  @@index([organizationId, executionTargetHash])
   @@index([organizationId, expiresAt])
   @@map("code_build_approvals")
 }
