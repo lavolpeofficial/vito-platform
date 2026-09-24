@@ -56,6 +56,63 @@ export class CodeBuildApprovalService {
     });
   }
 
+  async resolveForWorkflowDispatch(
+    organizationId: string,
+    missionId: string,
+    workflowStepRunId: string,
+  ) {
+    const now = new Date();
+    const approvals = await this.prisma.codeBuildApproval.findMany({
+      where: {
+        organizationId,
+        missionId,
+        repository: 'lavolpeofficial/vito-platform',
+        consumedAt: null,
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+      orderBy: { approvedAt: 'desc' },
+      take: 2,
+    });
+    if (approvals.length === 0) {
+      throw new ForbiddenException('CODE_BUILD_APPROVAL_REQUIRED');
+    }
+    if (approvals.length !== 1) {
+      throw new ConflictException('CODE_BUILD_APPROVAL_AMBIGUOUS');
+    }
+
+    const machineUsers = await this.prisma.user.findMany({
+      where: {
+        organizationId,
+        status: 'ACTIVE',
+        deletedAt: null,
+        isMachineIdentity: true,
+        machineScope: 'vito-bridge',
+      },
+      orderBy: { id: 'asc' },
+      take: 2,
+      select: { id: true },
+    });
+    if (machineUsers.length === 0) {
+      throw new ForbiddenException('CODE_BUILD_MACHINE_IDENTITY_REQUIRED');
+    }
+    if (machineUsers.length !== 1) {
+      throw new ConflictException('CODE_BUILD_MACHINE_IDENTITY_AMBIGUOUS');
+    }
+
+    const approval = approvals[0];
+    return Object.freeze({
+      approvalId: approval.id,
+      machineUserId: machineUsers[0].id,
+      scope: Object.freeze({
+        missionId,
+        repository: approval.repository,
+        branch: approval.branch,
+        requestKey: `workflow-step:${workflowStepRunId}`,
+      }),
+    });
+  }
+
   // Dispatch-only claim: unlike the public idempotent consume endpoint, a replay
   // must never authorize a second provider invocation.
   async consumeForDispatch(
