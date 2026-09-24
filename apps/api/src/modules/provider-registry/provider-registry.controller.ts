@@ -25,6 +25,12 @@ export class ProviderRegistryController {
     return this.engineeringProvisioning.provision();
   }
 
+  @Post('engineering-provider/public-plan-fallback/provision')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  provisionPublicPlanFallback() {
+    return this.engineeringProvisioning.provisionPublicPlanFallback();
+  }
+
   @Post('providers')
   @Roles(UserRole.OWNER, UserRole.ADMIN)
   createProvider(@Body() body: {
