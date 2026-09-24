@@ -224,6 +224,8 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
         cwd: request.workspace.worktreePath,
         env: {},
         stdio: ['pipe', 'pipe', 'pipe'],
+        // Own process group so cancellation/timeout can terminate the agent tree.
+        detached: true,
       });
 
       child.stdout.on('data', (chunk: Buffer) => capture.appendStdout(chunk));
@@ -237,9 +239,9 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
       const cancelExecution = () => {
         if (cancelled) return;
         cancelled = true;
-        child.kill('SIGTERM');
+        killLocalProcessGroup(child.pid, 'SIGTERM', () => child.kill('SIGTERM'));
         cancellationKillTimer = setTimeout(() => {
-          try { child.kill('SIGKILL'); } catch { /* already dead */ }
+          killLocalProcessGroup(child.pid, 'SIGKILL', () => { try { child.kill('SIGKILL'); } catch { /* already dead */ } });
         }, SIGTERM_GRACE_MS);
         cancellationKillTimer.unref();
       };
@@ -249,9 +251,9 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
 
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill('SIGTERM');
+        killLocalProcessGroup(child.pid, 'SIGTERM', () => child.kill('SIGTERM'));
         setTimeout(() => {
-          try { child.kill('SIGKILL'); } catch { /* already dead */ }
+          killLocalProcessGroup(child.pid, 'SIGKILL', () => { try { child.kill('SIGKILL'); } catch { /* already dead */ } });
         }, SIGTERM_GRACE_MS).unref();
       }, timeoutMs);
       timer.unref();
@@ -310,6 +312,8 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
         cwd: request.workspace.worktreePath,
         env: processEnv,
         stdio: ['pipe', 'pipe', 'pipe'],
+        // Development-only direct mode still gets process-group cancellation.
+        detached: true,
       });
 
       child.stdout.on('data', (chunk: Buffer) => capture.appendStdout(chunk));
@@ -322,9 +326,9 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
       const cancelExecution = () => {
         if (cancelled) return;
         cancelled = true;
-        child.kill('SIGTERM');
+        killLocalProcessGroup(child.pid, 'SIGTERM', () => child.kill('SIGTERM'));
         cancellationKillTimer = setTimeout(() => {
-          try { child.kill('SIGKILL'); } catch { /* already dead */ }
+          killLocalProcessGroup(child.pid, 'SIGKILL', () => { try { child.kill('SIGKILL'); } catch { /* already dead */ } });
         }, SIGTERM_GRACE_MS);
         cancellationKillTimer.unref();
       };
@@ -334,9 +338,9 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
 
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill('SIGTERM');
+        killLocalProcessGroup(child.pid, 'SIGTERM', () => child.kill('SIGTERM'));
         setTimeout(() => {
-          try { child.kill('SIGKILL'); } catch { /* already dead */ }
+          killLocalProcessGroup(child.pid, 'SIGKILL', () => { try { child.kill('SIGKILL'); } catch { /* already dead */ } });
         }, SIGTERM_GRACE_MS).unref();
       }, timeoutMs);
       timer.unref();
@@ -378,6 +382,27 @@ export class BubblewrapSandboxExecutor implements SandboxExecutor {
         child.stdin.end();
       }
     });
+  }
+}
+
+function killLocalProcessGroup(
+  pid: number | undefined,
+  signal: NodeJS.Signals,
+  fallback: () => void,
+): void {
+  if (typeof pid === 'number' && pid > 0) {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+      // Fall through to the child handle if the process group is already gone
+      // or group signalling is unavailable on this platform.
+    }
+  }
+  try {
+    fallback();
+  } catch {
+    // Best effort: the process may already be terminal.
   }
 }
 
