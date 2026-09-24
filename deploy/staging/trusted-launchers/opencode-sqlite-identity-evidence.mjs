@@ -1,5 +1,3 @@
-[Reading 30 lines from start (total: 30 lines, 0 remaining)]
-
 import { DatabaseSync } from 'node:sqlite';
 const dbPath = process.argv[2];
 if (!dbPath) process.exit(50);
