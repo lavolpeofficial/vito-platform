@@ -4,6 +4,10 @@ import { Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { ConsumeCodeBuildApprovalDto, CreateCodeBuildApprovalDto } from './dto/code-build-approval.dto';
+import {
+  codeBuildTargetMatchesApprovalScope,
+  type CodeBuildExecutionTarget,
+} from '../governed-runtime/adapters/code-build-execution-target';
 
 @Injectable()
 export class CodeBuildApprovalService {
@@ -53,17 +57,69 @@ export class CodeBuildApprovalService {
 
   // Dispatch-only claim: unlike the public idempotent consume endpoint, a replay
   // must never authorize a second provider invocation.
-  async consumeForDispatch(organizationId: string, machineUserId: string, id: string, dto: ConsumeCodeBuildApprovalDto) {
+  async consumeForDispatch(
+    organizationId: string,
+    machineUserId: string,
+    id: string,
+    dto: ConsumeCodeBuildApprovalDto,
+    executionTarget: CodeBuildExecutionTarget,
+  ) {
+    if (!codeBuildTargetMatchesApprovalScope(executionTarget, {
+      organizationId,
+      missionId: dto.missionId,
+      repository: dto.repository,
+      branch: dto.branch,
+    })) {
+      throw new ForbiddenException('CODE_BUILD execution target does not match approval scope.');
+    }
+    const executionTargetHash = this.hash(executionTarget);
     return this.prisma.$transaction(async (tx) => {
       const actor = await tx.user.findFirst({ where: { id: machineUserId, organizationId, status: 'ACTIVE', deletedAt: null } });
       if (!actor?.isMachineIdentity || actor.machineScope !== 'vito-bridge') throw new ForbiddenException('Active vito-bridge machine identity required.');
       const now = new Date();
       const claimed = await tx.codeBuildApproval.updateMany({
         where: { id, organizationId, missionId: dto.missionId, repository: dto.repository, branch: dto.branch, consumedAt: null, revokedAt: null, expiresAt: { gt: now } },
-        data: { consumedAt: now, consumedByUserId: machineUserId, consumptionRequestKey: dto.requestKey, consumptionRequestHash: this.hash({ approvalId: id, missionId: dto.missionId, repository: dto.repository, branch: dto.branch }) },
+        data: {
+          consumedAt: now,
+          consumedByUserId: machineUserId,
+          consumptionRequestKey: dto.requestKey,
+          consumptionRequestHash: this.hash({
+            approvalId: id,
+            missionId: dto.missionId,
+            repository: dto.repository,
+            branch: dto.branch,
+            executionTargetHash,
+          }),
+          executionTargetHash,
+          executionTarget: executionTarget as unknown as Prisma.InputJsonValue,
+        },
       });
       if (claimed.count !== 1) throw new ForbiddenException('No unconsumed CODE_BUILD approval matches this execution.');
-      await this.audit.record({ organizationId, actorType: 'USER', actorId: machineUserId, action: 'CODE_BUILD_APPROVAL_CONSUMED', entityType: 'CodeBuildApproval', entityId: id, metadata: { missionId: dto.missionId, repository: dto.repository, branch: dto.branch, requestKey: dto.requestKey } }, tx);
+      await this.audit.record({
+        organizationId,
+        actorType: 'USER',
+        actorId: machineUserId,
+        action: 'CODE_BUILD_APPROVAL_CONSUMED',
+        entityType: 'CodeBuildApproval',
+        entityId: id,
+        metadata: {
+          missionId: dto.missionId,
+          repository: dto.repository,
+          branch: dto.branch,
+          requestKey: dto.requestKey,
+          executionTargetHash,
+          executionTarget: {
+            version: executionTarget.version,
+            workflowRunId: executionTarget.workflowRunId,
+            workflowStepRunId: executionTarget.workflowStepRunId,
+            providerId: executionTarget.providerId,
+            providerCode: executionTarget.providerCode,
+            executionTier: executionTarget.executionTier,
+            commandAlias: executionTarget.commandAlias,
+            baseRef: executionTarget.baseRef,
+          },
+        },
+      }, tx);
       return tx.codeBuildApproval.findUniqueOrThrow({ where: { id } });
     });
   }
