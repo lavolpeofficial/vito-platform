@@ -1,4 +1,10 @@
-import { AgentExecutionStatus, ExecutionAction, ExecutionTier, ProviderType } from '@vito/contracts';
+import {
+  AgentExecutionStatus,
+  CloudCredentialMode,
+  ExecutionAction,
+  ExecutionTier,
+  ProviderType,
+} from '@vito/contracts';
 import type { CloudExecutionProfile, GovernedAdapterRequest, GovernedExecutionContext, TrustedExecutable } from '@vito/contracts';
 import { CloudGovernedAgentAdapter } from './cloud-governed-agent.adapter';
 import { CloudExecutionProfileRegistry } from '../../cloud-governed-execution/cloud-execution-profile.registry';
@@ -226,6 +232,52 @@ describe('CloudGovernedAgentAdapter (CLOUD_GOVERNED tier, §9 gates)', () => {
     );
     expect(result.status).toBe(AgentExecutionStatus.FAILED);
     expect((result.error as { code: string }).code).toBe('CLOUD_CREDENTIAL_UNAVAILABLE');
+    expect(worker.executeSandboxed).not.toHaveBeenCalled();
+  });
+
+  it('allows an explicit credential-free cloud profile without materializing a credential', async () => {
+    const worker = makeMockWorkerService();
+    (worker.executeSandboxed as jest.Mock).mockResolvedValue(makeWorkerResult({
+      observedProviderIdentity: { providerId: 'opencode', modelId: 'big-pickle' },
+    }));
+    const profile = makeProfile({
+      credentialMode: CloudCredentialMode.NONE,
+      credentialRef: undefined,
+      expectedProviderId: 'opencode',
+      allowedModelIds: ['big-pickle'],
+    });
+    const result = await makeAdapter(worker, makeRegistry([profile])).execute(
+      { governedInputPayload: { args: ['run'], prompt: 'plan' } },
+      makeContext({ credentialReference: undefined }),
+    );
+
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(worker.executeSandboxed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        credentialReference: undefined,
+        expectedProviderIdentity: {
+          providerId: 'opencode',
+          allowedModelIds: ['big-pickle'],
+        },
+      }),
+    );
+  });
+
+  it('fails closed if credential material appears on a credential-free profile', async () => {
+    const worker = makeMockWorkerService();
+    const profile = makeProfile({
+      credentialMode: CloudCredentialMode.NONE,
+      credentialRef: undefined,
+      expectedProviderId: 'opencode',
+      allowedModelIds: ['big-pickle'],
+    });
+    const result = await makeAdapter(worker, makeRegistry([profile])).execute(
+      { governedInputPayload: { args: ['run'] } },
+      makeContext({ credentialReference: 'unexpected:secret-ref' }),
+    );
+
+    expect(result.status).toBe(AgentExecutionStatus.FAILED);
+    expect(result.error?.code).toBe('CLOUD_CREDENTIAL_MODE_MISMATCH');
     expect(worker.executeSandboxed).not.toHaveBeenCalled();
   });
 
