@@ -122,6 +122,76 @@ describePg('CODE_BUILD approval PostgreSQL security gate', () => {
     expect(await prisma.auditEvent.count({ where: { organizationId: t.organizationId, action: 'CODE_BUILD_APPROVAL_CONSUMED', entityId: stored.id } })).toBe(1);
   });
 
+  it('resolves workflow dispatch authority only from one active human approval and one trusted bridge identity', async () => {
+    const t = await tenant();
+    const dto = approval();
+    dto.missionId = 'workflow-run-secure';
+    const stored = await service.create(t.organizationId, t.human.id, 'OWNER', dto);
+
+    const resolved = await service.resolveForWorkflowDispatch(
+      t.organizationId,
+      dto.missionId,
+      'workflow-step-secure',
+    );
+
+    expect(resolved).toEqual({
+      approvalId: stored.id,
+      machineUserId: t.machine.id,
+      scope: {
+        missionId: dto.missionId,
+        repository: 'lavolpeofficial/vito-platform',
+        branch: dto.branch,
+        requestKey: 'workflow-step:workflow-step-secure',
+      },
+    });
+  });
+
+  it('fails closed when workflow dispatch approval is missing or ambiguous', async () => {
+    const t = await tenant();
+    await expect(service.resolveForWorkflowDispatch(
+      t.organizationId,
+      'missing-mission',
+      'step-1',
+    )).rejects.toBeInstanceOf(ForbiddenException);
+
+    const first = approval();
+    first.missionId = 'ambiguous-mission';
+    const second = approval();
+    second.missionId = first.missionId;
+    await service.create(t.organizationId, t.human.id, 'OWNER', first);
+    await service.create(t.organizationId, t.human.id, 'OWNER', second);
+
+    await expect(service.resolveForWorkflowDispatch(
+      t.organizationId,
+      first.missionId,
+      'step-1',
+    )).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('fails closed when more than one active bridge identity could consume a workflow approval', async () => {
+    const t = await tenant();
+    const dto = approval();
+    dto.missionId = 'machine-ambiguity-mission';
+    await service.create(t.organizationId, t.human.id, 'OWNER', dto);
+    await prisma.user.create({
+      data: {
+        organizationId: t.organizationId,
+        email: `${randomUUID()}@example.com`,
+        firstName: 'Bridge2',
+        lastName: 'Machine',
+        role: 'MEMBER',
+        isMachineIdentity: true,
+        machineScope: 'vito-bridge',
+      },
+    });
+
+    await expect(service.resolveForWorkflowDispatch(
+      t.organizationId,
+      dto.missionId,
+      'step-1',
+    )).rejects.toBeInstanceOf(ConflictException);
+  });
+
   it('dispatch consumption is single-use, scope-bound, execution-target-bound, and rejects replay before execution', async () => {
     const t = await tenant();
     const dto = approval();
