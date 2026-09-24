@@ -1,8 +1,10 @@
 import {
   AgentExecutionStatus,
+  CloudCredentialMode,
   ExecutionAction,
   ExecutionTier,
   ProviderType,
+  resolveCloudCredentialMode,
   type GovernedAdapterRequest,
   type GovernedAdapterResult,
   type GovernedExecutionContext,
@@ -46,7 +48,7 @@ interface CloudAgentPayload {
  *  - a server-owned, ENABLED CloudExecutionProfile is bound to the provider
  *    code,
  *  - the already-trusted executable alias equals the profile's launcher alias,
- *  - an opaque credential reference is present in the governed context.
+ *  - profile credential mode and governed credential presence match exactly.
  *
  * It never performs routing or policy decisions and never uses a shell.
  * The executable path must originate from TrustedExecutableResolver.
@@ -97,10 +99,23 @@ export class CloudGovernedAgentAdapter implements GovernedProviderAdapter {
       );
     }
 
-    if (!context.credentialReference) {
+    const credentialMode = resolveCloudCredentialMode(profile);
+    if (
+      credentialMode === CloudCredentialMode.REFERENCE &&
+      !context.credentialReference
+    ) {
       return failed(
         'CLOUD_CREDENTIAL_UNAVAILABLE',
         'Cloud execution requires a server-owned credential reference',
+      );
+    }
+    if (
+      credentialMode === CloudCredentialMode.NONE &&
+      context.credentialReference
+    ) {
+      return failed(
+        'CLOUD_CREDENTIAL_MODE_MISMATCH',
+        'Credential-free cloud execution must not receive credential material',
       );
     }
 
