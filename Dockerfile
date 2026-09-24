@@ -1,5 +1,3 @@
-[Reading 67 lines from start (total: 67 lines, 0 remaining)]
-
 FROM node:22-bookworm-slim AS builder
 
 ENV PNPM_HOME="/pnpm"
