@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createAuthenticatedVitoApiClient } from '@/lib/api/server';
 import { VitoApiError } from '@/lib/api/error';
-import { parseHumanReleaseApprovalResult, parseMutationResult, type WorkflowControlAction } from './contracts';
+import { parseHumanReleaseApprovalResult, parseMutationResult, parseWorkflowCancellationResult, type WorkflowControlAction } from './contracts';
 
 const WORKFLOWS_PATH = '/workflows';
 
@@ -71,6 +71,8 @@ export async function workflowAction(formData: FormData): Promise<void> {
     const client = await createAuthenticatedVitoApiClient();
     if (action === 'APPROVE_HUMAN_RELEASE') {
       await client.post(path, {}, parseHumanReleaseApprovalResult);
+    } else if (action === 'CANCEL_RUN') {
+      await client.post(path, {}, parseWorkflowCancellationResult);
     } else {
       await client.post(path, {}, parseMutationResult);
     }
