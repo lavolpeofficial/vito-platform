@@ -4012,3 +4012,170 @@ describe('OB-002D: cloud-governed alias augmentation boundary', () => {
     expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
   });
 });
+
+
+describe('CODE_PLAN trusted cloud launcher boundary', () => {
+  const planProvider = () =>
+    makeProviderDeclaration({
+      providerCode: 'cloud.openrouter.free',
+      providerType: ProviderType.CLOUD_LLM,
+      supportedCapabilities: [EngineeringCapability.CODE_PLAN],
+      capabilityAssignments: [
+        {
+          capabilityCode: EngineeringCapability.CODE_PLAN,
+          isEnabled: true,
+        },
+      ],
+    });
+
+  const planProfile = (enabled = true) =>
+    makeCloudProfile('cloud.openrouter.free', {
+      profileId: 'profile-openrouter-plan',
+      trustedLauncherAlias: 'opencode-openrouter-free',
+      expectedProviderId: 'openrouter',
+      allowedModelIds: ['cohere/north-mini-code:free'],
+      enabled,
+    });
+
+  const exactPlanLauncherResolver: TrustedExecutableResolver = {
+    resolve: jest.fn(async (requestedCommand: string) =>
+      requestedCommand === 'opencode-openrouter-free'
+        ? {
+            commandName: 'opencode-openrouter-free',
+            resolvedPath: '/opt/vito/trusted-launchers/opencode-openrouter-free',
+            verifiedAt: new Date(),
+          }
+        : null,
+    ),
+  };
+
+  it('SECURITY: allows only the exact trusted cloud launcher for CODE_PLAN under BUILDER', async () => {
+    const harness = buildHarness({
+      provider: planProvider(),
+      fakeAdapter: buildFakeAdapter(ProviderType.CLOUD_LLM),
+      trustedExecutableResolver: exactPlanLauncherResolver,
+      cloudExecutionProfileRegistry: new CloudExecutionProfileRegistry([
+        planProfile(true),
+      ]),
+    });
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({
+        invocationId: 'code-plan-cloud-allow-1',
+        capabilityCode: EngineeringCapability.CODE_PLAN,
+        requestedAction: ExecutionAction.RUN_COMMAND,
+        requestedCommand: 'opencode-openrouter-free',
+        requestedPath: undefined,
+      }),
+    );
+
+    expect(result.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(harness.fakeAdapter.execute).toHaveBeenCalledTimes(1);
+    const [, executionContext] = harness.fakeAdapter.execute.mock.calls[0];
+    expect(executionContext.policyDecision.allowed).toBe(true);
+    expect(executionContext.policyDecision.reasonCode).toBe('POLICY_ALLOWED');
+    expect(executionContext.trustedExecutable?.commandName).toBe(
+      'opencode-openrouter-free',
+    );
+  });
+
+  it('SECURITY: CODE_PLAN does not gain trusted-launcher authority for LOCAL_TOOL providers', async () => {
+    const provider = makeProviderDeclaration({
+      providerCode: 'local.plan',
+      providerType: ProviderType.LOCAL_TOOL,
+      supportedCapabilities: [EngineeringCapability.CODE_PLAN],
+      capabilityAssignments: [
+        {
+          capabilityCode: EngineeringCapability.CODE_PLAN,
+          isEnabled: true,
+        },
+      ],
+    });
+    const harness = buildHarness({
+      provider,
+      fakeAdapter: buildFakeAdapter(ProviderType.LOCAL_TOOL),
+      trustedExecutableResolver: exactPlanLauncherResolver,
+    });
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({
+        invocationId: 'code-plan-local-deny-1',
+        capabilityCode: EngineeringCapability.CODE_PLAN,
+        requestedAction: ExecutionAction.RUN_COMMAND,
+        requestedCommand: 'opencode-openrouter-free',
+        requestedPath: undefined,
+      }),
+    );
+
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(result.normalizedError?.providerMetadata?.policyReasonCode).toBe(
+      'COMMAND_NOT_ALLOWED',
+    );
+  });
+
+  it('SECURITY: CODE_PLAN remains blocked when the server-owned cloud profile is disabled', async () => {
+    const harness = buildHarness({
+      provider: planProvider(),
+      fakeAdapter: buildFakeAdapter(ProviderType.CLOUD_LLM),
+      trustedExecutableResolver: exactPlanLauncherResolver,
+      cloudExecutionProfileRegistry: new CloudExecutionProfileRegistry([
+        planProfile(false),
+      ]),
+    });
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({
+        invocationId: 'code-plan-disabled-profile-deny-1',
+        capabilityCode: EngineeringCapability.CODE_PLAN,
+        requestedAction: ExecutionAction.RUN_COMMAND,
+        requestedCommand: 'opencode-openrouter-free',
+        requestedPath: undefined,
+      }),
+    );
+
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(result.normalizedError?.providerMetadata?.policyReasonCode).toBe(
+      'COMMAND_NOT_ALLOWED',
+    );
+  });
+
+  it('SECURITY: other builder capabilities do not inherit CODE_PLAN command authority', async () => {
+    const provider = makeProviderDeclaration({
+      providerCode: 'cloud.openrouter.free',
+      providerType: ProviderType.CLOUD_LLM,
+      supportedCapabilities: [EngineeringCapability.TEST_EXECUTION],
+      capabilityAssignments: [
+        {
+          capabilityCode: EngineeringCapability.TEST_EXECUTION,
+          isEnabled: true,
+        },
+      ],
+    });
+    const harness = buildHarness({
+      provider,
+      fakeAdapter: buildFakeAdapter(ProviderType.CLOUD_LLM),
+      trustedExecutableResolver: exactPlanLauncherResolver,
+      cloudExecutionProfileRegistry: new CloudExecutionProfileRegistry([
+        planProfile(true),
+      ]),
+    });
+
+    const result = await harness.service.invoke(
+      makeInvocationRequest({
+        invocationId: 'code-plan-no-capability-bleed-1',
+        capabilityCode: EngineeringCapability.TEST_EXECUTION,
+        requestedAction: ExecutionAction.RUN_COMMAND,
+        requestedCommand: 'opencode-openrouter-free',
+        requestedPath: undefined,
+      }),
+    );
+
+    expect(harness.fakeAdapter.execute).not.toHaveBeenCalled();
+    expect(result.status).toBe(AgentExecutionStatus.POLICY_BLOCKED);
+    expect(result.normalizedError?.providerMetadata?.policyReasonCode).toBe(
+      'COMMAND_NOT_ALLOWED',
+    );
+  });
+});
