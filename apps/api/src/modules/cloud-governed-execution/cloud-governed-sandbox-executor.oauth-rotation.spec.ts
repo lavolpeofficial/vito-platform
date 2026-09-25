@@ -136,6 +136,81 @@ process.stdout.write('ROTATED');
     expect(existsSync(runs)).toBe(true);
     expect(require('node:fs').readdirSync(runs)).toHaveLength(0);
   });
+
+  it('does not persist rotated OAuth state when provider/model identity is unverified', async () => {
+    writeFileSync(
+      fixture,
+      `
+const path=require('node:path');
+const {DatabaseSync}=require('node:sqlite');
+const db=new DatabaseSync(path.join(process.env.XDG_DATA_HOME,'opencode','opencode.db'));
+const next=JSON.stringify({
+  type:'oauth',
+  methodID:'chatgpt-headless',
+  access:'unverified-access',
+  refresh:'unverified-refresh',
+  expires:3000
+});
+db.prepare("UPDATE credential SET value=?, time_updated=? WHERE integration_id='openai' AND active=1").run(next,300);
+db.close();
+process.stdout.write('ROTATED_WITHOUT_IDENTITY');
+`,
+    );
+
+    const executor = new CloudGovernedSandboxExecutor(
+      new CloudCredentialResolver(new Map([['cloud:sqlite', MARKER]])),
+      root,
+      'test',
+      sourceDb,
+    );
+
+    const result = await executor.execute({
+      workspace: {
+        worktreePath: worktree,
+        baseSha: 'd'.repeat(40),
+        role: 'builder',
+        repositoryId: 'lavolpeofficial/vito-platform',
+        createdAt: new Date(),
+      },
+      executable: {
+        resolvedPath: process.execPath,
+        commandName: 'node',
+        verifiedAt: new Date(),
+      },
+      args: [fixture],
+      credentialReference: 'cloud:sqlite',
+      expectedProviderIdentity: {
+        providerId: 'openai',
+        allowedModelIds: ['gpt-6-astra'],
+      },
+      sandboxConfig: {
+        technology: 'none',
+        timeoutMs: 30_000,
+        maxMemoryBytes: 0,
+        maxCpuTimeMs: 0,
+        maxWorktreeBytes: 0,
+      },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.providerIdentityError?.code).toBe('PROVIDER_IDENTITY_MISSING');
+
+    const db = new DatabaseSync(sourceDb, { readOnly: true });
+    try {
+      const row = db
+        .prepare(
+          "SELECT value FROM credential WHERE integration_id='openai' AND active=1",
+        )
+        .get();
+      expect(JSON.parse(String(row?.value))).toMatchObject({
+        access: 'access-before',
+        refresh: 'refresh-before',
+        expires: 1_000,
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function createCredentialDb(path: string, value: string): void {
