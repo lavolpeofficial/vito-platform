@@ -55,6 +55,7 @@ export class OpenCodeCredentialStateError extends Error {
  * OpenCode session back into VITO's server-owned credential-state database.
  *
  * Security / integrity invariants:
+ * - sourceDbPath is VITO-owned writable durable state, never the read-only operator seed;
  * - never copies the whole session DB back;
  * - never persists session/message/project state;
  * - never logs or returns credential values;
