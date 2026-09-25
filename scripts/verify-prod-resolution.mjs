@@ -33,6 +33,10 @@ const credentialStatePath = resolve(
   rootDir,
   'apps/api/src/modules/cloud-governed-execution/opencode-sqlite-credential-state.ts',
 );
+const cloudExecutorPath = resolve(
+  rootDir,
+  'apps/api/src/modules/cloud-governed-execution/cloud-governed-sandbox-executor.ts',
+);
 
 function fail(message) {
   console.error(`verify-prod-resolution: FAILED — ${message}`);
@@ -54,12 +58,14 @@ let trustedLauncher;
 let identityEvidence;
 let stagingCompose;
 let credentialState;
+let cloudExecutor;
 try {
   dockerfile = readFileSync(dockerfilePath, 'utf8');
   trustedLauncher = readFileSync(trustedLauncherPath, 'utf8');
   identityEvidence = readFileSync(identityEvidencePath, 'utf8');
   stagingCompose = readFileSync(stagingComposePath, 'utf8');
   credentialState = readFileSync(credentialStatePath, 'utf8');
+  cloudExecutor = readFileSync(cloudExecutorPath, 'utf8');
 } catch (error) {
   fail(`trusted launcher runtime assets are missing (${error.code ?? error.message})`);
 }
@@ -114,6 +120,18 @@ if (
 ) {
   fail(
     'OpenCode credential-state reconciliation must remain row-scoped, self-contained and monotonic',
+  );
+}
+
+if (
+  !credentialState.includes('OPENCODE_OAUTH_CREDENTIAL_METADATA_CHANGED') ||
+  !cloudExecutor.includes('providerIdentityVerified') ||
+  !cloudExecutor.includes(
+    'Skipping OpenCode OAuth credential persistence because provider/model identity was not verified',
+  )
+) {
+  fail(
+    'OpenCode OAuth writeback must preserve non-rotating metadata and require verified provider/model identity',
   );
 }
 
