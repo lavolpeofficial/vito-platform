@@ -18,6 +18,10 @@ import { BoundedOutputCapture } from '../remote-execution-worker/output-capture'
 import { CloudCredentialResolver } from './cloud-credential.resolver';
 import { SandboxStartupError } from '../remote-execution-worker/sandbox-executor';
 import { extractProviderIdentity } from './provider-identity';
+import {
+  OpenCodeCredentialStateError,
+  syncRotatedOpenCodeOAuthCredential,
+} from './opencode-sqlite-credential-state';
 
 /**
  * Server-managed cloud-execution hardening flags. Executor-owned constants,
@@ -86,7 +90,9 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
     private readonly credentialResolver: CloudCredentialResolver,
     workspaceRoot: string,
     private readonly nodeEnv = process.env.NODE_ENV ?? 'development',
-    private readonly opencodeSqliteCredentialPath = DEFAULT_OPENCODE_SQLITE_CREDENTIAL_PATH,
+    private readonly opencodeSqliteCredentialPath =
+      process.env.VITO_CLOUD_OPENCODE_STATE_DB_PATH ??
+      DEFAULT_OPENCODE_SQLITE_CREDENTIAL_PATH,
   ) {
     if (!isAbsolute(workspaceRoot)) {
       throw new SandboxStartupError(
@@ -130,7 +136,10 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
     const sessionDir = this.createSessionDir();
 
     try {
-      this.materializeCredential(sessionDir, request.credentialReference);
+      const usesOpenCodeSqliteCredential = this.materializeCredential(
+        sessionDir,
+        request.credentialReference,
+      );
 
       const processEnv = this.buildProcessEnv(sessionDir, request.env);
       const capture = new BoundedOutputCapture(MAX_OUTPUT_BYTES);
@@ -141,7 +150,7 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
           ? this.buildRunArgs(request.args)
           : [...request.args];
 
-      return await this.spawnBounded(
+      const result = await this.spawnBounded(
         request.executable.resolvedPath,
         launchArgs,
         request.prompt,
@@ -153,9 +162,32 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
         request.expectedProviderIdentity,
         request.cancellationSignal,
       );
+
+      // OpenCode OAuth refreshes rotate credential state inside the ephemeral
+      // SQLite copy. Persist only that provider's validated active OAuth row
+      // back to VITO-owned durable state before the session is destroyed.
+      // This runs even when the model request itself fails (for example quota)
+      // because a successful refresh may already have rotated the refresh token.
+      if (usesOpenCodeSqliteCredential && request.expectedProviderIdentity) {
+        const sync = syncRotatedOpenCodeOAuthCredential({
+          sourceDbPath: this.opencodeSqliteCredentialPath,
+          sessionDir,
+          providerId: request.expectedProviderIdentity.providerId,
+        });
+        if (sync.updated) {
+          this.logger.log(
+            `Persisted rotated OpenCode OAuth credential state for provider ${request.expectedProviderIdentity.providerId}`,
+          );
+        }
+      }
+
+      return result;
     } catch (error) {
       if (error instanceof SandboxStartupError || error instanceof CloudSandboxError) {
         throw error;
+      }
+      if (error instanceof OpenCodeCredentialStateError) {
+        throw new CloudSandboxError(error.code, error.message);
       }
       throw new CloudSandboxError(
         'CLOUD_AGENT_EXECUTION_ERROR',
@@ -242,9 +274,9 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
   private materializeCredential(
     sessionDir: string,
     credentialReference: string | undefined,
-  ): string | undefined {
+  ): boolean {
     if (credentialReference === undefined) {
-      return undefined;
+      return false;
     }
 
     const credentialPayload = this.credentialResolver.resolve(credentialReference);
@@ -261,11 +293,12 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
 
     if (credentialPayload === OPENCODE_SQLITE_CREDENTIAL_MARKER) {
       this.materializeOpenCodeSqliteCredential(authDir);
-      return;
+      return true;
     }
 
     const authPath = join(authDir, 'auth.json');
     writeFileSync(authPath, credentialPayload, { encoding: 'utf8', mode: 0o600 });
+    return false;
   }
 
   private materializeOpenCodeSqliteCredential(authDir: string): void {
