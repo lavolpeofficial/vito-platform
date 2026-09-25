@@ -144,6 +144,40 @@ describe('OpenCode SQLite OAuth credential state', () => {
     );
   });
 
+  it('fails closed when non-rotating OAuth metadata changes', () => {
+    createCredentialDb(
+      sourceDb,
+      oauth({
+        access: 'access-before',
+        refresh: 'refresh-before',
+        expires: 1_000,
+      }),
+    );
+    createCredentialDb(
+      sessionDb,
+      JSON.stringify({
+        type: 'oauth',
+        methodID: 'chatgpt-headless',
+        access: 'access-after',
+        refresh: 'refresh-after',
+        expires: 2_000,
+        metadata: { accountID: 'different-account' },
+      }),
+    );
+
+    expect(() =>
+      syncRotatedOpenCodeOAuthCredential({
+        sourceDbPath: sourceDb,
+        sessionDir,
+        providerId: 'openai',
+      }),
+    ).toThrow(
+      expect.objectContaining<Partial<OpenCodeCredentialStateError>>({
+        code: 'OPENCODE_OAUTH_CREDENTIAL_METADATA_CHANGED',
+      }),
+    );
+  });
+
   it('fails closed when the authorized provider credential disappears', () => {
     createCredentialDb(
       sourceDb,
