@@ -30,6 +30,7 @@ type OAuthValue = {
   access: string;
   refresh: string;
   expires: number;
+  stableShape: string;
 };
 
 type ParsedCredential =
@@ -129,6 +130,13 @@ export function syncRotatedOpenCodeOAuthCredential(input: {
       throw new OpenCodeCredentialStateError(
         'OPENCODE_OAUTH_METHOD_CHANGED',
         'OpenCode OAuth method changed during governed execution; refusing persistence',
+      );
+    }
+
+    if (before.stableShape !== after.stableShape) {
+      throw new OpenCodeCredentialStateError(
+        'OPENCODE_OAUTH_CREDENTIAL_METADATA_CHANGED',
+        'OpenCode OAuth non-rotating credential metadata changed during governed execution; refusing persistence',
       );
     }
 
@@ -344,6 +352,11 @@ function parseCredential(raw: string): ParsedCredential {
     );
   }
 
+  const stable = { ...value };
+  delete stable.access;
+  delete stable.refresh;
+  delete stable.expires;
+
   return {
     kind: 'oauth',
     value: {
@@ -352,6 +365,7 @@ function parseCredential(raw: string): ParsedCredential {
       access: value.access,
       refresh: value.refresh,
       expires: value.expires,
+      stableShape: canonicalJson(stable),
     },
   };
 }
@@ -361,8 +375,23 @@ function sameOAuthCredential(a: OAuthValue, b: OAuthValue): boolean {
     a.methodID === b.methodID &&
     a.access === b.access &&
     a.refresh === b.refresh &&
-    a.expires === b.expires
+    a.expires === b.expires &&
+    a.stableShape === b.stableShape
   );
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => canonicalJson(entry)).join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function openDatabase(
