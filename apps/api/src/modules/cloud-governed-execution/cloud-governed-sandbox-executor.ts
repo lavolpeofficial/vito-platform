@@ -168,17 +168,32 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
       // back to VITO-owned durable state before the session is destroyed.
       // This runs even when the model request itself fails (for example quota)
       // because a successful refresh may already have rotated the refresh token.
-      if (usesOpenCodeSqliteCredential && request.expectedProviderIdentity) {
+      const expectedIdentity = request.expectedProviderIdentity;
+      const observedIdentity = result.observedProviderIdentity;
+      const providerIdentityVerified =
+        expectedIdentity !== undefined &&
+        result.providerIdentityError === undefined &&
+        observedIdentity !== undefined &&
+        observedIdentity.providerId === expectedIdentity.providerId &&
+        (!expectedIdentity.allowedModelIds ||
+          expectedIdentity.allowedModelIds.length === 0 ||
+          expectedIdentity.allowedModelIds.includes(observedIdentity.modelId));
+
+      if (usesOpenCodeSqliteCredential && expectedIdentity && providerIdentityVerified) {
         const sync = syncRotatedOpenCodeOAuthCredential({
           sourceDbPath: this.opencodeSqliteCredentialPath,
           sessionDir,
-          providerId: request.expectedProviderIdentity.providerId,
+          providerId: expectedIdentity.providerId,
         });
         if (sync.updated) {
           this.logger.log(
-            `Persisted rotated OpenCode OAuth credential state for provider ${request.expectedProviderIdentity.providerId}`,
+            `Persisted rotated OpenCode OAuth credential state for provider ${expectedIdentity.providerId}`,
           );
         }
+      } else if (usesOpenCodeSqliteCredential && expectedIdentity) {
+        this.logger.warn(
+          'Skipping OpenCode OAuth credential persistence because provider/model identity was not verified',
+        );
       }
 
       return result;
