@@ -370,7 +370,9 @@ function openDatabase(
   options?: { readonly readOnly?: boolean },
 ): SqliteDatabase {
   const sqlite = require('node:sqlite') as { DatabaseSync: DatabaseSyncCtor };
-  return new sqlite.DatabaseSync(path, options);
+  return options === undefined
+    ? new sqlite.DatabaseSync(path)
+    : new sqlite.DatabaseSync(path, options);
 }
 
 function closeQuietly(db: SqliteDatabase | null): void {
