@@ -48,13 +48,21 @@ services:
       VITO_REPOSITORY_REGISTRY: '[{"repositoryId":"lavolpeofficial/vito-platform","cloneUrl":"https://github.com/lavolpeofficial/vito-platform.git","allowedBaseRefs":["main"],"enabled":true}]'
       VITO_TRUSTED_LOCAL_EXECUTABLES: '{"opencode":"/opt/vito/trusted-launchers/opencode"}'
       VITO_TRUSTED_AGENT_LAUNCHER_ROOT: /opt/vito/trusted-launchers
-      VITO_CLOUD_EXECUTION_PROFILES: '[{"profileId":"staging-openai-opencode","providerCode":"cloud.openai.main","credentialRef":"cloud:openai:staging","trustedLauncherAlias":"opencode","expectedProviderId":"openai","maxDurationMs":600000,"maxParallelism":1,"enabled":${VITO_CLOUD_PROFILE_ENABLED:-false}}]'
+      VITO_CLOUD_EXECUTION_PROFILES: '[{"profileId":"staging-openai-opencode","providerCode":"cloud.openai.main","credentialRef":"cloud:openai:staging","trustedLauncherAlias":"opencode","expectedProviderId":"openai","allowedModelIds":["gpt-6-astra"],"maxDurationMs":600000,"maxParallelism":1,"enabled":${VITO_CLOUD_PROFILE_ENABLED:-false}}]'
       VITO_CLOUD_AGENT_CREDENTIALS: "${VITO_CLOUD_AGENT_CREDENTIALS_JSON:?VITO_CLOUD_AGENT_CREDENTIALS_JSON is required}"
+      VITO_CLOUD_OPENCODE_STATE_DB_PATH: /var/lib/vito/cloud-credential-state/opencode.db
       VITO_SANDBOX_TECHNOLOGY: bubblewrap
     command:
       - sh
       - -c
       - |
+        set -eu
+        credential_state="${VITO_CLOUD_OPENCODE_STATE_DB_PATH}"
+        mkdir -p "$(dirname "$credential_state")"
+        if [ ! -s "$credential_state" ]; then
+          cp /run/secrets/vito-cloud/opencode-seed.db "$credential_state"
+          chmod 0600 "$credential_state"
+        fi
         pnpm prisma:migrate:deploy
         exec pnpm start
     ports:
@@ -62,7 +70,8 @@ services:
     volumes:
       - source-vault:/var/lib/vito/source-vault
       - governed-workspaces:/var/lib/vito/workspaces
-      - "${VITO_CLOUD_OPENCODE_DB_PATH:?VITO_CLOUD_OPENCODE_DB_PATH is required}:/run/secrets/vito-cloud/opencode.db:ro"
+      - cloud-credential-state:/var/lib/vito/cloud-credential-state
+      - "${VITO_CLOUD_OPENCODE_DB_PATH:?VITO_CLOUD_OPENCODE_DB_PATH is required}:/run/secrets/vito-cloud/opencode-seed.db:ro"
     healthcheck:
       test:
         - CMD
@@ -111,6 +120,7 @@ volumes:
   postgres-data:
   source-vault:
   governed-workspaces:
+  cloud-credential-state:
 
 networks:
   vito-staging-backend:

@@ -22,6 +22,21 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const apiDir = resolve(rootDir, 'apps/api');
 const contractsPkgPath = resolve(rootDir, 'packages/contracts/package.json');
 const contractsPkg = JSON.parse(readFileSync(contractsPkgPath, 'utf8'));
+const dockerfilePath = resolve(rootDir, 'Dockerfile');
+const trustedLauncherPath = resolve(rootDir, 'deploy/staging/trusted-launchers/opencode');
+const identityEvidencePath = resolve(
+  rootDir,
+  'deploy/staging/trusted-launchers/opencode-sqlite-identity-evidence.mjs',
+);
+const stagingComposePath = resolve(rootDir, 'deploy/staging/docker-compose.yml');
+const credentialStatePath = resolve(
+  rootDir,
+  'apps/api/src/modules/cloud-governed-execution/opencode-sqlite-credential-state.ts',
+);
+const cloudExecutorPath = resolve(
+  rootDir,
+  'apps/api/src/modules/cloud-governed-execution/cloud-governed-sandbox-executor.ts',
+);
 
 function fail(message) {
   console.error(`verify-prod-resolution: FAILED — ${message}`);
@@ -36,6 +51,88 @@ if (contractsPkg.types !== 'dist/index.d.ts') {
 }
 if (typeof contractsPkg.scripts?.build !== 'string' || !contractsPkg.scripts.build.includes('tsc')) {
   fail('@vito/contracts must expose a tsc-based "build" script');
+}
+
+let dockerfile;
+let trustedLauncher;
+let identityEvidence;
+let stagingCompose;
+let credentialState;
+let cloudExecutor;
+try {
+  dockerfile = readFileSync(dockerfilePath, 'utf8');
+  trustedLauncher = readFileSync(trustedLauncherPath, 'utf8');
+  identityEvidence = readFileSync(identityEvidencePath, 'utf8');
+  stagingCompose = readFileSync(stagingComposePath, 'utf8');
+  credentialState = readFileSync(credentialStatePath, 'utf8');
+  cloudExecutor = readFileSync(cloudExecutorPath, 'utf8');
+} catch (error) {
+  fail(`trusted launcher runtime assets are missing (${error.code ?? error.message})`);
+}
+if (
+  !dockerfile.includes(
+    'COPY deploy/staging/trusted-launchers/opencode /opt/vito/trusted-launchers/opencode',
+  ) ||
+  !dockerfile.includes(
+    'COPY deploy/staging/trusted-launchers/opencode-sqlite-identity-evidence.mjs /opt/vito/trusted-launchers/opencode-sqlite-identity-evidence.mjs',
+  )
+) {
+  fail('Dockerfile must ship the reviewed OpenCode launcher and SQLite identity evidence assets');
+}
+if (
+  !trustedLauncher.includes('XDG_DATA_HOME') ||
+  !trustedLauncher.includes('opencode-sqlite-identity-evidence.mjs') ||
+  !trustedLauncher.includes('model:"openai/gpt-6-astra"')
+) {
+  fail('reviewed OpenCode launcher must pin the server-owned model and enforce SQLite identity evidence');
+}
+if (
+  !identityEvidence.includes("new DatabaseSync(dbPath, { readOnly: true })") ||
+  !identityEvidence.includes('providerID=') ||
+  !identityEvidence.includes('modelID=')
+) {
+  fail('SQLite identity evidence helper must remain read-only and emit provider/model identity evidence');
+}
+
+if (
+  !stagingCompose.includes('"expectedProviderId":"openai","allowedModelIds":["gpt-6-astra"]')
+) {
+  fail('staging cloud profile must server-authorize only the governed gpt-6-astra model');
+}
+
+if (
+  !stagingCompose.includes(
+    'VITO_CLOUD_OPENCODE_STATE_DB_PATH: /var/lib/vito/cloud-credential-state/opencode.db',
+  ) ||
+  !stagingCompose.includes('cloud-credential-state:/var/lib/vito/cloud-credential-state') ||
+  !stagingCompose.includes('/run/secrets/vito-cloud/opencode-seed.db:ro') ||
+  !stagingCompose.includes('cp /run/secrets/vito-cloud/opencode-seed.db')
+) {
+  fail(
+    'staging must keep the host OpenCode DB read-only and seed a separate persistent credential-state volume',
+  );
+}
+
+if (
+  !credentialState.includes('UPDATE credential SET value = ?, time_updated = ?') ||
+  !credentialState.includes('PRAGMA journal_mode=DELETE') ||
+  !credentialState.includes('OPENCODE_OAUTH_ROTATION_NOT_MONOTONIC')
+) {
+  fail(
+    'OpenCode credential-state reconciliation must remain row-scoped, self-contained and monotonic',
+  );
+}
+
+if (
+  !credentialState.includes('OPENCODE_OAUTH_CREDENTIAL_METADATA_CHANGED') ||
+  !cloudExecutor.includes('providerIdentityVerified') ||
+  !cloudExecutor.includes(
+    'Skipping OpenCode OAuth credential persistence because provider/model identity was not verified',
+  )
+) {
+  fail(
+    'OpenCode OAuth writeback must preserve non-rotating metadata and require verified provider/model identity',
+  );
 }
 
 const requireFromApi = createRequire(resolve(apiDir, 'package.json'));
