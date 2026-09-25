@@ -54,11 +54,14 @@ RUN mkdir -p /opt/vito/trusted-launchers/opencode-runtime \
  && npm install --prefix /opt/vito/trusted-launchers/opencode-runtime --omit=dev --no-audit --no-fund @opencode/cli@2.0.3
 
 COPY deploy/staging/trusted-launchers/opencode /opt/vito/trusted-launchers/opencode
+COPY deploy/staging/trusted-launchers/opencode-openrouter-free /opt/vito/trusted-launchers/opencode-openrouter-free
 COPY deploy/staging/trusted-launchers/opencode-sqlite-identity-evidence.mjs /opt/vito/trusted-launchers/opencode-sqlite-identity-evidence.mjs
 
 RUN chmod 0755 /opt/vito/trusted-launchers/opencode \
+ && chmod 0755 /opt/vito/trusted-launchers/opencode-openrouter-free \
  && chmod 0644 /opt/vito/trusted-launchers/opencode-sqlite-identity-evidence.mjs \
- && /opt/vito/trusted-launchers/opencode --version
+ && /opt/vito/trusted-launchers/opencode --version \
+ && /opt/vito/trusted-launchers/opencode-openrouter-free --version
 
 COPY --from=builder /app /app
 
