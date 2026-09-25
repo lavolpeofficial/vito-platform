@@ -160,12 +160,15 @@ export class ProviderRegistryService {
     if (!existing) throw new NotFoundException('Provider nicht gefunden.');
 
     const effectiveProviderType = input.providerType ?? existing.providerType;
-    const effectiveCredentialRequirement = this.resolveCredentialRequirementForWrite(
-      effectiveProviderType,
-      input.credentialRequirement ??
-        (existing.credentialRequirement as ProviderCredentialRequirement),
-      false,
-    );
+    const effectiveCredentialRequirement =
+      input.credentialRequirement !== undefined || input.providerType !== undefined
+        ? this.resolveCredentialRequirementForWrite(
+            effectiveProviderType,
+            input.credentialRequirement ??
+              (existing.credentialRequirement as ProviderCredentialRequirement),
+            false,
+          )
+        : undefined;
 
     if (input.status === 'ACTIVE') {
       throw new BadRequestException(
