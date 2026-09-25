@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
-import type { ProviderRoutingRequest } from '@vito/contracts';
+import { ProviderCredentialRequirement, type ProviderRoutingRequest } from '@vito/contracts';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { TenantContext } from '../../common/tenant/tenant-context';
 import { EngineeringProviderProvisioningService } from './engineering-provider-provisioning.service';
@@ -33,6 +33,7 @@ export class ProviderRegistryController {
     estimatedCostMinorUnits?: number | null; healthStatus?: string; quotaStatus?: string;
     qualityScore?: number; latencyScore?: number; costScore?: number;
     costMetadata?: Record<string, unknown>; assuranceLevels?: string[]; metadata?: Record<string, unknown>;
+    credentialRequirement?: ProviderCredentialRequirement;
   }) {
     return this.registryService.createProvider({ organizationId: this.tenantContext.getOrThrow(), ...body });
   }
