@@ -28,6 +28,7 @@ const identityEvidencePath = resolve(
   rootDir,
   'deploy/staging/trusted-launchers/opencode-sqlite-identity-evidence.mjs',
 );
+const stagingComposePath = resolve(rootDir, 'deploy/staging/docker-compose.yml');
 
 function fail(message) {
   console.error(`verify-prod-resolution: FAILED — ${message}`);
@@ -47,10 +48,12 @@ if (typeof contractsPkg.scripts?.build !== 'string' || !contractsPkg.scripts.bui
 let dockerfile;
 let trustedLauncher;
 let identityEvidence;
+let stagingCompose;
 try {
   dockerfile = readFileSync(dockerfilePath, 'utf8');
   trustedLauncher = readFileSync(trustedLauncherPath, 'utf8');
   identityEvidence = readFileSync(identityEvidencePath, 'utf8');
+  stagingCompose = readFileSync(stagingComposePath, 'utf8');
 } catch (error) {
   fail(`trusted launcher runtime assets are missing (${error.code ?? error.message})`);
 }
@@ -77,6 +80,12 @@ if (
   !identityEvidence.includes('modelID=')
 ) {
   fail('SQLite identity evidence helper must remain read-only and emit provider/model identity evidence');
+}
+
+if (
+  !stagingCompose.includes('"expectedProviderId":"openai","allowedModelIds":["gpt-6-astra"]')
+) {
+  fail('staging cloud profile must server-authorize only the governed gpt-6-astra model');
 }
 
 const requireFromApi = createRequire(resolve(apiDir, 'package.json'));
