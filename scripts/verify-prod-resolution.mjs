@@ -24,6 +24,10 @@ const contractsPkgPath = resolve(rootDir, 'packages/contracts/package.json');
 const contractsPkg = JSON.parse(readFileSync(contractsPkgPath, 'utf8'));
 const dockerfilePath = resolve(rootDir, 'Dockerfile');
 const trustedLauncherPath = resolve(rootDir, 'deploy/staging/trusted-launchers/opencode');
+const openRouterFreeLauncherPath = resolve(
+  rootDir,
+  'deploy/staging/trusted-launchers/opencode-openrouter-free',
+);
 const identityEvidencePath = resolve(
   rootDir,
   'deploy/staging/trusted-launchers/opencode-sqlite-identity-evidence.mjs',
@@ -47,11 +51,13 @@ if (typeof contractsPkg.scripts?.build !== 'string' || !contractsPkg.scripts.bui
 
 let dockerfile;
 let trustedLauncher;
+let openRouterFreeLauncher;
 let identityEvidence;
 let stagingCompose;
 try {
   dockerfile = readFileSync(dockerfilePath, 'utf8');
   trustedLauncher = readFileSync(trustedLauncherPath, 'utf8');
+  openRouterFreeLauncher = readFileSync(openRouterFreeLauncherPath, 'utf8');
   identityEvidence = readFileSync(identityEvidencePath, 'utf8');
   stagingCompose = readFileSync(stagingComposePath, 'utf8');
 } catch (error) {
@@ -62,10 +68,13 @@ if (
     'COPY deploy/staging/trusted-launchers/opencode /opt/vito/trusted-launchers/opencode',
   ) ||
   !dockerfile.includes(
+    'COPY deploy/staging/trusted-launchers/opencode-openrouter-free /opt/vito/trusted-launchers/opencode-openrouter-free',
+  ) ||
+  !dockerfile.includes(
     'COPY deploy/staging/trusted-launchers/opencode-sqlite-identity-evidence.mjs /opt/vito/trusted-launchers/opencode-sqlite-identity-evidence.mjs',
   )
 ) {
-  fail('Dockerfile must ship the reviewed OpenCode launcher and SQLite identity evidence assets');
+  fail('Dockerfile must ship the reviewed OpenCode launchers and SQLite identity evidence assets');
 }
 if (
   !trustedLauncher.includes('XDG_DATA_HOME') ||
@@ -73,6 +82,15 @@ if (
   !trustedLauncher.includes('model:"openai/gpt-6-astra"')
 ) {
   fail('reviewed OpenCode launcher must pin the server-owned model and enforce SQLite identity evidence');
+}
+
+if (
+  !openRouterFreeLauncher.includes('XDG_DATA_HOME') ||
+  !openRouterFreeLauncher.includes('opencode-sqlite-identity-evidence.mjs') ||
+  !openRouterFreeLauncher.includes('OPENROUTER_API_KEY') ||
+  !openRouterFreeLauncher.includes('model:"openrouter/cohere/north-mini-code:free"')
+) {
+  fail('reviewed OpenRouter free launcher must bind the ephemeral key, pin the free coding model and enforce SQLite identity evidence');
 }
 if (
   !identityEvidence.includes("new DatabaseSync(dbPath, { readOnly: true })") ||
@@ -86,6 +104,15 @@ if (
   !stagingCompose.includes('"expectedProviderId":"openai","allowedModelIds":["gpt-6-astra"]')
 ) {
   fail('staging cloud profile must server-authorize only the governed gpt-6-astra model');
+}
+
+if (
+  !stagingCompose.includes('"providerCode":"cloud.openrouter.free"') ||
+  !stagingCompose.includes('"credentialRef":"cloud:openrouter:staging"') ||
+  !stagingCompose.includes('"trustedLauncherAlias":"opencode-openrouter-free"') ||
+  !stagingCompose.includes('"expectedProviderId":"openrouter","allowedModelIds":["cohere/north-mini-code:free"]')
+) {
+  fail('staging OpenRouter free profile must be separately credentialed, launcher-bound and model-allowlisted');
 }
 
 const requireFromApi = createRequire(resolve(apiDir, 'package.json'));
