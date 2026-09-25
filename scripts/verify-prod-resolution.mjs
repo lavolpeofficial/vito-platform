@@ -29,6 +29,10 @@ const identityEvidencePath = resolve(
   'deploy/staging/trusted-launchers/opencode-sqlite-identity-evidence.mjs',
 );
 const stagingComposePath = resolve(rootDir, 'deploy/staging/docker-compose.yml');
+const credentialStatePath = resolve(
+  rootDir,
+  'apps/api/src/modules/cloud-governed-execution/opencode-sqlite-credential-state.ts',
+);
 
 function fail(message) {
   console.error(`verify-prod-resolution: FAILED — ${message}`);
@@ -49,11 +53,13 @@ let dockerfile;
 let trustedLauncher;
 let identityEvidence;
 let stagingCompose;
+let credentialState;
 try {
   dockerfile = readFileSync(dockerfilePath, 'utf8');
   trustedLauncher = readFileSync(trustedLauncherPath, 'utf8');
   identityEvidence = readFileSync(identityEvidencePath, 'utf8');
   stagingCompose = readFileSync(stagingComposePath, 'utf8');
+  credentialState = readFileSync(credentialStatePath, 'utf8');
 } catch (error) {
   fail(`trusted launcher runtime assets are missing (${error.code ?? error.message})`);
 }
@@ -86,6 +92,29 @@ if (
   !stagingCompose.includes('"expectedProviderId":"openai","allowedModelIds":["gpt-6-astra"]')
 ) {
   fail('staging cloud profile must server-authorize only the governed gpt-6-astra model');
+}
+
+if (
+  !stagingCompose.includes(
+    'VITO_CLOUD_OPENCODE_STATE_DB_PATH: /var/lib/vito/cloud-credential-state/opencode.db',
+  ) ||
+  !stagingCompose.includes('cloud-credential-state:/var/lib/vito/cloud-credential-state') ||
+  !stagingCompose.includes('/run/secrets/vito-cloud/opencode-seed.db:ro') ||
+  !stagingCompose.includes('cp /run/secrets/vito-cloud/opencode-seed.db')
+) {
+  fail(
+    'staging must keep the host OpenCode DB read-only and seed a separate persistent credential-state volume',
+  );
+}
+
+if (
+  !credentialState.includes('UPDATE credential SET value = ?, time_updated = ?') ||
+  !credentialState.includes('PRAGMA journal_mode=DELETE') ||
+  !credentialState.includes('OPENCODE_OAUTH_ROTATION_NOT_MONOTONIC')
+) {
+  fail(
+    'OpenCode credential-state reconciliation must remain row-scoped, self-contained and monotonic',
+  );
 }
 
 const requireFromApi = createRequire(resolve(apiDir, 'package.json'));
