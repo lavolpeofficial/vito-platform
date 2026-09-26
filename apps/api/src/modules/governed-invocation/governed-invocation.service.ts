@@ -185,7 +185,8 @@ async function resolveTrustedExecutionPolicy(
  * the EXACT trusted coding-agent launcher alias. Authorized ONLY when ALL of
  * the following hold (narrow, fail-closed):
  *   - the requested action is RUN_COMMAND,
- *   - the trusted capability is the CODE_BUILD builder context,
+ *   - the trusted capability is either CODE_BUILD, or CODE_PLAN when the
+ *     provider is cloud-governed and bound to an enabled server-owned profile,
  *   - the execution profile is BUILDER,
  *   - the provider is authorized for agent execution — either a LOCAL_TOOL
  *     provider (deep local agent workflow) OR a cloud-governed provider type
@@ -235,9 +236,16 @@ async function augmentBuilderPolicyWithTrustedCodingAgentAlias(
   policy: ExecutionPolicyConfig,
   dependencies: GovernedInvocationDependencies,
 ): Promise<ExecutionPolicyConfig> {
+  const capabilityAllowsTrustedAgent =
+    request.capabilityCode === EngineeringCapability.CODE_BUILD ||
+    (
+      request.capabilityCode === EngineeringCapability.CODE_PLAN &&
+      isCloudGovernedProviderType(provider.providerType)
+    );
+
   if (
     request.requestedAction !== ExecutionAction.RUN_COMMAND ||
-    request.capabilityCode !== EngineeringCapability.CODE_BUILD ||
+    !capabilityAllowsTrustedAgent ||
     executionProfile !== ExecutionProfile.BUILDER ||
     !isProviderAuthorizedForCodingAgent(provider, dependencies) ||
     typeof request.requestedCommand !== 'string' ||

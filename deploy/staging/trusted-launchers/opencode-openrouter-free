@@ -40,19 +40,59 @@ node -e '
     p,
     JSON.stringify({
       model:"openrouter/cohere/north-mini-code:free",
-      permission:{
-        external_directory:{
-          "*":"deny",
-          [h+"/.local/share/opencode/snapshot/**"]:"allow",
-          [h+"/.cache/opencode/bin/**"]:"allow"
-        }
-      }
+      default_agent:"plan",
+      permissions:[
+        {action:"read",resource:"*",effect:"allow"},
+        {action:"read",resource:"*.env",effect:"deny"},
+        {action:"read",resource:"*.env.*",effect:"deny"},
+        {action:"glob",resource:"*",effect:"allow"},
+        {action:"grep",resource:"*",effect:"allow"},
+        {action:"edit",resource:"*",effect:"deny"},
+        {action:"shell",resource:"*",effect:"deny"},
+        {action:"subagent",resource:"*",effect:"deny"},
+        {action:"webfetch",resource:"*",effect:"deny"},
+        {action:"websearch",resource:"*",effect:"deny"},
+        {action:"external_directory",resource:"*",effect:"deny"},
+        {action:"external_directory",resource:h+"/.local/share/opencode/snapshot/*",effect:"allow"},
+        {action:"external_directory",resource:h+"/.cache/opencode/bin/*",effect:"allow"}
+      ]
     })
   );
 ' "$XDG_CONFIG_HOME/opencode/opencode.json"
 
+shift
+saw_stdin=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --print-logs)
+      shift
+      ;;
+    --log-level)
+      [ "$#" -ge 2 ] || exit 56
+      case "$2" in
+        trace|debug|info) ;;
+        *) exit 56 ;;
+      esac
+      shift 2
+      ;;
+    --log-level=trace|--log-level=debug|--log-level=info)
+      shift
+      ;;
+    -)
+      [ "$saw_stdin" -eq 0 ] || exit 56
+      saw_stdin=1
+      shift
+      ;;
+    *)
+      exit 56
+      ;;
+  esac
+done
+
+[ "$saw_stdin" -eq 1 ] || exit 56
+
 set +e
-"$BIN" "$@"
+"$BIN" run --agent plan --print-logs --log-level info -
 rc=$?
 
 DB="$XDG_DATA_HOME/opencode/opencode.db"

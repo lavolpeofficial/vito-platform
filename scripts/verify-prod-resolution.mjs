@@ -88,9 +88,14 @@ if (
   !openRouterFreeLauncher.includes('XDG_DATA_HOME') ||
   !openRouterFreeLauncher.includes('opencode-sqlite-identity-evidence.mjs') ||
   !openRouterFreeLauncher.includes('OPENROUTER_API_KEY') ||
-  !openRouterFreeLauncher.includes('model:"openrouter/cohere/north-mini-code:free"')
+  !openRouterFreeLauncher.includes('model:"openrouter/cohere/north-mini-code:free"') ||
+  !openRouterFreeLauncher.includes('default_agent:"plan"') ||
+  !openRouterFreeLauncher.includes('{action:"edit",resource:"*",effect:"deny"}') ||
+  !openRouterFreeLauncher.includes('{action:"shell",resource:"*",effect:"deny"}') ||
+  !openRouterFreeLauncher.includes('{action:"subagent",resource:"*",effect:"deny"}') ||
+  !openRouterFreeLauncher.includes('"$BIN" run --agent plan --print-logs --log-level info -')
 ) {
-  fail('reviewed OpenRouter free launcher must bind the ephemeral key, pin the free coding model and enforce SQLite identity evidence');
+  fail('reviewed OpenRouter free CODE_PLAN launcher must bind the ephemeral key, pin the free model/plan agent, deny write/shell/subagent authority and enforce SQLite identity evidence');
 }
 if (
   !identityEvidence.includes("new DatabaseSync(dbPath, { readOnly: true })") ||
