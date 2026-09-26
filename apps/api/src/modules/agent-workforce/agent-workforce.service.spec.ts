@@ -41,7 +41,7 @@ describe('AgentWorkforceService', () => {
 
   function service(registry?: CloudExecutionProfileRegistry) {
     return new AgentWorkforceService(
-      { route } as any,
+      { routeForExecution: route } as any,
       { executeWorkspaceFileOperation } as any,
       { retrieve } as any,
       { resolve: resolveWorkflowIdentity } as any,
@@ -74,7 +74,7 @@ describe('AgentWorkforceService', () => {
       .mockResolvedValueOnce({ id: 'approval-1' })
       .mockRejectedValueOnce(new ForbiddenException('already consumed'));
     const workforce = new AgentWorkforceService(
-      { route } as any, { executeWorkspaceFileOperation } as any, { retrieve } as any,
+      { routeForExecution: route } as any, { executeWorkspaceFileOperation } as any, { retrieve } as any,
       { resolve: resolveWorkflowIdentity } as any, { tryRecord: tryRecordExperience } as any,
       undefined, undefined, { consumeForDispatch } as any,
     );

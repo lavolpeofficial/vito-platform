@@ -66,7 +66,7 @@ describe('AgentWorkforceService mission context', () => {
 
   function service(context: any = missionContext) {
     return new AgentWorkforceService(
-      { route } as any,
+      { routeForExecution: route } as any,
       { executeWorkspaceFileOperation } as any,
       { retrieve } as any,
       { resolve } as any,

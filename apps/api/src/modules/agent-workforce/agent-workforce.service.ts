@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { CodeBuildApprovalService } from '../engineering-release/code-build-approval.service';
 import { ConsumeCodeBuildApprovalDto } from '../engineering-release/dto/code-build-approval.dto';
 import { ProviderRouterService } from '../provider-registry/provider-router.service';
+import { ProviderRuntimeStateService } from '../provider-registry/provider-runtime-state.service';
 import {
   GovernedRuntimeService,
   TRUSTED_RUNTIME_ORIGIN,
@@ -92,6 +93,7 @@ export class AgentWorkforceService {
     @Optional() private readonly memory?: MemoryService,
     @Optional() private readonly codeBuildApprovals?: CodeBuildApprovalService,
     @Optional() private readonly missionContextService?: MissionContextService,
+    @Optional() private readonly providerRuntimeState?: ProviderRuntimeStateService,
   ) {
     this.profileRegistry = profileRegistry ?? new CloudExecutionProfileRegistry([]);
   }
@@ -123,7 +125,7 @@ export class AgentWorkforceService {
       }
     }
 
-    const routing = await this.providerRouter.route({
+    const routing = await this.providerRouter.routeForExecution({
       organizationId: input.organizationId,
       capability: capabilityCode,
       assuranceLevel,
@@ -228,6 +230,19 @@ export class AgentWorkforceService {
       executionBudget: input.executionBudget,
       ...(codeBuildExecutionTarget ? { codeBuildExecutionTarget } : {}),
     });
+
+    if (this.providerRuntimeState) {
+      try {
+        await this.providerRuntimeState.observeExecution(
+          input.organizationId,
+          provider.id,
+          execution,
+        );
+      } catch {
+        // Runtime-state feedback must never rewrite the already-governed
+        // execution outcome. A later readiness probe will repair stale state.
+      }
+    }
 
     const experience = persistedIdentity
       ? await this.captureRuntimeExperience({

@@ -55,13 +55,16 @@ RUN mkdir -p /opt/vito/trusted-launchers/opencode-runtime \
 
 COPY deploy/staging/trusted-launchers/opencode /opt/vito/trusted-launchers/opencode
 COPY deploy/staging/trusted-launchers/opencode-openrouter-free /opt/vito/trusted-launchers/opencode-openrouter-free
+COPY deploy/staging/trusted-launchers/opencode-openai-probe /opt/vito/trusted-launchers/opencode-openai-probe
 COPY deploy/staging/trusted-launchers/opencode-sqlite-identity-evidence.mjs /opt/vito/trusted-launchers/opencode-sqlite-identity-evidence.mjs
 
 RUN chmod 0755 /opt/vito/trusted-launchers/opencode \
  && chmod 0755 /opt/vito/trusted-launchers/opencode-openrouter-free \
+ && chmod 0755 /opt/vito/trusted-launchers/opencode-openai-probe \
  && chmod 0644 /opt/vito/trusted-launchers/opencode-sqlite-identity-evidence.mjs \
  && /opt/vito/trusted-launchers/opencode --version \
- && /opt/vito/trusted-launchers/opencode-openrouter-free --version
+ && /opt/vito/trusted-launchers/opencode-openrouter-free --version \
+ && /opt/vito/trusted-launchers/opencode-openai-probe --version
 
 COPY --from=builder /app /app
 
