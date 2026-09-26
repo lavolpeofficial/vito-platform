@@ -143,8 +143,6 @@ export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-r
           executionPolicyResolver,
           trustedExecutableResolver,
           credentialBroker,
-          // Deliberately deferred until an approval resolver is durable.
-          // Consequential human-gated actions continue to fail closed.
           humanGateResolver: null,
           cloudExecutionProfileRegistry,
         }),
@@ -164,6 +162,6 @@ export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-r
     },
     GovernedRuntimeService,
   ],
-  exports: [GovernedRuntimeService],
+  exports: [GovernedRuntimeService, TrustedLocalExecutableResolver],
 })
 export class GovernedRuntimeModule {}

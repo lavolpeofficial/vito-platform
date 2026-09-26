@@ -68,7 +68,7 @@ describe('AgentWorkforceService runtime memory context', () => {
 
   function service() {
     return new AgentWorkforceService(
-      { route } as any,
+      { routeForExecution: route } as any,
       { executeWorkspaceFileOperation } as any,
       { retrieve: retrieveLearning } as any,
       { resolve: resolveWorkflowIdentity } as any,

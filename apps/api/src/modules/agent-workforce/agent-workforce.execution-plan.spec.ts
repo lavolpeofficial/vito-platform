@@ -7,7 +7,7 @@ describe('AgentWorkforceService persisted workflow execution plan boundary', () 
     const executeWorkspaceFileOperation = jest.fn();
     const resolve = jest.fn().mockResolvedValue({ capabilityCode: 'CODE_BUILD', correlationId: 'server-correlation' });
     const service = new AgentWorkforceService(
-      { route } as any,
+      { routeForExecution: route } as any,
       { executeWorkspaceFileOperation } as any,
       { retrieve: jest.fn() } as any,
       { resolve } as any,
@@ -50,7 +50,7 @@ describe('AgentWorkforceService persisted workflow execution plan boundary', () 
     const tryRecord = jest.fn().mockResolvedValue({ id: 'exp-1' });
 
     const service = new AgentWorkforceService(
-      { route } as any,
+      { routeForExecution: route } as any,
       { executeWorkspaceFileOperation } as any,
       { retrieve } as any,
       { resolve } as any,
