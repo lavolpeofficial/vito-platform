@@ -675,7 +675,31 @@ describe('CloudGovernedSandboxExecutor (OB-002D ephemeral boundary)', () => {
       });
       expect(result.providerIdentityError).toBeUndefined();
       expect(result.stderr).toContain('--print-logs');
-      expect(result.stderr).toContain('--log-level');
+      expect(result.stderr).toContain('\"--log-level\",\"info\"');
+    });
+
+    it('CRITICAL: governed prompt uses the OpenCode stdin sentinel and never appears in argv', async () => {
+      const governedPrompt = 'SENSITIVE_GOVERNED_PROMPT_DO_NOT_EXPOSE_IN_ARGV';
+      const result = await executor().execute(
+        makeRequest(
+          {
+            executable: { resolvedPath: runShimPath, commandName: 'run-shim', verifiedAt: new Date() },
+            args: ['run', '--identity', 'openai', 'gpt-5.6-terra-fast'],
+            prompt: governedPrompt,
+            expectedProviderIdentity: expectedOpenAI,
+          },
+          workspaceRoot,
+        ),
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toContain('\"-\"');
+      expect(result.stderr).not.toContain(governedPrompt);
+      expect(result.observedProviderIdentity).toEqual({
+        providerId: 'openai',
+        modelId: 'gpt-5.6-terra-fast',
+      });
+      expect(result.providerIdentityError).toBeUndefined();
     });
 
     it('fail closed: run-shaped invocation with the embedded fallback identity', async () => {

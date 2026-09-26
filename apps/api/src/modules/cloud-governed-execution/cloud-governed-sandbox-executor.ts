@@ -49,7 +49,7 @@ const MAX_OPENCODE_SQLITE_CREDENTIAL_BYTES = 32 * 1024 * 1024;
  * Only log levels that still emit INFO lines are accepted.
  */
 const ALLOWED_LOG_LEVELS = new Set(['trace', 'debug', 'info']);
-const DEFAULT_LOG_LEVEL = 'INFO';
+const DEFAULT_LOG_LEVEL = 'info';
 
 /**
  * CloudGovernedSandboxExecutor — the ephemeral CLOUD_GOVERNED execution
@@ -138,7 +138,7 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
       const timeoutMs = Math.max(1_000, request.sandboxConfig.timeoutMs || DEFAULT_MAX_DURATION_MS);
       const launchArgs =
         request.args.length > 0 && request.args[0] === 'run'
-          ? this.buildRunArgs(request.args)
+          ? this.buildRunArgs(request.args, request.prompt !== undefined)
           : [...request.args];
 
       return await this.spawnBounded(
@@ -311,9 +311,13 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
    *  - the log level is validated so identity lines can always be observed
    *    (INFO-compatible only, single unambiguous value);
    *  - `--print-logs` and `--log-level <INFO>` are injected when absent so the
-   *    boundary can observe the sanitized provider/model identity.
+   *    boundary can observe the sanitized provider/model identity;
+   *  - OpenCode 2.0.3 only consumes piped stdin as the run message when the
+   *    positional `-` stdin sentinel is present. When a governed prompt exists,
+   *    the executor injects only that sentinel while the prompt itself remains
+   *    on stdin and therefore never appears in process argv.
    */
-  private buildRunArgs(args: readonly string[]): string[] {
+  private buildRunArgs(args: readonly string[], hasGovernedPrompt = false): string[] {
     if (args.length === 0 || args[0] !== 'run') {
       throw new CloudSandboxError(
         'CLOUD_AGENT_ARGS_INVALID',
@@ -377,11 +381,13 @@ export class CloudGovernedSandboxExecutor implements SandboxExecutor {
     }
 
     const hasPrintLogs = rest.includes('--print-logs');
+    const hasStdinMessageSentinel = rest.includes('-');
     return [
       'run',
       ...(hasPrintLogs ? [] : ['--print-logs']),
       ...(sawLogLevel ? [] : ['--log-level', logLevel]),
       ...rest,
+      ...(hasGovernedPrompt && !hasStdinMessageSentinel ? ['-'] : []),
     ];
   }
 
