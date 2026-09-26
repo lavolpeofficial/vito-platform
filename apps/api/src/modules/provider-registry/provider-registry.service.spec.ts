@@ -10,6 +10,7 @@
 
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { ProviderCredentialRequirement } from '@vito/contracts';
 import { ProviderRegistryService } from './provider-registry.service';
 import { randomUUID } from 'crypto';
 
@@ -193,6 +194,77 @@ describe('provider default-deny provisioning', () => {
     expect(tx.agentProvider.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ status: 'DISABLED' }),
     });
+  });
+});
+
+describe('provider credential requirement persistence', () => {
+  it('defaults new CLOUD_LLM providers to REQUIRED', async () => {
+    const { service, tx } = buildService();
+
+    await service.createProvider({
+      organizationId: ORG_A,
+      providerCode: 'CLOUD_SAFE',
+      displayName: 'Cloud Safe',
+      supportedCapabilities: ['CODE_PLAN'],
+    });
+
+    expect(tx.agentProvider.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        providerType: 'CLOUD_LLM',
+        credentialRequirement: ProviderCredentialRequirement.REQUIRED,
+      }),
+    });
+  });
+
+  it('rejects NOT_REQUIRED for CLOUD_LLM providers', async () => {
+    const { service, tx } = buildService();
+
+    await expect(
+      service.createProvider({
+        organizationId: ORG_A,
+        providerCode: 'CLOUD_REQUIRES_CREDENTIAL',
+        displayName: 'Cloud Requires Credential',
+        providerType: 'CLOUD_LLM',
+        supportedCapabilities: ['CODE_PLAN'],
+        credentialRequirement: ProviderCredentialRequirement.NOT_REQUIRED,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(tx.agentProvider.create).not.toHaveBeenCalled();
+  });
+
+  it('persists UNKNOWN to REQUIRED correction for an existing CLOUD_LLM provider', async () => {
+    const { service, prisma, tx, auditService } = buildService();
+    prisma.agentProvider.findFirst.mockResolvedValue({
+      id: 'provider-1',
+      organizationId: ORG_A,
+      providerCode: 'cloud.openrouter.free',
+      providerType: 'CLOUD_LLM',
+      credentialRequirement: 'UNKNOWN',
+    });
+
+    const result = await service.updateProvider({
+      organizationId: ORG_A,
+      providerId: 'provider-1',
+      credentialRequirement: ProviderCredentialRequirement.REQUIRED,
+    });
+
+    expect(tx.agentProvider.update).toHaveBeenCalledWith({
+      where: { id: 'provider-1' },
+      data: expect.objectContaining({
+        credentialRequirement: ProviderCredentialRequirement.REQUIRED,
+      }),
+    });
+    expect(result.credentialRequirement).toBe(ProviderCredentialRequirement.REQUIRED);
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'PROVIDER_UPDATED',
+        metadata: expect.objectContaining({
+          updatedFields: expect.arrayContaining(['credentialRequirement']),
+        }),
+      }),
+      tx,
+    );
   });
 });
 

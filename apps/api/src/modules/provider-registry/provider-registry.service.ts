@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { ProviderCredentialRequirement } from '@vito/contracts';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 
@@ -27,6 +28,7 @@ export interface CreateProviderInput {
   costMetadata?: Record<string, unknown>;
   assuranceLevels?: readonly string[];
   metadata?: Record<string, unknown>;
+  credentialRequirement?: ProviderCredentialRequirement;
 }
 
 export interface ActivateProviderInput {
@@ -60,6 +62,7 @@ export interface UpdateProviderInput {
   costMetadata?: Record<string, unknown>;
   assuranceLevels?: readonly string[];
   metadata?: Record<string, unknown>;
+  credentialRequirement?: ProviderCredentialRequirement;
 }
 
 export interface AssignProviderCapabilityInput {
@@ -92,13 +95,20 @@ export class ProviderRegistryService {
   // -------------------------------------------------------------------------
 
   async createProvider(input: CreateProviderInput) {
+    const providerType = input.providerType ?? 'CLOUD_LLM';
+    const credentialRequirement = this.resolveCredentialRequirementForWrite(
+      providerType,
+      input.credentialRequirement,
+      true,
+    );
+
     return this.prisma.$transaction(async (tx) => {
       const provider = await tx.agentProvider.create({
         data: {
           organizationId: input.organizationId,
           providerCode: input.providerCode,
           displayName: input.displayName,
-          providerType: (input.providerType ?? 'CLOUD_LLM') as any,
+          providerType: providerType as any,
           status: (input.status ?? 'DISABLED') as any,
           modelFamily: input.modelFamily ?? null,
           modelName: input.modelName ?? null,
@@ -113,6 +123,7 @@ export class ProviderRegistryService {
           costMetadata: (input.costMetadata ?? {}) as Prisma.InputJsonValue,
           assuranceLevels: [...(input.assuranceLevels ?? [])] as Prisma.InputJsonValue,
           metadata: (input.metadata ?? {}) as Prisma.InputJsonValue,
+          credentialRequirement: credentialRequirement as any,
         },
       });
 
@@ -127,6 +138,7 @@ export class ProviderRegistryService {
             providerCode: provider.providerCode,
             displayName: provider.displayName,
             providerType: provider.providerType,
+            credentialRequirement: provider.credentialRequirement,
             supportedCapabilities: input.supportedCapabilities,
           },
         },
@@ -146,6 +158,18 @@ export class ProviderRegistryService {
       where: { id: input.providerId, organizationId: input.organizationId },
     });
     if (!existing) throw new NotFoundException('Provider nicht gefunden.');
+
+    const effectiveProviderType = input.providerType ?? existing.providerType;
+    const effectiveCredentialRequirement =
+      input.credentialRequirement !== undefined || input.providerType !== undefined
+        ? this.resolveCredentialRequirementForWrite(
+            effectiveProviderType,
+            input.credentialRequirement ??
+              (existing.credentialRequirement as ProviderCredentialRequirement),
+            false,
+          )
+        : undefined;
+
     if (input.status === 'ACTIVE') {
       throw new BadRequestException(
         'Provider activation is blocked on the generic update endpoint. Use the explicit activation gate.',
@@ -188,6 +212,12 @@ export class ProviderRegistryService {
       }
       if (input.metadata !== undefined) {
         updateData.metadata = input.metadata as Prisma.InputJsonValue;
+      }
+      if (
+        input.credentialRequirement !== undefined ||
+        input.providerType !== undefined
+      ) {
+        updateData.credentialRequirement = effectiveCredentialRequirement as any;
       }
 
       const provider = await tx.agentProvider.update({
@@ -431,6 +461,31 @@ export class ProviderRegistryService {
       },
       orderBy: [{ capabilityCode: 'asc' }, { agentProviderId: 'asc' }],
     });
+  }
+
+  private resolveCredentialRequirementForWrite(
+    providerType: string,
+    raw: ProviderCredentialRequirement | undefined,
+    applyCloudDefault: boolean,
+  ): ProviderCredentialRequirement {
+    const allowed = Object.values(ProviderCredentialRequirement) as string[];
+    const resolved =
+      raw === undefined && applyCloudDefault && providerType === 'CLOUD_LLM'
+        ? ProviderCredentialRequirement.REQUIRED
+        : raw ?? ProviderCredentialRequirement.UNKNOWN;
+
+    if (!allowed.includes(resolved)) {
+      throw new BadRequestException('Invalid provider credentialRequirement.');
+    }
+    if (
+      providerType === 'CLOUD_LLM' &&
+      resolved !== ProviderCredentialRequirement.REQUIRED
+    ) {
+      throw new BadRequestException(
+        'CLOUD_LLM providers must declare credentialRequirement=REQUIRED.',
+      );
+    }
+    return resolved;
   }
 
   // -------------------------------------------------------------------------
