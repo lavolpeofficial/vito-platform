@@ -1,0 +1,72 @@
+#!/bin/sh
+set -eu
+
+BIN=/opt/vito/trusted-launchers/opencode-runtime/node_modules/.bin/opencode
+EVIDENCE=/opt/vito/trusted-launchers/opencode-sqlite-identity-evidence.mjs
+
+if [ "${1:-}" != "run" ]; then
+  exec "$BIN" "$@"
+fi
+
+: "${XDG_CONFIG_HOME:?XDG_CONFIG_HOME required}"
+: "${XDG_DATA_HOME:?XDG_DATA_HOME required}"
+
+AUTH_FILE="$XDG_DATA_HOME/opencode/auth.json"
+[ -f "$AUTH_FILE" ] || exit 55
+
+OPENROUTER_API_KEY="$(
+  node -e '
+    const fs = require("fs");
+    let value;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      value = parsed && typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : "";
+    } catch {
+      process.exit(55);
+    }
+    if (!value || value.length > 4096 || /[\r\n\0]/.test(value)) process.exit(55);
+    process.stdout.write(value);
+  ' "$AUTH_FILE"
+)" || exit 55
+[ -n "$OPENROUTER_API_KEY" ] || exit 55
+export OPENROUTER_API_KEY
+
+mkdir -p "$XDG_CONFIG_HOME/opencode"
+node -e '
+  const fs=require("fs");
+  const p=process.argv[1];
+  const h=process.env.HOME;
+  fs.writeFileSync(
+    p,
+    JSON.stringify({
+      model:"openrouter/cohere/north-mini-code:free",
+      permission:{
+        external_directory:{
+          "*":"deny",
+          [h+"/.local/share/opencode/snapshot/**"]:"allow",
+          [h+"/.cache/opencode/bin/**"]:"allow"
+        }
+      }
+    })
+  );
+' "$XDG_CONFIG_HOME/opencode/opencode.json"
+
+set +e
+"$BIN" "$@"
+rc=$?
+
+DB="$XDG_DATA_HOME/opencode/opencode.db"
+evidence_rc=54
+if [ -f "$DB" ]; then
+  node --no-warnings=ExperimentalWarning --experimental-sqlite "$EVIDENCE" "$DB"
+  evidence_rc=$?
+fi
+set -e
+
+unset OPENROUTER_API_KEY
+
+if [ "$rc" -ne 0 ]; then
+  exit "$rc"
+fi
+[ "$evidence_rc" -eq 0 ] || exit "$evidence_rc"
+exit 0
