@@ -218,6 +218,31 @@ describe('CloudGovernedAgentAdapter (CLOUD_GOVERNED tier, §9 gates)', () => {
     expect(worker.executeSandboxed).not.toHaveBeenCalled();
   });
 
+
+  it('CRITICAL: enforces capability-specific server-owned launcher aliases', async () => {
+    const worker = makeMockWorkerService();
+    (worker.executeSandboxed as jest.Mock).mockResolvedValue(makeWorkerResult());
+    const registry = makeRegistry([makeProfile({
+      capabilityLauncherAliases: { CODE_PLAN: 'opencode-openai-plan' },
+    })]);
+    const adapter = makeAdapter(worker, registry);
+
+    const denied = await adapter.execute(
+      { governedInputPayload: {} },
+      makeContext({ capabilityCode: 'CODE_PLAN', trustedExecutable: makeTrustedExecutable({ commandName: 'worker-agent' }) }),
+    );
+    expect(denied.status).toBe(AgentExecutionStatus.FAILED);
+    expect(denied.error?.code).toBe('EXECUTABLE_PROFILE_MISMATCH');
+    expect(worker.executeSandboxed).not.toHaveBeenCalled();
+
+    const allowed = await adapter.execute(
+      { governedInputPayload: {} },
+      makeContext({ capabilityCode: 'CODE_PLAN', trustedExecutable: makeTrustedExecutable({ commandName: 'opencode-openai-plan' }) }),
+    );
+    expect(allowed.status).toBe(AgentExecutionStatus.SUCCEEDED);
+    expect(worker.executeSandboxed).toHaveBeenCalledTimes(1);
+  });
+
   it('CRITICAL: fails closed when no credential reference is present', async () => {
     const worker = makeMockWorkerService();
     const result = await makeAdapter(worker).execute(

@@ -94,6 +94,34 @@ describe('toValidatedCloudExecutionProfile', () => {
     expect(Object.isFrozen(profile)).toBe(true);
   });
 
+
+  it('accepts and freezes server-owned capability launcher aliases', () => {
+    const profile = toValidatedCloudExecutionProfile({
+      profileId: 'flight-001',
+      providerCode: 'openai',
+      credentialRef: 'cloud:openai:flight-001',
+      trustedLauncherAlias: 'opencode',
+      capabilityLauncherAliases: { CODE_PLAN: 'opencode-openai-plan' },
+      expectedProviderId: 'openai',
+      maxDurationMs: 600_000,
+      maxParallelism: 1,
+      enabled: true,
+    });
+    expect(profile?.capabilityLauncherAliases).toEqual({ CODE_PLAN: 'opencode-openai-plan' });
+    expect(Object.isFrozen(profile?.capabilityLauncherAliases)).toBe(true);
+  });
+
+  it('rejects malformed capability launcher alias maps fail closed', () => {
+    const base = {
+      profileId: 'flight-001', providerCode: 'openai', credentialRef: 'cloud:openai:flight-001',
+      trustedLauncherAlias: 'opencode', expectedProviderId: 'openai',
+      maxDurationMs: 600_000, maxParallelism: 1, enabled: true,
+    };
+    expect(toValidatedCloudExecutionProfile({ ...base, capabilityLauncherAliases: {} })).toBeNull();
+    expect(toValidatedCloudExecutionProfile({ ...base, capabilityLauncherAliases: { 'bad code': 'x' } })).toBeNull();
+    expect(toValidatedCloudExecutionProfile({ ...base, capabilityLauncherAliases: { CODE_PLAN: '../x' } })).toBeNull();
+  });
+
   it('accepts an optional authorized model allow-list and freezes it', () => {
     const profile = toValidatedCloudExecutionProfile({
       profileId: 'flight-001',

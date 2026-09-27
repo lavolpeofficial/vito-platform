@@ -90,7 +90,9 @@ export class CloudGovernedAgentAdapter implements GovernedProviderAdapter {
       );
     }
 
-    if (trustedExecutable.commandName !== profile.trustedLauncherAlias) {
+    const expectedLauncherAlias =
+      profile.capabilityLauncherAliases?.[context.capabilityCode] ?? profile.trustedLauncherAlias;
+    if (trustedExecutable.commandName !== expectedLauncherAlias) {
       return failed(
         'EXECUTABLE_PROFILE_MISMATCH',
         'Trusted executable does not match the server-owned cloud profile launcher',
