@@ -6,13 +6,16 @@ import {
   loadOperatorBridgeConfig,
 } from './operator-bridge.config';
 import { OperatorBridgeController } from './operator-bridge.controller';
+import { OperatorBridgeMachineIdentityController } from './operator-bridge-machine-identity.controller';
+import { OperatorBridgeMachineIdentityService } from './operator-bridge-machine-identity.service';
 import { OperatorBridgeService } from './operator-bridge.service';
 
 @Module({
   imports: [AgentWorkforceModule, AuditModule],
-  controllers: [OperatorBridgeController],
+  controllers: [OperatorBridgeController, OperatorBridgeMachineIdentityController],
   providers: [
     OperatorBridgeService,
+    OperatorBridgeMachineIdentityService,
     {
       provide: OPERATOR_BRIDGE_CONFIG,
       useFactory: loadOperatorBridgeConfig,
