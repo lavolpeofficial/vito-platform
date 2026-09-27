@@ -161,6 +161,7 @@ export class AgentWorkforceService {
 
     const commandAlias = this.providerCommandAlias(provider.metadata);
     const defaultArgs = this.providerDefaultArgs(provider.metadata);
+    const executionBudget = this.effectiveExecutionBudget(input.executionBudget, provider);
 
     const codeBuildExecutionTarget = codeBuildEvidence
       ? buildCodeBuildExecutionTarget({
@@ -227,7 +228,7 @@ export class AgentWorkforceService {
       correlationId,
       workflowRunId: input.workflowRunId,
       workflowStepRunId: input.workflowStepRunId,
-      executionBudget: input.executionBudget,
+      executionBudget,
       ...(codeBuildExecutionTarget ? { codeBuildExecutionTarget } : {}),
     });
 
@@ -477,6 +478,25 @@ export class AgentWorkforceService {
     ) {
       throw new BadRequestException('prompt must be a non-empty bounded string');
     }
+  }
+
+  private effectiveExecutionBudget(
+    requested: ExecutionBudget | undefined,
+    provider: { readonly providerType: ProviderType; readonly providerCode: string },
+  ): ExecutionBudget | undefined {
+    if (!isCloudGovernedProviderType(provider.providerType)) return requested;
+
+    const profile = this.profileRegistry.resolve(provider.providerCode);
+    if (!profile) return requested;
+
+    const requestedDuration = requested?.maxDurationMs;
+    return Object.freeze({
+      ...(requested ?? {}),
+      maxDurationMs:
+        requestedDuration === undefined
+          ? profile.maxDurationMs
+          : Math.min(requestedDuration, profile.maxDurationMs),
+    });
   }
 
   private providerCommandAlias(metadata: Record<string, unknown>): string {

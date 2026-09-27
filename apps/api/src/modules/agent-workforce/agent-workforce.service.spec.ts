@@ -361,6 +361,79 @@ describe('AgentWorkforceService', () => {
     );
   });
 
+  it('uses the server-owned cloud profile duration when workflow dispatch omits a budget', async () => {
+    route.mockResolvedValue({
+      selectedProvider: {
+        id: 'cloud-1',
+        providerCode: 'cloud.openai.main',
+        providerType: ProviderType.CLOUD_LLM,
+        metadata: { commandAlias: 'worker-agent', defaultArgs: [] },
+      },
+      routingDecisionId: 'route-cloud',
+      rejectionReasons: {},
+      decisionReason: 'selected',
+    });
+    executeWorkspaceFileOperation.mockResolvedValue({ status: AgentExecutionStatus.SUCCEEDED });
+    const registry = new CloudExecutionProfileRegistry([enabledCloudProfile('cloud.openai.main')]);
+
+    await service(registry).dispatch({ ...input, executionBudget: undefined });
+
+    expect(executeWorkspaceFileOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ executionBudget: { maxDurationMs: 60_000 } }),
+    );
+  });
+
+  it('caps an explicit cloud execution duration to the server-owned profile maximum', async () => {
+    route.mockResolvedValue({
+      selectedProvider: {
+        id: 'cloud-1',
+        providerCode: 'cloud.openai.main',
+        providerType: ProviderType.CLOUD_LLM,
+        metadata: { commandAlias: 'worker-agent', defaultArgs: [] },
+      },
+      routingDecisionId: 'route-cloud',
+      rejectionReasons: {},
+      decisionReason: 'selected',
+    });
+    executeWorkspaceFileOperation.mockResolvedValue({ status: AgentExecutionStatus.SUCCEEDED });
+    const registry = new CloudExecutionProfileRegistry([enabledCloudProfile('cloud.openai.main')]);
+
+    await service(registry).dispatch(input);
+
+    expect(executeWorkspaceFileOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionBudget: { maxDurationMs: 60_000, maxCostMinorUnits: 50 },
+      }),
+    );
+  });
+
+  it('preserves a shorter explicit cloud execution duration and other budget fields', async () => {
+    route.mockResolvedValue({
+      selectedProvider: {
+        id: 'cloud-1',
+        providerCode: 'cloud.openai.main',
+        providerType: ProviderType.CLOUD_LLM,
+        metadata: { commandAlias: 'worker-agent', defaultArgs: [] },
+      },
+      routingDecisionId: 'route-cloud',
+      rejectionReasons: {},
+      decisionReason: 'selected',
+    });
+    executeWorkspaceFileOperation.mockResolvedValue({ status: AgentExecutionStatus.SUCCEEDED });
+    const registry = new CloudExecutionProfileRegistry([enabledCloudProfile('cloud.openai.main')]);
+
+    await service(registry).dispatch({
+      ...input,
+      executionBudget: { maxDurationMs: 20_000, maxTokens: 1234, maxCostMinorUnits: 50 },
+    });
+
+    expect(executeWorkspaceFileOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionBudget: { maxDurationMs: 20_000, maxTokens: 1234, maxCostMinorUnits: 50 },
+      }),
+    );
+  });
+
   it('CRITICAL: denies a CLOUD_LLM provider when the bound profile is disabled', async () => {
     route.mockResolvedValue({
       selectedProvider: {
