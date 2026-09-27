@@ -24,6 +24,10 @@ const contractsPkgPath = resolve(rootDir, 'packages/contracts/package.json');
 const contractsPkg = JSON.parse(readFileSync(contractsPkgPath, 'utf8'));
 const dockerfilePath = resolve(rootDir, 'Dockerfile');
 const trustedLauncherPath = resolve(rootDir, 'deploy/staging/trusted-launchers/opencode');
+const openAiPlanLauncherPath = resolve(
+  rootDir,
+  'deploy/staging/trusted-launchers/opencode-openai-plan',
+);
 const openRouterFreeLauncherPath = resolve(
   rootDir,
   'deploy/staging/trusted-launchers/opencode-openrouter-free',
@@ -51,12 +55,14 @@ if (typeof contractsPkg.scripts?.build !== 'string' || !contractsPkg.scripts.bui
 
 let dockerfile;
 let trustedLauncher;
+let openAiPlanLauncher;
 let openRouterFreeLauncher;
 let identityEvidence;
 let stagingCompose;
 try {
   dockerfile = readFileSync(dockerfilePath, 'utf8');
   trustedLauncher = readFileSync(trustedLauncherPath, 'utf8');
+  openAiPlanLauncher = readFileSync(openAiPlanLauncherPath, 'utf8');
   openRouterFreeLauncher = readFileSync(openRouterFreeLauncherPath, 'utf8');
   identityEvidence = readFileSync(identityEvidencePath, 'utf8');
   stagingCompose = readFileSync(stagingComposePath, 'utf8');
@@ -66,6 +72,9 @@ try {
 if (
   !dockerfile.includes(
     'COPY deploy/staging/trusted-launchers/opencode /opt/vito/trusted-launchers/opencode',
+  ) ||
+  !dockerfile.includes(
+    'COPY deploy/staging/trusted-launchers/opencode-openai-plan /opt/vito/trusted-launchers/opencode-openai-plan',
   ) ||
   !dockerfile.includes(
     'COPY deploy/staging/trusted-launchers/opencode-openrouter-free /opt/vito/trusted-launchers/opencode-openrouter-free',
@@ -82,6 +91,19 @@ if (
   !trustedLauncher.includes('model:"openai/gpt-6-astra"')
 ) {
   fail('reviewed OpenCode launcher must pin the server-owned model and enforce SQLite identity evidence');
+}
+
+if (
+  !openAiPlanLauncher.includes('XDG_DATA_HOME') ||
+  !openAiPlanLauncher.includes('opencode-sqlite-identity-evidence.mjs') ||
+  !openAiPlanLauncher.includes('model:"openai/gpt-6-astra"') ||
+  !openAiPlanLauncher.includes('default_agent:"plan"') ||
+  !openAiPlanLauncher.includes('{action:"edit",resource:"*",effect:"deny"}') ||
+  !openAiPlanLauncher.includes('{action:"shell",resource:"*",effect:"deny"}') ||
+  !openAiPlanLauncher.includes('{action:"subagent",resource:"*",effect:"deny"}') ||
+  !openAiPlanLauncher.includes('"$BIN" run --agent plan --print-logs --log-level info -')
+) {
+  fail('reviewed OpenAI CODE_PLAN launcher must pin gpt-6-astra/plan, deny write/shell/subagent authority and enforce SQLite identity evidence');
 }
 
 if (
@@ -106,6 +128,7 @@ if (
 }
 
 if (
+  !stagingCompose.includes('"capabilityLauncherAliases":{"CODE_PLAN":"opencode-openai-plan"}') ||
   !stagingCompose.includes('"expectedProviderId":"openai","allowedModelIds":["gpt-6-astra"]')
 ) {
   fail('staging cloud profile must server-authorize only the governed gpt-6-astra model');

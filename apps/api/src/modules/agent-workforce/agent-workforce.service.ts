@@ -159,7 +159,7 @@ export class AgentWorkforceService {
       });
     }
 
-    const commandAlias = this.providerCommandAlias(provider.metadata);
+    const commandAlias = this.providerCommandAlias(provider.metadata, provider.providerCode, capabilityCode, tier);
     const defaultArgs = this.providerDefaultArgs(provider.metadata);
     const executionBudget = this.effectiveExecutionBudget(input.executionBudget, provider);
 
@@ -499,7 +499,19 @@ export class AgentWorkforceService {
     });
   }
 
-  private providerCommandAlias(metadata: Record<string, unknown>): string {
+  private providerCommandAlias(
+    metadata: Record<string, unknown>,
+    providerCode: string,
+    capabilityCode: string,
+    tier: ExecutionTier,
+  ): string {
+    if (tier === ExecutionTier.CLOUD_GOVERNED) {
+      const profile = this.profileRegistry.resolve(providerCode);
+      if (!profile) {
+        throw new ServiceUnavailableException({ code: 'CLOUD_EXECUTION_PROFILE_UNAVAILABLE' });
+      }
+      return profile.capabilityLauncherAliases?.[capabilityCode] ?? profile.trustedLauncherAlias;
+    }
     const alias = metadata.commandAlias;
     if (typeof alias !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(alias)) {
       throw new ServiceUnavailableException({ code: 'AGENT_PROVIDER_COMMAND_ALIAS_INVALID' });

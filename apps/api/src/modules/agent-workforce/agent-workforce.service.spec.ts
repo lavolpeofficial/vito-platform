@@ -361,6 +361,29 @@ describe('AgentWorkforceService', () => {
     );
   });
 
+
+  it('uses a capability-specific server-owned launcher for cloud CODE_PLAN and ignores DB metadata alias', async () => {
+    route.mockResolvedValue({
+      selectedProvider: {
+        id: 'cloud-1', providerCode: 'cloud.openai.main', providerType: ProviderType.CLOUD_LLM,
+        metadata: { commandAlias: 'db-controlled-builder', defaultArgs: ['run'] },
+      },
+      routingDecisionId: 'route-cloud', rejectionReasons: {}, decisionReason: 'selected',
+    });
+    executeWorkspaceFileOperation.mockResolvedValue({ status: AgentExecutionStatus.SUCCEEDED });
+    const registry = new CloudExecutionProfileRegistry([{
+      ...enabledCloudProfile('cloud.openai.main'),
+      trustedLauncherAlias: 'opencode',
+      capabilityLauncherAliases: { CODE_PLAN: 'opencode-openai-plan' },
+    }]);
+
+    await service(registry).dispatch(input);
+
+    expect(executeWorkspaceFileOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ command: 'opencode-openai-plan', capabilityCode: 'CODE_PLAN' }),
+    );
+  });
+
   it('uses the server-owned cloud profile duration when workflow dispatch omits a budget', async () => {
     route.mockResolvedValue({
       selectedProvider: {
