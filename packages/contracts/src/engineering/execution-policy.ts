@@ -776,6 +776,19 @@ function classifyCommand(
     return { allowed: true, reasonCode: PolicyReasonCode.POLICY_ALLOWED };
   }
 
+  // PR #143: reviewer agents use a deliberately separate authority surface.
+  // This prevents a coding-agent alias from becoming reviewer authority (or
+  // vice versa) merely because both happen to resolve to the same executable.
+  // As above, authorization is exact whole-command only and server-selected.
+  if (
+    profile === ExecutionProfile.REVIEWER &&
+    policy.trustedReviewerAgentAliases !== undefined &&
+    policy.trustedReviewerAgentAliases.length > 0 &&
+    policy.trustedReviewerAgentAliases.includes(trimmed)
+  ) {
+    return { allowed: true, reasonCode: PolicyReasonCode.POLICY_ALLOWED };
+  }
+
   // Split into chained commands — each must be independently safe
   const chainedCommands = splitShellChains(trimmed);
 
@@ -817,9 +830,15 @@ export interface ExecutionPolicyConfig {
    * prefix semantics, no wildcards, no shell chains, no arguments.
    * Deliberately separate from allowedCommands (which uses prefix matching).
    * Only ever set per-invocation by the governed execution layer for
-   * CODE_BUILD/builder run contexts backed by a trusted local executable.
+   * BUILDER contexts backed by a trusted local executable.
    */
   readonly trustedCodingAgentAliases?: readonly string[];
+  /**
+   * PR #143: server-selected trusted reviewer-agent launcher alias. Uses the
+   * same exact-match semantics as trustedCodingAgentAliases, but is effective
+   * only for REVIEWER contexts so authority cannot bleed across profiles.
+   */
+  readonly trustedReviewerAgentAliases?: readonly string[];
   /** Whether network access is permitted. */
   readonly allowNetwork: boolean;
   /** Whether secrets are permitted. */
