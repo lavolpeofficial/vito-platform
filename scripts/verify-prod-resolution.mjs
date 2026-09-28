@@ -79,9 +79,13 @@ if (
 if (
   !trustedLauncher.includes('XDG_DATA_HOME') ||
   !trustedLauncher.includes('opencode-sqlite-identity-evidence.mjs') ||
-  !trustedLauncher.includes('model:"openai/gpt-6-astra"')
+  !trustedLauncher.includes('model:"openai/gpt-6-astra"') ||
+  !trustedLauncher.includes('process.env.CAPABILITY_CODE==="TEST_EXECUTION"') ||
+  !trustedLauncher.includes('{action:"edit",resource:"*",effect:"deny"}') ||
+  !trustedLauncher.includes('{action:"shell",resource:"*",effect:"deny"}') ||
+  !trustedLauncher.includes('{action:"shell",resource:"pnpm test",effect:"allow"}')
 ) {
-  fail('reviewed OpenCode launcher must pin the server-owned model and enforce SQLite identity evidence');
+  fail('reviewed OpenCode launcher must pin the server-owned model, enforce SQLite identity evidence, and keep TEST_EXECUTION read-only except for pnpm test');
 }
 
 if (
@@ -106,6 +110,7 @@ if (
 }
 
 if (
+  !stagingCompose.includes('"testExecutionLauncherAlias":"opencode"') ||
   !stagingCompose.includes('"expectedProviderId":"openai","allowedModelIds":["gpt-6-astra"]')
 ) {
   fail('staging cloud profile must server-authorize only the governed gpt-6-astra model');

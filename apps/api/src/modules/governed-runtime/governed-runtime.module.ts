@@ -44,8 +44,23 @@ export { GOVERNED_ADAPTER_REGISTRY, GOVERNED_WORKSPACE_ROOT } from './governed-r
     TrustedLocalExecutableResolver,
     {
       provide: TrustedExecutionPolicyResolver,
-      useFactory: (workspaceRoot: string) => new TrustedExecutionPolicyResolver(workspaceRoot),
-      inject: [GOVERNED_WORKSPACE_ROOT],
+      useFactory: (
+        workspaceRoot: string,
+        providerResolver: PrismaProviderDeclarationResolver,
+        profileRegistry: CloudExecutionProfileRegistry,
+        trustedExecutableResolver: TrustedLocalExecutableResolver,
+      ) => new TrustedExecutionPolicyResolver(
+        workspaceRoot,
+        providerResolver,
+        profileRegistry,
+        trustedExecutableResolver,
+      ),
+      inject: [
+        GOVERNED_WORKSPACE_ROOT,
+        PrismaProviderDeclarationResolver,
+        CloudExecutionProfileRegistry,
+        TrustedLocalExecutableResolver,
+      ],
     },
     {
       provide: GovernedWorkingDirectoryResolver,

@@ -11,6 +11,7 @@ export interface CloudExecutionProfile {
   readonly credentialRef: string;
   readonly trustedLauncherAlias: string;
   readonly readinessProbeLauncherAlias?: string;
+  readonly testExecutionLauncherAlias?: string;
   readonly expectedProviderId: string;
   readonly allowedModelIds?: readonly string[];
   readonly maxDurationMs: number;
@@ -46,10 +47,11 @@ export function toValidatedCloudExecutionProfile(raw:unknown):CloudExecutionProf
   const credentialRef=value.credentialRef;if(typeof credentialRef!=='string'||!CREDENTIAL_REF_PATTERN.test(credentialRef))return null;
   const trustedLauncherAlias=value.trustedLauncherAlias;if(typeof trustedLauncherAlias!=='string'||!LAUNCHER_ALIAS_PATTERN.test(trustedLauncherAlias))return null;
   let readinessProbeLauncherAlias:string|undefined;if(value.readinessProbeLauncherAlias!==undefined){if(typeof value.readinessProbeLauncherAlias!=='string'||!LAUNCHER_ALIAS_PATTERN.test(value.readinessProbeLauncherAlias))return null;readinessProbeLauncherAlias=value.readinessProbeLauncherAlias;}
+  let testExecutionLauncherAlias:string|undefined;if(value.testExecutionLauncherAlias!==undefined){if(typeof value.testExecutionLauncherAlias!=='string'||!LAUNCHER_ALIAS_PATTERN.test(value.testExecutionLauncherAlias))return null;testExecutionLauncherAlias=value.testExecutionLauncherAlias;}
   const expectedProviderId=value.expectedProviderId;if(typeof expectedProviderId!=='string'||!PROVIDER_ID_PATTERN.test(expectedProviderId))return null;
   let allowedModelIds:readonly string[]|undefined;if(value.allowedModelIds!==undefined){if(!Array.isArray(value.allowedModelIds)||value.allowedModelIds.length===0||value.allowedModelIds.length>MAX_ALLOWED_MODEL_IDS)return null;const normalized:string[]=[];for(const entry of value.allowedModelIds){if(typeof entry!=='string'||!MODEL_ID_PATTERN.test(entry))return null;normalized.push(entry);}if(new Set(normalized).size!==normalized.length)return null;allowedModelIds=Object.freeze(normalized);}
   const maxDurationMs=value.maxDurationMs;if(typeof maxDurationMs!=='number'||!Number.isInteger(maxDurationMs)||maxDurationMs<CLOUD_EXECUTION_PROFILE_MIN_DURATION_MS||maxDurationMs>CLOUD_EXECUTION_PROFILE_MAX_DURATION_MS)return null;
   const maxParallelism=value.maxParallelism;if(typeof maxParallelism!=='number'||!Number.isInteger(maxParallelism)||maxParallelism<1||maxParallelism>CLOUD_EXECUTION_PROFILE_MAX_PARALLELISM)return null;
   const enabled=value.enabled;if(typeof enabled!=='boolean')return null;
-  return Object.freeze({profileId,providerCode,credentialRef,trustedLauncherAlias,...(readinessProbeLauncherAlias!==undefined?{readinessProbeLauncherAlias}:{}),expectedProviderId,...(allowedModelIds!==undefined?{allowedModelIds}:{}),maxDurationMs,maxParallelism,enabled});
+  return Object.freeze({profileId,providerCode,credentialRef,trustedLauncherAlias,...(readinessProbeLauncherAlias!==undefined?{readinessProbeLauncherAlias}:{}),...(testExecutionLauncherAlias!==undefined?{testExecutionLauncherAlias}:{}),expectedProviderId,...(allowedModelIds!==undefined?{allowedModelIds}:{}),maxDurationMs,maxParallelism,enabled});
 }
