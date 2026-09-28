@@ -6,7 +6,40 @@ if [ "${1:-}" != "run" ]; then exec "$BIN" "$@"; fi
 : "${XDG_CONFIG_HOME:?XDG_CONFIG_HOME required}"
 : "${XDG_DATA_HOME:?XDG_DATA_HOME required}"
 mkdir -p "$XDG_CONFIG_HOME/opencode"
-node -e 'const fs=require("fs"); const p=process.argv[1]; const h=process.env.HOME; fs.writeFileSync(p, JSON.stringify({model:"openai/gpt-6-astra",permission:{external_directory:{"*":"deny",[h+"/.local/share/opencode/snapshot/**"]:"allow",[h+"/.cache/opencode/bin/**"]:"allow"}}}));' "$XDG_CONFIG_HOME/opencode/opencode.json"
+node -e '
+const fs=require("fs");
+const p=process.argv[1];
+const h=process.env.HOME;
+const isTest=process.env.CAPABILITY_CODE==="TEST_EXECUTION";
+const config=isTest ? {
+  model:"openai/gpt-6-astra",
+  default_agent:"build",
+  permissions:[
+    {action:"read",resource:"*",effect:"allow"},
+    {action:"read",resource:"*.env",effect:"deny"},
+    {action:"read",resource:"*.env.*",effect:"deny"},
+    {action:"glob",resource:"*",effect:"allow"},
+    {action:"grep",resource:"*",effect:"allow"},
+    {action:"edit",resource:"*",effect:"deny"},
+    {action:"shell",resource:"*",effect:"deny"},
+    {action:"shell",resource:"pnpm test",effect:"allow"},
+    {action:"subagent",resource:"*",effect:"deny"},
+    {action:"webfetch",resource:"*",effect:"deny"},
+    {action:"websearch",resource:"*",effect:"deny"},
+    {action:"external_directory",resource:"*",effect:"deny"},
+    {action:"external_directory",resource:h+"/.local/share/opencode/snapshot/*",effect:"allow"},
+    {action:"external_directory",resource:h+"/.cache/opencode/bin/*",effect:"allow"}
+  ]
+} : {
+  model:"openai/gpt-6-astra",
+  permission:{external_directory:{
+    "*":"deny",
+    [h+"/.local/share/opencode/snapshot/**"]:"allow",
+    [h+"/.cache/opencode/bin/**"]:"allow"
+  }}
+};
+fs.writeFileSync(p,JSON.stringify(config));
+' "$XDG_CONFIG_HOME/opencode/opencode.json"
 set +e
 "$BIN" "$@"
 rc=$?
