@@ -18,6 +18,7 @@ export const DEFAULT_CAPABILITY_PROFILES: Readonly<Record<string, ExecutionProfi
     CODE_BUILD: ExecutionProfile.BUILDER,
     TEST_EXECUTION: ExecutionProfile.BUILDER,
     REVIEW_PACKAGE: ExecutionProfile.REVIEWER,
+    RED_TEAM: ExecutionProfile.REVIEWER,
     CODE_REVIEW: ExecutionProfile.REVIEWER,
     SECURITY_REVIEW: ExecutionProfile.REVIEWER,
   });
