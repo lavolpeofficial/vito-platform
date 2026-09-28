@@ -32,6 +32,7 @@ describe('EngineeringProviderProvisioningService', () => {
         EngineeringCapability.CODE_BUILD,
         EngineeringCapability.TEST_EXECUTION,
         EngineeringCapability.REVIEW_PACKAGE,
+        EngineeringCapability.RED_TEAM,
       ],
     });
     listCapabilities.mockResolvedValue([]);
@@ -64,7 +65,7 @@ describe('EngineeringProviderProvisioningService', () => {
       status: 'DISABLED',
       modelFamily: 'openai',
     }));
-    expect(assignCapability).toHaveBeenCalledTimes(4);
+    expect(assignCapability).toHaveBeenCalledTimes(5);
     for (const call of assignCapability.mock.calls) {
       expect(call[0].isEnabled).toBe(false);
     }
@@ -95,6 +96,7 @@ describe('EngineeringProviderProvisioningService', () => {
         EngineeringCapability.CODE_BUILD,
         EngineeringCapability.TEST_EXECUTION,
         EngineeringCapability.REVIEW_PACKAGE,
+        EngineeringCapability.RED_TEAM,
       ],
     });
     listCapabilities.mockResolvedValueOnce([
@@ -102,6 +104,7 @@ describe('EngineeringProviderProvisioningService', () => {
       { capabilityCode: EngineeringCapability.CODE_BUILD, isEnabled: false },
       { capabilityCode: EngineeringCapability.TEST_EXECUTION, isEnabled: false },
       { capabilityCode: EngineeringCapability.REVIEW_PACKAGE, isEnabled: false },
+      { capabilityCode: EngineeringCapability.RED_TEAM, isEnabled: false },
     ]);
 
     const result = await service().provision();
@@ -122,6 +125,7 @@ describe('EngineeringProviderProvisioningService', () => {
         EngineeringCapability.CODE_BUILD,
         EngineeringCapability.TEST_EXECUTION,
         EngineeringCapability.REVIEW_PACKAGE,
+        EngineeringCapability.RED_TEAM,
       ],
     });
 
@@ -141,6 +145,7 @@ describe('EngineeringProviderProvisioningService', () => {
         EngineeringCapability.CODE_BUILD,
         EngineeringCapability.TEST_EXECUTION,
         EngineeringCapability.REVIEW_PACKAGE,
+        EngineeringCapability.RED_TEAM,
       ],
     });
     listCapabilities.mockResolvedValueOnce([

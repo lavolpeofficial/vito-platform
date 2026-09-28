@@ -46,6 +46,9 @@ describe('TrustedExecutionProfileResolver', () => {
     await expect(
       resolver.resolve({ ...TRUSTED, capabilityCode: 'CODE_REVIEW' }),
     ).resolves.toBe(ExecutionProfile.REVIEWER);
+    await expect(
+      resolver.resolve({ ...TRUSTED, capabilityCode: 'RED_TEAM' }),
+    ).resolves.toBe(ExecutionProfile.REVIEWER);
   });
 
   it('invalid configured profile value is rejected at construction time (fail closed)', () => {

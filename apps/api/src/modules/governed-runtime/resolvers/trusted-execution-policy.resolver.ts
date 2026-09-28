@@ -20,8 +20,8 @@ interface ProviderDeclarationResolver {
 
 /**
  * Trusted EO-01.5 policy resolver. The frozen policy factories remain the
- * source of truth. TEST_EXECUTION and REVIEW_PACKAGE receive distinct exact
- * launcher authority only when server-owned provider/profile/executable
+ * source of truth. TEST_EXECUTION, REVIEW_PACKAGE, and RED_TEAM receive
+ * distinct exact launcher authority only when server-owned provider/profile/executable
  * evidence all agree.
  */
 export class TrustedExecutionPolicyResolver implements ExecutionPolicyResolver {
@@ -86,7 +86,8 @@ export class TrustedExecutionPolicyResolver implements ExecutionPolicyResolver {
   ): Promise<ExecutionPolicyConfig> {
     const base = createReviewerPolicy(this.workspaceRoot);
     if (
-      context.capabilityCode !== EngineeringCapability.REVIEW_PACKAGE ||
+      (context.capabilityCode !== EngineeringCapability.REVIEW_PACKAGE &&
+        context.capabilityCode !== EngineeringCapability.RED_TEAM) ||
       context.requestedAction !== ExecutionAction.RUN_COMMAND ||
       !this.providerResolver ||
       !this.cloudProfileRegistry ||
