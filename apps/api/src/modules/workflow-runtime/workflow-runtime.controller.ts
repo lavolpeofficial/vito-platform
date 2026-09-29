@@ -4,6 +4,7 @@ import { UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../../common/auth/authenticated-user.interface';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { TenantContext } from '../../common/tenant/tenant-context';
+import { HumanDecisionCorrectionService } from './human-decision-correction.service';
 import { HumanReleaseApprovalService } from './human-release-approval.service';
 import { WorkflowRuntimeService } from './workflow-runtime.service';
 
@@ -13,6 +14,7 @@ import { WorkflowRuntimeService } from './workflow-runtime.service';
 export class WorkflowRuntimeController {
   constructor(
     private readonly service: WorkflowRuntimeService,
+    private readonly humanDecisionCorrection: HumanDecisionCorrectionService,
     private readonly humanReleaseApproval: HumanReleaseApprovalService,
     private readonly tenantContext: TenantContext,
   ) {}
@@ -47,6 +49,25 @@ export class WorkflowRuntimeController {
   @ApiOkResponse({ description: 'Resumes a blocked workflow run. Provider-blocked steps are returned to READY; no execution is triggered automatically.' })
   resume(@Param('workflowRunId') workflowRunId: string) {
     return this.service.resumeRun(this.tenantContext.getOrThrow(), workflowRunId);
+  }
+
+  @Post(':workflowRunId/human-decision/correction')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description:
+      'Explicit human decision for a HUMAN_DECISION_REQUIRED block. Atomically creates one READY CORRECTION step and does not trigger execution.',
+  })
+  requestHumanCorrection(
+    @Param('workflowRunId') workflowRunId: string,
+    @Req() request: { user: AuthenticatedUser },
+  ) {
+    return this.humanDecisionCorrection.requestCorrection({
+      organizationId: this.tenantContext.getOrThrow(),
+      workflowRunId,
+      decidedByUserId: request.user.userId,
+      isMachineIdentity: request.user.isMachineIdentity,
+    });
   }
 
   @Post(':workflowRunId/human-release-approval')

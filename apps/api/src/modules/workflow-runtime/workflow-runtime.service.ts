@@ -596,6 +596,12 @@ export class WorkflowRuntimeService {
     }
 
     if (run.status === 'BLOCKED') {
+      if (run.blockReasonCode === 'HUMAN_DECISION_REQUIRED') {
+        throw new ConflictException(
+          'HUMAN_DECISION_REQUIRED must be resolved through an explicit human decision; generic resume is forbidden.',
+        );
+      }
+
       return this.prisma.$transaction(async (tx) => {
         const updated = await tx.workflowRun.update({
           where: { id: workflowRunId },
