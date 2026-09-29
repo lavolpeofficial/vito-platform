@@ -45,6 +45,10 @@ export {
 } from './permissions.js';
 export { ExecutionArtifactType } from './artifacts.js';
 export {
+  nextEngineeringHumanDecision,
+  type HumanDecisionInput,
+} from './human-decision.js';
+export {
   nextEngineeringStep,
   checkAl4Independence,
   type StateMachineInput,
