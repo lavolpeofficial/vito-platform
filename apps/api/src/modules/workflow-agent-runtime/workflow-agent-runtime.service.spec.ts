@@ -12,6 +12,7 @@ describe('WorkflowAgentRuntimeService', () => {
   const tryRecordOutcome = jest.fn();
   const resolveForWorkflowDispatch = jest.fn();
   const resolveRedTeamEvidence = jest.fn();
+  const resolveCorrectionContext = jest.fn();
 
   const prisma = {
     workflowRun: { findFirst: findRun },
@@ -28,6 +29,7 @@ describe('WorkflowAgentRuntimeService', () => {
     undefined,
     { resolveForWorkflowDispatch } as any,
     { resolve: resolveRedTeamEvidence } as any,
+    { resolve: resolveCorrectionContext } as any,
   );
 
   beforeEach(() => {
@@ -47,6 +49,12 @@ describe('WorkflowAgentRuntimeService', () => {
     resolveRedTeamEvidence.mockResolvedValue({
       schemaVersion: 'RED_TEAM_EVIDENCE_V1', workflowRunId: 'run-1', redTeamStepRunId: 'step-red',
       testedRevisionSha: 'a'.repeat(40), entries: [], manifestSha256: 'f'.repeat(64),
+    });
+    resolveCorrectionContext.mockResolvedValue({
+      schemaVersion: 'CORRECTION_CONTEXT_V1', workflowRunId: 'run-1', correctionStepRunId: 'step-correction',
+      parseVerdictStepRunId: 'step-parse', redTeamStepRunId: 'step-red', reviewerExecutionId: 'inv-red', verdict: 'D',
+      blockingFindings: [{ id: 'RT-001', severity: 'HIGH', category: 'TESTING', summary: 'Fix evidence handoff.', evidenceRefs: [], blocking: true }],
+      governedExecutionReference: 'gov://execution/inv-red', policyDecisionReference: 'policy-red', manifestSha256: 'c'.repeat(64),
     });
     resolveForWorkflowDispatch.mockResolvedValue({
       approvalId: 'approval-1',
@@ -265,4 +273,31 @@ describe('WorkflowAgentRuntimeService', () => {
     await expect(service.executeCurrentStep('org-1', 'run-1')).rejects.toBeInstanceOf(ConflictException);
     expect(dispatch).not.toHaveBeenCalled();
   });
+  it('injects only the server-resolved correction context into CORRECTION prompt and persists the binding', async () => {
+    findRun.mockResolvedValueOnce({
+      id: 'run-1', taskId: 'task-1', status: 'RUNNING',
+      currentStepType: EngineeringStepType.CORRECTION, assuranceLevel: 'AL-3', correlationId: 'corr-1',
+    });
+    findStep.mockResolvedValueOnce({ id: 'step-correction', stepType: EngineeringStepType.CORRECTION, attemptNumber: 1 });
+    capabilityForStep.mockReturnValueOnce(EngineeringCapability.CODE_BUILD);
+    dispatch.mockResolvedValueOnce({
+      routingDecisionId: 'route-correction', selectedProviderId: 'provider-1', selectedProviderCode: 'cloud.openai.main', experienceId: 'exp-correction',
+      execution: {
+        status: AgentExecutionStatus.SUCCEEDED, invocationId: 'inv-correction', outputReference: 'gov://execution/inv-correction',
+        providerExecutionMetadata: { governedResultSettling: { baseSha: '[REDACTED]', changedFiles: [] } },
+      },
+    });
+    await service.executeCurrentStep('org-1', 'run-1');
+    expect(resolveCorrectionContext).toHaveBeenCalledWith('org-1', 'run-1', 'step-correction');
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: expect.stringContaining('CORRECTION_CONTEXT_MANIFEST_SHA256: ' + 'c'.repeat(64)),
+    }));
+    expect(dispatch.mock.calls.at(-1)?.[0].prompt).toContain('RT-001');
+    expect(completeStep).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        correctionContextManifest: expect.objectContaining({ manifestSha256: 'c'.repeat(64) }),
+      }),
+    }));
+  });
+
 });

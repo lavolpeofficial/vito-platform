@@ -10,6 +10,7 @@ import { CodeBuildApprovalService } from '../engineering-release/code-build-appr
 import { WorkflowReviewResultProjectorService } from './workflow-review-result-projector.service';
 import { buildBoundedExecutionResultSummary } from '../governed-invocation/governed-evidence-binding';
 import { type RedTeamEvidenceManifest, WorkflowRedTeamEvidenceHandoffService } from './workflow-red-team-evidence-handoff.service';
+import { type CorrectionContextManifest, WorkflowCorrectionContextHandoffService } from './workflow-correction-context-handoff.service';
 
 const MAX_TASK_CONTEXT_CHARS = 32_000;
 const MAX_EXECUTION_EVIDENCE_REFERENCES = 32;
@@ -32,6 +33,7 @@ export class WorkflowAgentRuntimeService {
     private readonly runtimeReflectionLearning?: RuntimeReflectionLearningService,
     @Optional() private readonly codeBuildApprovals?: CodeBuildApprovalService,
     @Optional() private readonly redTeamEvidence?: WorkflowRedTeamEvidenceHandoffService,
+    @Optional() private readonly correctionContext?: WorkflowCorrectionContextHandoffService,
   ) {}
 
   async executeCurrentStep(organizationId: string, workflowRunId: string) {
@@ -91,7 +93,12 @@ export class WorkflowAgentRuntimeService {
     const redTeamEvidenceManifest = step.stepType === EngineeringStepType.RED_TEAM
       ? await this.resolveRedTeamEvidence(organizationId, workflowRunId, step.id)
       : null;
-    const prompt = this.buildPrompt(step.stepType, task.title, task.description, redTeamEvidenceManifest);
+    const correctionContextManifest = step.stepType === EngineeringStepType.CORRECTION
+      ? await this.resolveCorrectionContext(organizationId, workflowRunId, step.id)
+      : null;
+    const prompt = this.buildPrompt(
+      step.stepType, task.title, task.description, redTeamEvidenceManifest, correctionContextManifest,
+    );
     const dispatch = await this.agentWorkforce.dispatch({
       organizationId,
       workflowRunId,
@@ -127,6 +134,7 @@ export class WorkflowAgentRuntimeService {
           executionStatus,
           executionEvidence,
           ...(redTeamEvidenceManifest ? { redTeamEvidenceManifest } : {}),
+          ...(correctionContextManifest ? { correctionContextManifest } : {}),
         },
       });
       const outcomeEvaluation = await this.recordOutcome({
@@ -197,6 +205,7 @@ export class WorkflowAgentRuntimeService {
           executionStatus,
           executionEvidence,
           ...(redTeamEvidenceManifest ? { redTeamEvidenceManifest } : {}),
+          ...(correctionContextManifest ? { correctionContextManifest } : {}),
           reviewProjectionStatus: 'INVALID',
         },
       });
@@ -238,6 +247,7 @@ export class WorkflowAgentRuntimeService {
         executionStatus,
         executionEvidence,
         ...(redTeamEvidenceManifest ? { redTeamEvidenceManifest } : {}),
+        ...(correctionContextManifest ? { correctionContextManifest } : {}),
         ...(reviewResult ? { reviewProjectionStatus: 'VALID', reviewResult } : {}),
       },
     });
@@ -362,6 +372,11 @@ export class WorkflowAgentRuntimeService {
     return this.redTeamEvidence.resolve(organizationId, workflowRunId, stepRunId);
   }
 
+  private async resolveCorrectionContext(organizationId: string, workflowRunId: string, stepRunId: string) {
+    if (!this.correctionContext) throw new ConflictException('CORRECTION_CONTEXT_HANDOFF_UNAVAILABLE');
+    return this.correctionContext.resolve(organizationId, workflowRunId, stepRunId);
+  }
+
   private revisionSha(value: unknown): string | null {
     if (typeof value !== 'string') return null;
     const match = /^gov:\/\/revision\/([a-f0-9]{40,64})$/u.exec(value);
@@ -385,6 +400,7 @@ export class WorkflowAgentRuntimeService {
     title: string,
     description: string | null,
     redTeamEvidenceManifest: RedTeamEvidenceManifest | null,
+    correctionContextManifest: CorrectionContextManifest | null,
   ): string {
     const evidenceContext = redTeamEvidenceManifest
       ? [
@@ -392,6 +408,14 @@ export class WorkflowAgentRuntimeService {
           'Do not traverse external workflow directories. Review only the current workspace plus this manifest.',
           `RED_TEAM_EVIDENCE_MANIFEST_SHA256: ${redTeamEvidenceManifest.manifestSha256}`,
           `RED_TEAM_EVIDENCE_MANIFEST: ${JSON.stringify(redTeamEvidenceManifest)}`,
+        ]
+      : [];
+    const correctionContext = correctionContextManifest
+      ? [
+          'Authoritative correction context follows. It was server-generated from the persisted causation chain and governed RED_TEAM execution ledger.',
+          'Correct the blocking findings in this manifest only. Do not invent, weaken, or replace the persisted findings.',
+          `CORRECTION_CONTEXT_MANIFEST_SHA256: ${correctionContextManifest.manifestSha256}`,
+          `CORRECTION_CONTEXT_MANIFEST: ${JSON.stringify(correctionContextManifest)}`,
         ]
       : [];
     const reviewContract = stepType === EngineeringStepType.RED_TEAM
@@ -406,6 +430,7 @@ export class WorkflowAgentRuntimeService {
       `Task title: ${title}`,
       description ? `Task description: ${description}` : null,
       ...evidenceContext,
+      ...correctionContext,
       ...reviewContract,
       'Operate only within this workflow step and return bounded execution evidence.',
     ].filter((value): value is string => Boolean(value)).join('\n').slice(0, MAX_TASK_CONTEXT_CHARS);
