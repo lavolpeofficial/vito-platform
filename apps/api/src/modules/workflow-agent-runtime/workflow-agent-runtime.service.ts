@@ -8,11 +8,16 @@ import { RuntimeReflectionLearningService } from '../learning/runtime-reflection
 import { WorkflowRuntimeService } from '../workflow-runtime/workflow-runtime.service';
 import { CodeBuildApprovalService } from '../engineering-release/code-build-approval.service';
 import { WorkflowReviewResultProjectorService } from './workflow-review-result-projector.service';
+import { buildBoundedExecutionResultSummary } from '../governed-invocation/governed-evidence-binding';
+import { type RedTeamEvidenceManifest, WorkflowRedTeamEvidenceHandoffService } from './workflow-red-team-evidence-handoff.service';
 
 const MAX_TASK_CONTEXT_CHARS = 32_000;
 const MAX_EXECUTION_EVIDENCE_REFERENCES = 32;
 const MAX_EXECUTION_EVIDENCE_REFERENCE_CHARS = 2_048;
 const MAX_EXECUTION_EVIDENCE_ID_CHARS = 256;
+const MAX_RESULT_SUMMARY_CHARS = 6_000;
+const MAX_CHANGED_FILES = 64;
+const MAX_CHANGED_FILE_CHARS = 512;
 
 @Injectable()
 export class WorkflowAgentRuntimeService {
@@ -26,6 +31,7 @@ export class WorkflowAgentRuntimeService {
     private readonly runtimeOutcome?: RuntimeOutcomeEvaluationService,
     private readonly runtimeReflectionLearning?: RuntimeReflectionLearningService,
     @Optional() private readonly codeBuildApprovals?: CodeBuildApprovalService,
+    @Optional() private readonly redTeamEvidence?: WorkflowRedTeamEvidenceHandoffService,
   ) {}
 
   async executeCurrentStep(organizationId: string, workflowRunId: string) {
@@ -82,7 +88,10 @@ export class WorkflowAgentRuntimeService {
     });
     if (!task) throw new NotFoundException('Workflow task not found.');
 
-    const prompt = this.buildPrompt(step.stepType, task.title, task.description);
+    const redTeamEvidenceManifest = step.stepType === EngineeringStepType.RED_TEAM
+      ? await this.resolveRedTeamEvidence(organizationId, workflowRunId, step.id)
+      : null;
+    const prompt = this.buildPrompt(step.stepType, task.title, task.description, redTeamEvidenceManifest);
     const dispatch = await this.agentWorkforce.dispatch({
       organizationId,
       workflowRunId,
@@ -95,7 +104,7 @@ export class WorkflowAgentRuntimeService {
     });
 
     const executionStatus = dispatch.execution.status as AgentExecutionStatus;
-    const executionEvidence = this.executionEvidence(dispatch.execution);
+    const executionEvidence = this.executionEvidence(dispatch.execution, step.stepType);
     const completionStatus = this.toWorkflowCompletionStatus(executionStatus);
     const providerBlocked =
       executionStatus === AgentExecutionStatus.POLICY_BLOCKED ||
@@ -117,6 +126,7 @@ export class WorkflowAgentRuntimeService {
           experienceId: dispatch.experienceId,
           executionStatus,
           executionEvidence,
+          ...(redTeamEvidenceManifest ? { redTeamEvidenceManifest } : {}),
         },
       });
       const outcomeEvaluation = await this.recordOutcome({
@@ -186,6 +196,7 @@ export class WorkflowAgentRuntimeService {
           experienceId: dispatch.experienceId,
           executionStatus,
           executionEvidence,
+          ...(redTeamEvidenceManifest ? { redTeamEvidenceManifest } : {}),
           reviewProjectionStatus: 'INVALID',
         },
       });
@@ -226,6 +237,7 @@ export class WorkflowAgentRuntimeService {
         experienceId: dispatch.experienceId,
         executionStatus,
         executionEvidence,
+        ...(redTeamEvidenceManifest ? { redTeamEvidenceManifest } : {}),
         ...(reviewResult ? { reviewProjectionStatus: 'VALID', reviewResult } : {}),
       },
     });
@@ -299,7 +311,7 @@ export class WorkflowAgentRuntimeService {
     return outcome;
   }
 
-  private executionEvidence(execution: unknown): Readonly<Record<string, unknown>> {
+  private executionEvidence(execution: unknown, stepType: string): Readonly<Record<string, unknown>> {
     if (!execution || typeof execution !== 'object' || Array.isArray(execution)) {
       return Object.freeze({});
     }
@@ -313,7 +325,47 @@ export class WorkflowAgentRuntimeService {
     if (artifactReferences.length > 0) evidence.artifactReferences = artifactReferences;
     const evidenceReferences = this.boundedEvidenceReferences(source.evidenceReferences);
     if (evidenceReferences.length > 0) evidence.evidenceReferences = evidenceReferences;
+
+    const providerMetadata = this.objectValue(source.providerExecutionMetadata);
+    const usageMetadata = this.objectValue(source.usageMetadata);
+    const binding = this.objectValue(usageMetadata?.governedEvidenceBinding);
+    const baseSha = this.revisionSha(binding?.revisionReference);
+    const settling = this.objectValue(providerMetadata?.governedResultSettling);
+    if (baseSha) {
+      evidence.revision = Object.freeze({
+        baseSha,
+        changedFiles: this.boundedChangedFiles(settling?.changedFiles),
+      });
+    }
+    if (stepType === EngineeringStepType.TEST || stepType === EngineeringStepType.PACKAGE) {
+      const resultSummary = buildBoundedExecutionResultSummary(providerMetadata ?? undefined, MAX_RESULT_SUMMARY_CHARS);
+      if (resultSummary) evidence.resultSummary = resultSummary;
+    }
     return Object.freeze(evidence);
+  }
+
+  private objectValue(value: unknown): Record<string, unknown> | null {
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
+  }
+
+  private boundedChangedFiles(value: unknown): readonly string[] {
+    if (!Array.isArray(value)) return Object.freeze([]);
+    return Object.freeze(value.filter(
+      (item): item is string => typeof item === 'string' && item.length > 0 && item.length <= MAX_CHANGED_FILE_CHARS,
+    ).slice(0, MAX_CHANGED_FILES));
+  }
+
+  private async resolveRedTeamEvidence(organizationId: string, workflowRunId: string, stepRunId: string) {
+    if (!this.redTeamEvidence) throw new ConflictException('RED_TEAM_EVIDENCE_HANDOFF_UNAVAILABLE');
+    return this.redTeamEvidence.resolve(organizationId, workflowRunId, stepRunId);
+  }
+
+  private revisionSha(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const match = /^gov:\/\/revision\/([a-f0-9]{40,64})$/u.exec(value);
+    return match?.[1] ?? null;
   }
 
   private boundedEvidenceScalar(value: unknown, maxChars: number): string | null {
@@ -328,7 +380,20 @@ export class WorkflowAgentRuntimeService {
     ).slice(0, MAX_EXECUTION_EVIDENCE_REFERENCES));
   }
 
-  private buildPrompt(stepType: string, title: string, description: string | null): string {
+  private buildPrompt(
+    stepType: string,
+    title: string,
+    description: string | null,
+    redTeamEvidenceManifest: RedTeamEvidenceManifest | null,
+  ): string {
+    const evidenceContext = redTeamEvidenceManifest
+      ? [
+          'Authoritative mission-bound evidence follows. It was server-generated from the persisted causation chain and governed execution ledger.',
+          'Do not traverse external workflow directories. Review only the current workspace plus this manifest.',
+          `RED_TEAM_EVIDENCE_MANIFEST_SHA256: ${redTeamEvidenceManifest.manifestSha256}`,
+          `RED_TEAM_EVIDENCE_MANIFEST: ${JSON.stringify(redTeamEvidenceManifest)}`,
+        ]
+      : [];
     const reviewContract = stepType === EngineeringStepType.RED_TEAM
       ? [
           'Return ONLY one JSON object with this exact review schema:',
@@ -340,6 +405,7 @@ export class WorkflowAgentRuntimeService {
       `Execute the persisted VITO engineering workflow step: ${stepType}.`,
       `Task title: ${title}`,
       description ? `Task description: ${description}` : null,
+      ...evidenceContext,
       ...reviewContract,
       'Operate only within this workflow step and return bounded execution evidence.',
     ].filter((value): value is string => Boolean(value)).join('\n').slice(0, MAX_TASK_CONTEXT_CHARS);

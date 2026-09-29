@@ -312,6 +312,13 @@ describe('CloudGovernedAgentAdapter (CLOUD_GOVERNED tier, §9 gates)', () => {
     expect(meta.stdout).toBe('done');
     expect(meta.executableIntegrityHash).toBe('sha256:i');
     expect(meta.flight001Acceptance).toMatchObject({ checked: true, passed: false });
+    expect(result.usageMetadata).toEqual(expect.objectContaining({
+      governedEvidenceBinding: {
+        revisionReference: `gov://revision/${'a'.repeat(40)}`,
+        stdoutSha256Reference: 'gov://evidence/stdout-sha256/a4c3ed04a95a3da14a9d235c83d868bed7c0f45cf7f3faa751ee8f50598d2211',
+        exitCode: 0,
+      },
+    }));
   });
 
   it('maps explicit cloud cancellation to CANCELLED before provider-identity failure handling', async () => {
