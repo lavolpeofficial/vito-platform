@@ -10,6 +10,7 @@ import { WorkflowAgentRuntimeService } from './workflow-agent-runtime.service';
 import { WorkflowAl4ReviewCoordinatorService } from './workflow-al4-review-coordinator.service';
 import { WorkflowReviewEvidenceService } from './workflow-review-evidence.service';
 import { WorkflowReviewVerdictService } from './workflow-review-verdict.service';
+import { WorkflowRedTeamEvidenceHandoffService } from './workflow-red-team-evidence-handoff.service';
 
 @Module({
   imports: [AgentWorkforceModule, EngineeringReleaseModule, WorkflowRuntimeModule, LearningModule, WorkflowVerificationModule],
@@ -20,6 +21,7 @@ import { WorkflowReviewVerdictService } from './workflow-review-verdict.service'
     WorkflowAl4ReviewCoordinatorService,
     WorkflowReviewEvidenceService,
     WorkflowReviewVerdictService,
+    WorkflowRedTeamEvidenceHandoffService,
   ],
   exports: [
     WorkflowAgentRuntimeService,
@@ -27,6 +29,7 @@ import { WorkflowReviewVerdictService } from './workflow-review-verdict.service'
     WorkflowAl4ReviewCoordinatorService,
     WorkflowReviewEvidenceService,
     WorkflowReviewVerdictService,
+    WorkflowRedTeamEvidenceHandoffService,
   ],
 })
 export class WorkflowAgentRuntimeModule {}

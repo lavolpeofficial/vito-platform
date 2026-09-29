@@ -11,6 +11,7 @@ describe('WorkflowAgentRuntimeService', () => {
   const completeStep = jest.fn();
   const tryRecordOutcome = jest.fn();
   const resolveForWorkflowDispatch = jest.fn();
+  const resolveRedTeamEvidence = jest.fn();
 
   const prisma = {
     workflowRun: { findFirst: findRun },
@@ -26,6 +27,7 @@ describe('WorkflowAgentRuntimeService', () => {
     { tryRecord: tryRecordOutcome } as any,
     undefined,
     { resolveForWorkflowDispatch } as any,
+    { resolve: resolveRedTeamEvidence } as any,
   );
 
   beforeEach(() => {
@@ -42,6 +44,10 @@ describe('WorkflowAgentRuntimeService', () => {
     capabilityForStep.mockReturnValue(EngineeringCapability.CODE_BUILD);
     completeStep.mockResolvedValue({ idempotent: false, outcome: { kind: 'NEXT_STEP' } });
     tryRecordOutcome.mockResolvedValue({ id: 'outcome-1', score: 1 });
+    resolveRedTeamEvidence.mockResolvedValue({
+      schemaVersion: 'RED_TEAM_EVIDENCE_V1', workflowRunId: 'run-1', redTeamStepRunId: 'step-red',
+      testedRevisionSha: 'a'.repeat(40), entries: [], manifestSha256: 'f'.repeat(64),
+    });
     resolveForWorkflowDispatch.mockResolvedValue({
       approvalId: 'approval-1',
       machineUserId: 'machine-1',
@@ -106,6 +112,57 @@ describe('WorkflowAgentRuntimeService', () => {
     expect(result.disposition).toBe('TRANSITIONED');
     if (result.disposition !== 'TRANSITIONED') throw new Error('expected transitioned result');
     expect(result.outcomeEvaluation).toEqual(expect.objectContaining({ id: 'outcome-1' }));
+  });
+
+
+  it('persists revision and bounded result evidence for TEST execution', async () => {
+    findRun.mockResolvedValueOnce({
+      id: 'run-1', taskId: 'task-1', status: 'RUNNING',
+      currentStepType: EngineeringStepType.TEST, assuranceLevel: 'AL-3', correlationId: 'corr-1',
+    });
+    findStep.mockResolvedValueOnce({ id: 'step-test', stepType: EngineeringStepType.TEST, attemptNumber: 1 });
+    capabilityForStep.mockReturnValueOnce(EngineeringCapability.TEST_EXECUTION);
+    dispatch.mockResolvedValueOnce({
+      routingDecisionId: 'route-test', selectedProviderId: 'provider-1', selectedProviderCode: 'cloud.openai.main', experienceId: 'exp-test',
+      execution: {
+        status: AgentExecutionStatus.SUCCEEDED, invocationId: 'inv-test', outputReference: 'gov://execution/inv-test',
+        providerExecutionMetadata: {
+          stdout: '42 tests passed', exitCode: 0,
+          governedResultSettling: { baseSha: '[REDACTED]', changedFiles: [] },
+        },
+        usageMetadata: { governedEvidenceBinding: { revisionReference: `gov://revision/${'a'.repeat(40)}`, stdoutSha256Reference: `gov://evidence/stdout-sha256/${'0'.repeat(64)}`, exitCode: 0 } },
+      },
+    });
+    await service.executeCurrentStep('org-1', 'run-1');
+    const evidence = completeStep.mock.calls[0][0].metadata.executionEvidence;
+    expect(evidence.revision).toEqual({ baseSha: 'a'.repeat(40), changedFiles: [] });
+    expect(evidence.resultSummary).toEqual(expect.objectContaining({ content: '42 tests passed', truncated: false }));
+    expect(evidence.resultSummary.sha256).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('injects only the server-resolved evidence manifest into RED_TEAM prompt and persists the binding', async () => {
+    findRun.mockResolvedValueOnce({
+      id: 'run-1', taskId: 'task-1', status: 'RUNNING',
+      currentStepType: EngineeringStepType.RED_TEAM, assuranceLevel: 'AL-3', correlationId: 'corr-1',
+    });
+    findStep.mockResolvedValueOnce({ id: 'step-red', stepType: EngineeringStepType.RED_TEAM, attemptNumber: 1 });
+    capabilityForStep.mockReturnValueOnce(EngineeringCapability.RED_TEAM);
+    dispatch.mockResolvedValueOnce({
+      routingDecisionId: 'route-red', selectedProviderId: 'provider-1', selectedProviderCode: 'cloud.openai.main', experienceId: 'exp-red',
+      execution: {
+        status: AgentExecutionStatus.SUCCEEDED, invocationId: 'inv-red', outputReference: 'gov://execution/inv-red',
+        artifactReferences: [], providerExecutionMetadata: { stdout: '{"verdict":"A","findings":[]}' },
+      },
+    });
+    await service.executeCurrentStep('org-1', 'run-1');
+    expect(resolveRedTeamEvidence).toHaveBeenCalledWith('org-1', 'run-1', 'step-red');
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: expect.stringContaining('RED_TEAM_EVIDENCE_MANIFEST_SHA256: ' + 'f'.repeat(64)),
+    }));
+    expect(dispatch.mock.calls[0][0].prompt).toContain('Do not traverse external workflow directories');
+    expect(completeStep).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({ redTeamEvidenceManifest: expect.objectContaining({ schemaVersion: 'RED_TEAM_EVIDENCE_V1' }) }),
+    }));
   });
 
   it('fails closed before CODE_BUILD dispatch when server-side approval resolution fails', async () => {

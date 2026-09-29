@@ -23,6 +23,7 @@ import {
   codeBuildTargetMatchesContext,
   readCodeBuildExecutionTarget,
 } from './code-build-execution-target';
+import { buildGovernedEvidenceBinding } from '../../governed-invocation/governed-evidence-binding';
 
 const MAX_ARGS = 64;
 const MAX_ARG_LENGTH = 4096;
@@ -263,6 +264,11 @@ function mapWorkerResult(
       commandsExecuted: [commandSummary],
     },
   };
+  const evidenceBinding = buildGovernedEvidenceBinding(baseMetadata, baseMetadata);
+  const usageMetadata = {
+    durationMs: result.durationMs,
+    ...(evidenceBinding ? { governedEvidenceBinding: evidenceBinding } : {}),
+  };
 
   if (result.cancelled === true) {
     return {
@@ -277,7 +283,7 @@ function mapWorkerResult(
           observedModelId: result.observedProviderIdentity?.modelId ?? null,
         },
       },
-      usageMetadata: { durationMs: result.durationMs },
+      usageMetadata,
       error: {
         code: 'CLOUD_AGENT_CANCELLED',
         message: 'Cloud-governed agent was cancelled by an explicit workflow stop',
@@ -291,7 +297,7 @@ function mapWorkerResult(
     return {
       status: AgentExecutionStatus.FAILED,
       providerExecutionMetadata: baseMetadata,
-      usageMetadata: { durationMs: result.durationMs },
+      usageMetadata,
       error: {
         code: result.providerIdentityError.code,
         message: result.providerIdentityError.message,
@@ -305,7 +311,7 @@ function mapWorkerResult(
     return {
       status: AgentExecutionStatus.TIMED_OUT,
       providerExecutionMetadata: baseMetadata,
-      usageMetadata: { durationMs: result.durationMs },
+      usageMetadata,
       error: {
         code: 'CLOUD_AGENT_TIMEOUT',
         message: 'Cloud governed agent exceeded the governed execution timeout',
@@ -320,7 +326,7 @@ function mapWorkerResult(
     status: succeeded ? AgentExecutionStatus.SUCCEEDED : AgentExecutionStatus.FAILED,
     outputReference: `gov://execution/${invocationId}`,
     providerExecutionMetadata: baseMetadata,
-    usageMetadata: { durationMs: result.durationMs },
+    usageMetadata,
     ...(succeeded
       ? {}
       : {
