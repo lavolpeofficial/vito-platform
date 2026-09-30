@@ -64,6 +64,14 @@ describePg('VITO core path · PostgreSQL proof v2', () => {
   const governedRuntime = { executeWorkspaceFileOperation: jest.fn(async (input: { capabilityCode: string }) => ({
     invocationId: randomUUID(), executionId: randomUUID(), status: AgentExecutionStatus.SUCCEEDED, durationMs: 1,
     policyDecisionReference: 'core-proof-policy', workspaceDisposition: 'CLEANED', outputReference: `proof:${input.capabilityCode}`,
+    ...(input.capabilityCode === 'TEST_EXECUTION'
+      ? {
+          providerExecutionMetadata: {
+            stdout: JSON.stringify({ status: 'PASS', testsExecuted: 1, testsFailed: 0, evidenceRefs: ['gov://evidence/core-path-test'] }),
+            exitCode: 0,
+          },
+        }
+      : {}),
   })) } as any;
 
   const agentWorkforce = new AgentWorkforceService(providerRouter, governedRuntime, learningRetrieval, identity, capture, undefined, memory);
