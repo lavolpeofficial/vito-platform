@@ -135,7 +135,7 @@ describe('WorkflowAgentRuntimeService', () => {
       execution: {
         status: AgentExecutionStatus.SUCCEEDED, invocationId: 'inv-test', outputReference: 'gov://execution/inv-test',
         providerExecutionMetadata: {
-          stdout: '42 tests passed', exitCode: 0,
+          stdout: JSON.stringify({ status: 'PASS', testsExecuted: 42, testsFailed: 0, evidenceRefs: ['gov://evidence/test-run'] }), exitCode: 0,
           governedResultSettling: { baseSha: '[REDACTED]', changedFiles: [] },
         },
         usageMetadata: { governedEvidenceBinding: { revisionReference: `gov://revision/${'a'.repeat(40)}`, stdoutSha256Reference: `gov://evidence/stdout-sha256/${'0'.repeat(64)}`, exitCode: 0 } },
@@ -144,8 +144,78 @@ describe('WorkflowAgentRuntimeService', () => {
     await service.executeCurrentStep('org-1', 'run-1');
     const evidence = completeStep.mock.calls[0][0].metadata.executionEvidence;
     expect(evidence.revision).toEqual({ baseSha: 'a'.repeat(40), changedFiles: [] });
-    expect(evidence.resultSummary).toEqual(expect.objectContaining({ content: '42 tests passed', truncated: false }));
+    expect(evidence.resultSummary).toEqual(expect.objectContaining({
+      content: JSON.stringify({ status: 'PASS', testsExecuted: 42, testsFailed: 0, evidenceRefs: ['gov://evidence/test-run'] }),
+      truncated: false,
+    }));
+    expect(completeStep.mock.calls[0][0].metadata.testResult).toEqual({
+      status: 'PASS', testsExecuted: 42, testsFailed: 0, evidenceRefs: ['gov://evidence/test-run'],
+    });
     expect(evidence.resultSummary.sha256).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('fails closed when provider execution succeeds but TEST output is blocked and unstructured', async () => {
+    findRun.mockResolvedValueOnce({
+      id: 'run-1', taskId: 'task-1', status: 'RUNNING',
+      currentStepType: EngineeringStepType.TEST, assuranceLevel: 'AL-3', correlationId: 'corr-1',
+    });
+    findStep.mockResolvedValueOnce({ id: 'step-test', stepType: EngineeringStepType.TEST, attemptNumber: 1 });
+    capabilityForStep.mockReturnValueOnce(EngineeringCapability.TEST_EXECUTION);
+    dispatch.mockResolvedValueOnce({
+      routingDecisionId: 'route-test', selectedProviderId: 'provider-1', selectedProviderCode: 'cloud.openai.main', experienceId: 'exp-test',
+      execution: {
+        status: AgentExecutionStatus.SUCCEEDED, invocationId: 'inv-test', outputReference: 'gov://execution/inv-test',
+        providerExecutionMetadata: { stdout: 'TEST result: BLOCKED — execution unavailable. Tests executed: 0.' },
+      },
+    });
+    completeStep.mockResolvedValueOnce({ idempotent: false, outcome: { kind: 'NEXT_STEP', nextStep: EngineeringStepType.CORRECTION } });
+
+    const result = await service.executeCurrentStep('org-1', 'run-1');
+
+    expect(result.disposition).toBe('TEST_RESULT_INVALID');
+    expect(dispatch.mock.calls[0][0].prompt).toContain('"status":"PASS|FAIL|BLOCKED"');
+    expect(completeStep).toHaveBeenCalledWith(expect.objectContaining({
+      stepStatus: 'FAILED',
+      metadata: expect.objectContaining({
+        executionStatus: AgentExecutionStatus.SUCCEEDED,
+        testResultProjectionStatus: 'INVALID',
+        testResultStatus: 'INVALID',
+        executionEvidence: expect.objectContaining({
+          resultSummary: expect.objectContaining({ content: expect.stringContaining('TEST result: BLOCKED') }),
+        }),
+      }),
+    }));
+  });
+
+  it('fails closed when a structured TEST result is BLOCKED with zero tests', async () => {
+    findRun.mockResolvedValueOnce({
+      id: 'run-1', taskId: 'task-1', status: 'RUNNING',
+      currentStepType: EngineeringStepType.TEST, assuranceLevel: 'AL-3', correlationId: 'corr-1',
+    });
+    findStep.mockResolvedValueOnce({ id: 'step-test', stepType: EngineeringStepType.TEST, attemptNumber: 1 });
+    capabilityForStep.mockReturnValueOnce(EngineeringCapability.TEST_EXECUTION);
+    dispatch.mockResolvedValueOnce({
+      routingDecisionId: 'route-test', selectedProviderId: 'provider-1', selectedProviderCode: 'cloud.openai.main', experienceId: 'exp-test',
+      execution: {
+        status: AgentExecutionStatus.SUCCEEDED, invocationId: 'inv-test', outputReference: 'gov://execution/inv-test',
+        providerExecutionMetadata: {
+          stdout: JSON.stringify({ status: 'BLOCKED', testsExecuted: 0, testsFailed: 0, evidenceRefs: [] }),
+        },
+      },
+    });
+    completeStep.mockResolvedValueOnce({ idempotent: false, outcome: { kind: 'NEXT_STEP', nextStep: EngineeringStepType.CORRECTION } });
+
+    const result = await service.executeCurrentStep('org-1', 'run-1');
+
+    expect(result.disposition).toBe('TEST_RESULT_INVALID');
+    expect(completeStep).toHaveBeenCalledWith(expect.objectContaining({
+      stepStatus: 'FAILED',
+      metadata: expect.objectContaining({
+        testResultProjectionStatus: 'REJECTED',
+        testResultStatus: 'BLOCKED',
+        testResult: { status: 'BLOCKED', testsExecuted: 0, testsFailed: 0, evidenceRefs: [] },
+      }),
+    }));
   });
 
   it('injects only the server-resolved evidence manifest into RED_TEAM prompt and persists the binding', async () => {

@@ -8,6 +8,7 @@ import { RuntimeReflectionLearningService } from '../learning/runtime-reflection
 import { WorkflowRuntimeService } from '../workflow-runtime/workflow-runtime.service';
 import { CodeBuildApprovalService } from '../engineering-release/code-build-approval.service';
 import { WorkflowReviewResultProjectorService } from './workflow-review-result-projector.service';
+import { WorkflowTestResultProjectorService } from './workflow-test-result-projector.service';
 import { buildBoundedExecutionResultSummary } from '../governed-invocation/governed-evidence-binding';
 import { type RedTeamEvidenceManifest, WorkflowRedTeamEvidenceHandoffService } from './workflow-red-team-evidence-handoff.service';
 import { type CorrectionContextManifest, WorkflowCorrectionContextHandoffService } from './workflow-correction-context-handoff.service';
@@ -23,6 +24,7 @@ const MAX_CHANGED_FILE_CHARS = 512;
 @Injectable()
 export class WorkflowAgentRuntimeService {
   private readonly reviewProjector = new WorkflowReviewResultProjectorService();
+  private readonly testResultProjector = new WorkflowTestResultProjectorService();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -232,6 +234,56 @@ export class WorkflowAgentRuntimeService {
       });
     }
 
+    const testResult =
+      step.stepType === EngineeringStepType.TEST && completionStatus === 'SUCCEEDED'
+        ? this.testResultProjector.project(dispatch.execution)
+        : null;
+
+    if (step.stepType === EngineeringStepType.TEST && completionStatus === 'SUCCEEDED' && (!testResult || testResult.status !== 'PASS')) {
+      const transition = await this.workflowRuntime.completeStep({
+        organizationId,
+        workflowRunId,
+        workflowStepRunId: step.id,
+        stepStatus: 'FAILED',
+        metadata: {
+          source: 'WORKFLOW_AGENT_RUNTIME',
+          capabilityCode,
+          routingDecisionId: dispatch.routingDecisionId,
+          selectedProviderId: dispatch.selectedProviderId,
+          selectedProviderCode: dispatch.selectedProviderCode,
+          experienceId: dispatch.experienceId,
+          executionStatus,
+          executionEvidence,
+          testResultProjectionStatus: testResult ? 'REJECTED' : 'INVALID',
+          testResultStatus: testResult?.status ?? 'INVALID',
+          ...(testResult ? { testResult } : {}),
+          ...(redTeamEvidenceManifest ? { redTeamEvidenceManifest } : {}),
+          ...(correctionContextManifest ? { correctionContextManifest } : {}),
+        },
+      });
+      const outcomeEvaluation = await this.recordOutcome({
+        organizationId,
+        experienceId: dispatch.experienceId,
+        workflowRunId,
+        workflowStepRunId: step.id,
+        stepType: step.stepType,
+        capabilityCode,
+        executionStatus,
+        transitionKind: transition.outcome?.kind ?? null,
+      });
+      return Object.freeze({
+        disposition: 'TEST_RESULT_INVALID' as const,
+        workflowRunId,
+        workflowStepRunId: step.id,
+        stepType: step.stepType,
+        capabilityCode,
+        executionStatus,
+        dispatch,
+        transition,
+        outcomeEvaluation,
+      });
+    }
+
     const transition = await this.workflowRuntime.completeStep({
       organizationId,
       workflowRunId,
@@ -249,6 +301,7 @@ export class WorkflowAgentRuntimeService {
         ...(redTeamEvidenceManifest ? { redTeamEvidenceManifest } : {}),
         ...(correctionContextManifest ? { correctionContextManifest } : {}),
         ...(reviewResult ? { reviewProjectionStatus: 'VALID', reviewResult } : {}),
+        ...(testResult ? { testResultProjectionStatus: 'VALID', testResult } : {}),
       },
     });
 
@@ -425,6 +478,14 @@ export class WorkflowAgentRuntimeService {
           'Do not include markdown fences, prose outside the JSON object, reviewer identity, assurance level, provider identity, or authority claims.',
         ]
       : [];
+    const testContract = stepType === EngineeringStepType.TEST
+      ? [
+          'Return ONLY one JSON object with this exact test-result schema:',
+          '{"status":"PASS|FAIL|BLOCKED","testsExecuted":0,"testsFailed":0,"evidenceRefs":["gov://..."]}',
+          'Use PASS only when at least one test was actually executed and testsFailed is 0. Use FAIL when executed tests failed. Use BLOCKED when execution was unavailable or could not establish a test result.',
+          'Do not include markdown fences or prose outside the JSON object.',
+        ]
+      : [];
     return [
       `Execute the persisted VITO engineering workflow step: ${stepType}.`,
       `Task title: ${title}`,
@@ -432,6 +493,7 @@ export class WorkflowAgentRuntimeService {
       ...evidenceContext,
       ...correctionContext,
       ...reviewContract,
+      ...testContract,
       'Operate only within this workflow step and return bounded execution evidence.',
     ].filter((value): value is string => Boolean(value)).join('\n').slice(0, MAX_TASK_CONTEXT_CHARS);
   }
