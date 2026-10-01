@@ -239,6 +239,54 @@ export class WorkflowAgentRuntimeService {
         ? this.testResultProjector.project(dispatch.execution)
         : null;
 
+    const correctionChangedFiles =
+      step.stepType === EngineeringStepType.CORRECTION && completionStatus === 'SUCCEEDED'
+        ? this.changedFilesFromExecutionEvidence(executionEvidence)
+        : null;
+
+    if (step.stepType === EngineeringStepType.CORRECTION && completionStatus === 'SUCCEEDED' && (!correctionChangedFiles || correctionChangedFiles.length === 0)) {
+      const transition = await this.workflowRuntime.completeStep({
+        organizationId,
+        workflowRunId,
+        workflowStepRunId: step.id,
+        stepStatus: 'FAILED',
+        metadata: {
+          source: 'WORKFLOW_AGENT_RUNTIME',
+          capabilityCode,
+          routingDecisionId: dispatch.routingDecisionId,
+          selectedProviderId: dispatch.selectedProviderId,
+          selectedProviderCode: dispatch.selectedProviderCode,
+          experienceId: dispatch.experienceId,
+          executionStatus,
+          executionEvidence,
+          correctionResultProjectionStatus: 'REJECTED',
+          correctionResultStatus: 'EMPTY_CHANGESET',
+          ...(correctionContextManifest ? { correctionContextManifest } : {}),
+        },
+      });
+      const outcomeEvaluation = await this.recordOutcome({
+        organizationId,
+        experienceId: dispatch.experienceId,
+        workflowRunId,
+        workflowStepRunId: step.id,
+        stepType: step.stepType,
+        capabilityCode,
+        executionStatus,
+        transitionKind: transition.outcome?.kind ?? null,
+      });
+      return Object.freeze({
+        disposition: 'CORRECTION_RESULT_INVALID' as const,
+        workflowRunId,
+        workflowStepRunId: step.id,
+        stepType: step.stepType,
+        capabilityCode,
+        executionStatus,
+        dispatch,
+        transition,
+        outcomeEvaluation,
+      });
+    }
+
     if (step.stepType === EngineeringStepType.TEST && completionStatus === 'SUCCEEDED' && (!testResult || testResult.status !== 'PASS')) {
       const transition = await this.workflowRuntime.completeStep({
         organizationId,
@@ -405,6 +453,11 @@ export class WorkflowAgentRuntimeService {
       if (resultSummary) evidence.resultSummary = resultSummary;
     }
     return Object.freeze(evidence);
+  }
+
+  private changedFilesFromExecutionEvidence(executionEvidence: Readonly<Record<string, unknown>>): readonly string[] {
+    const revision = this.objectValue(executionEvidence.revision);
+    return this.boundedChangedFiles(revision?.changedFiles);
   }
 
   private objectValue(value: unknown): Record<string, unknown> | null {
