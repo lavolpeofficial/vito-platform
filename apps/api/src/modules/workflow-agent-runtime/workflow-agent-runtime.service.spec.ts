@@ -354,7 +354,8 @@ describe('WorkflowAgentRuntimeService', () => {
       routingDecisionId: 'route-correction', selectedProviderId: 'provider-1', selectedProviderCode: 'cloud.openai.main', experienceId: 'exp-correction',
       execution: {
         status: AgentExecutionStatus.SUCCEEDED, invocationId: 'inv-correction', outputReference: 'gov://execution/inv-correction',
-        providerExecutionMetadata: { governedResultSettling: { baseSha: '[REDACTED]', changedFiles: [] } },
+        providerExecutionMetadata: { governedResultSettling: { baseSha: '[REDACTED]', changedFiles: ['docs/evidence/rt-001.md'] } },
+        usageMetadata: { governedEvidenceBinding: { revisionReference: 'gov://revision/' + 'a'.repeat(40) } },
       },
     });
     await service.executeCurrentStep('org-1', 'run-1');
@@ -366,6 +367,33 @@ describe('WorkflowAgentRuntimeService', () => {
     expect(completeStep).toHaveBeenCalledWith(expect.objectContaining({
       metadata: expect.objectContaining({
         correctionContextManifest: expect.objectContaining({ manifestSha256: 'c'.repeat(64) }),
+      }),
+    }));
+  });
+
+
+
+  it('fails closed when a successful CORRECTION execution produces an empty changeset', async () => {
+    findRun.mockResolvedValueOnce({
+      id: 'run-1', taskId: 'task-1', status: 'RUNNING',
+      currentStepType: EngineeringStepType.CORRECTION, assuranceLevel: 'AL-3', correlationId: 'corr-1',
+    });
+    findStep.mockResolvedValueOnce({ id: 'step-correction', stepType: EngineeringStepType.CORRECTION, attemptNumber: 3 });
+    capabilityForStep.mockReturnValueOnce(EngineeringCapability.CODE_BUILD);
+    dispatch.mockResolvedValueOnce({
+      routingDecisionId: 'route-correction', selectedProviderId: 'provider-1', selectedProviderCode: 'cloud.openai.main', experienceId: 'exp-correction',
+      execution: {
+        status: AgentExecutionStatus.SUCCEEDED, invocationId: 'inv-correction-empty', outputReference: 'gov://execution/inv-correction-empty',
+        providerExecutionMetadata: { governedResultSettling: { baseSha: '[REDACTED]', changedFiles: [], empty: true, patch: '' } },
+        usageMetadata: { governedEvidenceBinding: { revisionReference: 'gov://revision/' + 'a'.repeat(40) } },
+      },
+    });
+    const result = await service.executeCurrentStep('org-1', 'run-1');
+    expect(result.disposition).toBe('CORRECTION_RESULT_INVALID');
+    expect(completeStep).toHaveBeenCalledWith(expect.objectContaining({
+      stepStatus: 'FAILED',
+      metadata: expect.objectContaining({
+        correctionResultProjectionStatus: 'REJECTED', correctionResultStatus: 'EMPTY_CHANGESET',
       }),
     }));
   });
