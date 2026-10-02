@@ -54,80 +54,31 @@ export class ProviderReadinessProbeService {
     workflowStepRunId?: string;
     provider: ProviderDeclaration;
   }): Promise<ProviderReadinessProbeResult> {
-    if (!this.runtimeState.needsRefresh(input.provider)) {
-      return frozenResult(input.provider, false, false, 'STATE_FRESH');
-    }
-    if (input.provider.providerType !== ProviderType.CLOUD_LLM) {
-      return frozenResult(input.provider, false, false, 'PROBE_UNSUPPORTED_PROVIDER_TYPE');
-    }
-
+    if (!this.runtimeState.needsRefresh(input.provider)) return frozenResult(input.provider, false, false, 'STATE_FRESH');
+    if (input.provider.providerType !== ProviderType.CLOUD_LLM) return frozenResult(input.provider, false, false, 'PROBE_UNSUPPORTED_PROVIDER_TYPE');
     const profile = this.profiles.resolve(input.provider.providerCode);
     const probeAlias = profile?.readinessProbeLauncherAlias;
-    if (!profile || !probeAlias) {
-      return frozenResult(input.provider, false, false, 'PROBE_PROFILE_UNAVAILABLE');
-    }
-
+    if (!profile || !probeAlias) return frozenResult(input.provider, false, false, 'PROBE_PROFILE_UNAVAILABLE');
     const key = `${input.organizationId}:${input.provider.id}`;
     const existing = this.inflight.get(key);
     if (existing) return existing;
-
-    const promise = this.probe({ ...input, probeAlias, profile }).finally(() => {
-      this.inflight.delete(key);
-    });
+    const promise = this.probe({ ...input, probeAlias, profile }).finally(() => this.inflight.delete(key));
     this.inflight.set(key, promise);
     return promise;
   }
 
-  private async probe(input: {
-    organizationId: string;
-    workflowRunId?: string;
-    workflowStepRunId?: string;
-    provider: ProviderDeclaration;
-    probeAlias: string;
-    profile: NonNullable<ReturnType<CloudExecutionProfileRegistry['resolve']>>;
-  }): Promise<ProviderReadinessProbeResult> {
-    const executable = await this.trustedExecutables.resolve(input.probeAlias, {
-      organizationId: input.organizationId,
-      workflowRunId: input.workflowRunId ?? `provider-probe:${input.provider.id}`,
-      capabilityCode: 'PROVIDER_READINESS_PROBE',
-      providerId: input.provider.id,
-    });
-    if (!executable) {
-      return frozenResult(input.provider, true, false, 'PROBE_EXECUTABLE_UNAVAILABLE');
-    }
-
-    const sandboxConfig: GovernedSandboxConfig = {
-      technology: 'none',
-      timeoutMs: Math.min(this.timeoutMs, input.profile.maxDurationMs),
-      maxMemoryBytes: 0,
-      maxCpuTimeMs: 0,
-      maxWorktreeBytes: 0,
-    };
-
+  private async probe(input: {organizationId:string;workflowRunId?:string;workflowStepRunId?:string;provider:ProviderDeclaration;probeAlias:string;profile:NonNullable<ReturnType<CloudExecutionProfileRegistry['resolve']>>;}): Promise<ProviderReadinessProbeResult> {
+    const executable = await this.trustedExecutables.resolve(input.probeAlias, {organizationId:input.organizationId,workflowRunId:input.workflowRunId??`provider-probe:${input.provider.id}`,capabilityCode:'PROVIDER_READINESS_PROBE',providerId:input.provider.id});
+    if (!executable) return frozenResult(input.provider, true, false, 'PROBE_EXECUTABLE_UNAVAILABLE');
+    const sandboxConfig: GovernedSandboxConfig = {technology:'none',timeoutMs:Math.min(this.timeoutMs,input.profile.maxDurationMs),maxMemoryBytes:0,maxCpuTimeMs:0,maxWorktreeBytes:0};
     try {
-      const result = await this.cloudWorker.executeSandboxed({
-        organizationId: input.organizationId,
-        workflowRunId: input.workflowRunId ?? `provider-probe:${input.provider.id}`,
-        workflowStepRunId: input.workflowStepRunId ?? `provider-probe-step:${input.provider.id}`,
-        repositoryId: CODE_BUILD_REPOSITORY,
-        baseRef: CODE_BUILD_BASE_REF,
-        executable,
-        args: ['run', '-'],
-        prompt: PROBE_PROMPT,
-        sandboxConfig,
-        credentialReference: input.profile.credentialRef,
-        expectedProviderIdentity: {
-          providerId: input.profile.expectedProviderId,
-          ...(input.profile.allowedModelIds ? { allowedModelIds: input.profile.allowedModelIds } : {}),
-        },
-      });
-
-      const observation = classifyProbeResult(result);
-      await this.runtimeState.recordProbe(input.organizationId, input.provider.id, observation);
-      return Object.freeze({ providerId:input.provider.id,providerCode:input.provider.providerCode,attempted:true,refreshed:true,reasonCode:observation.reasonCode,healthStatus:observation.healthStatus,quotaStatus:observation.quotaStatus });
-    } catch (error) {
-      const code = error instanceof WorkerExecutionError ? error.code : errorCode(error);
-      if (isInfrastructureProbeFailure(code)) return frozenResult(input.provider,true,false,code);
+      const result = await this.cloudWorker.executeSandboxed({organizationId:input.organizationId,workflowRunId:input.workflowRunId??`provider-probe:${input.provider.id}`,workflowStepRunId:input.workflowStepRunId??`provider-probe-step:${input.provider.id}`,repositoryId:CODE_BUILD_REPOSITORY,baseRef:CODE_BUILD_BASE_REF,executable,args:['run','-'],prompt:PROBE_PROMPT,sandboxConfig,credentialReference:input.profile.credentialRef,expectedProviderIdentity:{providerId:input.profile.expectedProviderId,...(input.profile.allowedModelIds?{allowedModelIds:input.profile.allowedModelIds}:{})}});
+      const observation=classifyProbeResult(result);
+      await this.runtimeState.recordProbe(input.organizationId,input.provider.id,observation);
+      return Object.freeze({providerId:input.provider.id,providerCode:input.provider.providerCode,attempted:true,refreshed:true,reasonCode:observation.reasonCode,healthStatus:observation.healthStatus,quotaStatus:observation.quotaStatus});
+    } catch(error) {
+      const code=error instanceof WorkerExecutionError?error.code:errorCode(error);
+      if(isInfrastructureProbeFailure(code)) return frozenResult(input.provider,true,false,code);
       const observation={healthStatus:ProviderHealthStatus.UNAVAILABLE,quotaStatus:ProviderQuotaStatus.UNKNOWN,reasonCode:code} as const;
       await this.runtimeState.recordProbe(input.organizationId,input.provider.id,observation);
       return Object.freeze({providerId:input.provider.id,providerCode:input.provider.providerCode,attempted:true,refreshed:true,reasonCode:observation.reasonCode,healthStatus:observation.healthStatus,quotaStatus:observation.quotaStatus});
@@ -137,15 +88,28 @@ export class ProviderReadinessProbeService {
 
 function classifyProbeResult(result: Awaited<ReturnType<RemoteExecutionWorkerService['executeSandboxed']>>) {
   const identity=result.observedProviderIdentity; const text=`${result.stdout}\n${result.stderr}`.toLowerCase();
-  if(result.governedResultSettling.changedFiles.length>0||!result.governedResultSettling.empty)return{healthStatus:ProviderHealthStatus.UNAVAILABLE,quotaStatus:ProviderQuotaStatus.UNKNOWN,reasonCode:'PROBE_SIDE_EFFECT_DETECTED',durationMs:result.durationMs,observedProviderId:identity?.providerId??null,observedModelId:identity?.modelId??null} as const;
-  if(result.timedOut)return{healthStatus:ProviderHealthStatus.UNAVAILABLE,quotaStatus:ProviderQuotaStatus.UNKNOWN,reasonCode:'PROBE_TIMED_OUT',durationMs:result.durationMs,observedProviderId:identity?.providerId??null,observedModelId:identity?.modelId??null} as const;
-  if(/usage limit has been reached|insufficient[_ -]?quota|quota[_ -]?(exceeded|exhausted)/u.test(text))return{healthStatus:ProviderHealthStatus.HEALTHY,quotaStatus:ProviderQuotaStatus.EXHAUSTED,reasonCode:'PROBE_QUOTA_EXHAUSTED',durationMs:result.durationMs,observedProviderId:identity?.providerId??null,observedModelId:identity?.modelId??null} as const;
-  if(/rate[_ -]?limit|too many requests|\b429\b/u.test(text))return{healthStatus:ProviderHealthStatus.QUOTA_LIMITED,quotaStatus:ProviderQuotaStatus.LIMITED,reasonCode:'PROBE_RATE_LIMITED',durationMs:result.durationMs,observedProviderId:identity?.providerId??null,observedModelId:identity?.modelId??null} as const;
-  if(/unauthorized|authentication|invalid.*(api|token|credential)|oauth.*expired|token.*expired/u.test(text))return{healthStatus:ProviderHealthStatus.UNAVAILABLE,quotaStatus:ProviderQuotaStatus.UNKNOWN,reasonCode:'PROBE_AUTHENTICATION_FAILED',durationMs:result.durationMs,observedProviderId:identity?.providerId??null,observedModelId:identity?.modelId??null} as const;
-  if(result.providerIdentityError)return{healthStatus:ProviderHealthStatus.UNAVAILABLE,quotaStatus:ProviderQuotaStatus.UNKNOWN,reasonCode:result.providerIdentityError.code,durationMs:result.durationMs,observedProviderId:identity?.providerId??null,observedModelId:identity?.modelId??null} as const;
-  if(result.exitCode===0)return{healthStatus:ProviderHealthStatus.HEALTHY,quotaStatus:ProviderQuotaStatus.AVAILABLE,reasonCode:'PROBE_SUCCEEDED',durationMs:result.durationMs,observedProviderId:identity?.providerId??null,observedModelId:identity?.modelId??null} as const;
-  return{healthStatus:ProviderHealthStatus.UNAVAILABLE,quotaStatus:ProviderQuotaStatus.UNKNOWN,reasonCode:'PROBE_PROVIDER_UNAVAILABLE',durationMs:result.durationMs,observedProviderId:identity?.providerId??null,observedModelId:identity?.modelId??null} as const;
+  const limit=classifyLimit(text);
+  const common={durationMs:result.durationMs,observedProviderId:identity?.providerId??null,observedModelId:identity?.modelId??null};
+  if(result.governedResultSettling.changedFiles.length>0||!result.governedResultSettling.empty)return{healthStatus:ProviderHealthStatus.UNAVAILABLE,quotaStatus:ProviderQuotaStatus.UNKNOWN,reasonCode:'PROBE_SIDE_EFFECT_DETECTED',...common} as const;
+  if(result.timedOut)return{healthStatus:ProviderHealthStatus.UNAVAILABLE,quotaStatus:ProviderQuotaStatus.UNKNOWN,reasonCode:'PROBE_TIMED_OUT',...common} as const;
+  if(limit?.quotaStatus===ProviderQuotaStatus.EXHAUSTED)return{healthStatus:ProviderHealthStatus.HEALTHY,quotaStatus:ProviderQuotaStatus.EXHAUSTED,reasonCode:limit.reasonCode,limitKind:limit.kind,errorFingerprint:limit.fingerprint,...common} as const;
+  if(limit?.quotaStatus===ProviderQuotaStatus.LIMITED)return{healthStatus:ProviderHealthStatus.QUOTA_LIMITED,quotaStatus:ProviderQuotaStatus.LIMITED,reasonCode:limit.reasonCode,limitKind:limit.kind,errorFingerprint:limit.fingerprint,...common} as const;
+  if(/unauthorized|authentication|invalid.*(api|token|credential)|oauth.*expired|token.*expired/u.test(text))return{healthStatus:ProviderHealthStatus.UNAVAILABLE,quotaStatus:ProviderQuotaStatus.UNKNOWN,reasonCode:'PROBE_AUTHENTICATION_FAILED',...common} as const;
+  if(result.providerIdentityError)return{healthStatus:ProviderHealthStatus.UNAVAILABLE,quotaStatus:ProviderQuotaStatus.UNKNOWN,reasonCode:result.providerIdentityError.code,...common} as const;
+  if(result.exitCode===0)return{healthStatus:ProviderHealthStatus.HEALTHY,quotaStatus:ProviderQuotaStatus.AVAILABLE,reasonCode:'PROBE_SUCCEEDED',...common} as const;
+  return{healthStatus:ProviderHealthStatus.UNAVAILABLE,quotaStatus:ProviderQuotaStatus.UNKNOWN,reasonCode:'PROBE_PROVIDER_UNAVAILABLE',...common} as const;
 }
+function classifyLimit(text:string) {
+  const rules=[
+    ['PROJECT_SPEND_LIMIT','PROBE_PROJECT_SPEND_LIMIT','project[_ -]?(spend|usage)[_ -]?limit|project.{0,40}(spend|usage).{0,20}limit',ProviderQuotaStatus.EXHAUSTED],
+    ['ORGANIZATION_SPEND_LIMIT','PROBE_ORGANIZATION_SPEND_LIMIT','organi[sz]ation[_ -]?(spend|usage)[_ -]?limit|organi[sz]ation.{0,40}(spend|usage).{0,20}limit',ProviderQuotaStatus.EXHAUSTED],
+    ['CREDIT_BALANCE_EXHAUSTED','PROBE_CREDIT_BALANCE_EXHAUSTED','credit[_ -]?balance[_ -]?exhausted|insufficient[_ -]?(credit|quota)|quota[_ -]?(exceeded|exhausted)|usage limit has been reached',ProviderQuotaStatus.EXHAUSTED],
+    ['RATE_LIMITED','PROBE_RATE_LIMITED','rate[_ -]?limit|too many requests|\\b429\\b',ProviderQuotaStatus.LIMITED],
+  ] as const;
+  for(const [kind,reasonCode,pattern,quotaStatus] of rules){const match=text.match(new RegExp(pattern,'u'));if(match){const normalized=match[0].replace(/\s+/gu,' ').trim().slice(0,160);return{kind,reasonCode,quotaStatus,fingerprint:`${kind}:${stableFingerprint(normalized)}`} as const;}}
+  return null;
+}
+function stableFingerprint(value:string):string {let hash=2166136261;for(let i=0;i<value.length;i++){hash^=value.charCodeAt(i);hash=Math.imul(hash,16777619);}return(hash>>>0).toString(16).padStart(8,'0');}
 function frozenResult(provider:ProviderDeclaration,attempted:boolean,refreshed:boolean,reasonCode:string):ProviderReadinessProbeResult{return Object.freeze({providerId:provider.id,providerCode:provider.providerCode,attempted,refreshed,reasonCode});}
 function boundedProbeTimeout(raw:string|undefined):number{if(!raw?.trim())return DEFAULT_PROBE_TIMEOUT_MS;const parsed=Number(raw);if(!Number.isInteger(parsed)||parsed<MIN_PROBE_TIMEOUT_MS||parsed>MAX_PROBE_TIMEOUT_MS)return DEFAULT_PROBE_TIMEOUT_MS;return parsed;}
 function errorCode(error:unknown):string{if(error&&typeof error==='object'&&'code' in error&&typeof(error as any).code==='string')return(error as any).code;return'PROBE_EXECUTION_ERROR';}
