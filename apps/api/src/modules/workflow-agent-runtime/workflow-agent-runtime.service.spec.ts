@@ -176,6 +176,7 @@ describe('WorkflowAgentRuntimeService', () => {
     expect(dispatch.mock.calls[0][0].prompt).toContain('"status":"PASS|FAIL|BLOCKED"');
     expect(dispatch.mock.calls[0][0].prompt).toContain('docs/vito-flight-001-proof.md');
     expect(dispatch.mock.calls[0][0].prompt).toContain('Shell authority is intentionally narrow');
+    expect(dispatch.mock.calls[0][0].prompt).toContain('pnpm --filter @vito/api test -- --runTestsByPath src/modules/cloud-governed-execution/flight-001-acceptance.spec.ts');
     expect(completeStep).toHaveBeenCalledWith(expect.objectContaining({
       stepStatus: 'FAILED',
       metadata: expect.objectContaining({

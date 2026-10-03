@@ -536,7 +536,7 @@ export class WorkflowAgentRuntimeService {
           'Return ONLY one JSON object with this exact test-result schema:',
           '{"status":"PASS|FAIL|BLOCKED","testsExecuted":0,"testsFailed":0,"evidenceRefs":["gov://..."]}',
           'Use PASS only when at least one test was actually executed and testsFailed is 0. Use FAIL when executed tests failed. Use BLOCKED when execution was unavailable or could not establish a test result.',
-          'Flight-001 acceptance is authoritative for this governed TEST: the only workspace mutation permitted is docs/vito-flight-001-proof.md with the byte-exact canonical content defined in apps/api/src/modules/cloud-governed-execution/flight-001-acceptance.ts. Read that definition, materialize only that proof file, and execute an applicable existing test command. Do not modify any other file.',
+          'Flight-001 acceptance is authoritative for this governed TEST: the only workspace mutation permitted is docs/vito-flight-001-proof.md with the byte-exact canonical content defined in apps/api/src/modules/cloud-governed-execution/flight-001-acceptance.ts. Read that definition, materialize only that proof file, and execute exactly this existing test command: pnpm --filter @vito/api test -- --runTestsByPath src/modules/cloud-governed-execution/flight-001-acceptance.spec.ts. Do not execute another shell test command and do not modify any other file.',
           'Shell authority is intentionally narrow: use only read-only git inspection and existing test/build/lint commands; do not install dependencies, commit, push, or access external directories.',
           'Do not include markdown fences or prose outside the JSON object.',
         ]
