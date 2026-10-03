@@ -92,7 +92,7 @@ if (
   !trustedLauncher.includes('OPENAI_API_KEY=') ||
   !trustedLauncher.includes('export OPENAI_API_KEY') ||
   !trustedLauncher.includes('rm -f "$AUTH_FILE"') ||
-  !trustedLauncher.includes('model:"openai/gpt-6-astra"') ||
+  !trustedLauncher.includes('model:"openai/gpt-5.6-sol"') ||
   !trustedLauncher.includes('process.env.CAPABILITY_CODE==="TEST_EXECUTION"') ||
   !trustedLauncher.includes('{action:"edit",resource:"*",effect:"deny"}') ||
   !trustedLauncher.includes('{action:"edit",resource:"docs/vito-flight-001-proof.md",effect:"allow"}') ||
@@ -112,12 +112,12 @@ if (
   !openAiProbeLauncher.includes('OPENAI_API_KEY=') ||
   !openAiProbeLauncher.includes('export OPENAI_API_KEY') ||
   !openAiProbeLauncher.includes('rm -f "$AUTH_FILE"') ||
-  !openAiProbeLauncher.includes('model:"openai/gpt-6-astra"') ||
+  !openAiProbeLauncher.includes('model:"openai/gpt-5.6-sol"') ||
   !openAiProbeLauncher.includes('default_agent:"plan"') ||
   !openAiProbeLauncher.includes('{action:"edit",resource:"*",effect:"deny"}') ||
   !openAiProbeLauncher.includes('{action:"shell",resource:"*",effect:"deny"}')
 ) {
-  fail('OpenAI readiness probe must require the ephemeral server-owned API key, pin gpt-6-astra/plan, and deny edit/shell authority');
+  fail('OpenAI readiness probe must require the ephemeral server-owned API key, pin gpt-5.6-sol/plan, and deny edit/shell authority');
 }
 
 if (
@@ -145,7 +145,7 @@ if (
   !stagingCompose.includes('"profileId":"staging-openai-api"') ||
   !stagingCompose.includes('"credentialRef":"cloud:openai:api:staging"') ||
   !stagingCompose.includes('"testExecutionLauncherAlias":"opencode"') ||
-  !stagingCompose.includes('"expectedProviderId":"openai","allowedModelIds":["gpt-6-astra"]') ||
+  !stagingCompose.includes('"expectedProviderId":"openai","allowedModelIds":["gpt-5.6-sol"]') ||
   stagingCompose.includes('VITO_CLOUD_OPENCODE_DB_PATH') ||
   stagingCompose.includes('/run/secrets/vito-cloud/opencode.db')
 ) {
