@@ -28,6 +28,10 @@ const openRouterFreeLauncherPath = resolve(
   rootDir,
   'deploy/staging/trusted-launchers/opencode-openrouter-free',
 );
+const openAiProbeLauncherPath = resolve(
+  rootDir,
+  'deploy/staging/trusted-launchers/opencode-openai-probe',
+);
 const identityEvidencePath = resolve(
   rootDir,
   'deploy/staging/trusted-launchers/opencode-sqlite-identity-evidence.mjs',
@@ -52,12 +56,14 @@ if (typeof contractsPkg.scripts?.build !== 'string' || !contractsPkg.scripts.bui
 let dockerfile;
 let trustedLauncher;
 let openRouterFreeLauncher;
+let openAiProbeLauncher;
 let identityEvidence;
 let stagingCompose;
 try {
   dockerfile = readFileSync(dockerfilePath, 'utf8');
   trustedLauncher = readFileSync(trustedLauncherPath, 'utf8');
   openRouterFreeLauncher = readFileSync(openRouterFreeLauncherPath, 'utf8');
+  openAiProbeLauncher = readFileSync(openAiProbeLauncherPath, 'utf8');
   identityEvidence = readFileSync(identityEvidencePath, 'utf8');
   stagingCompose = readFileSync(stagingComposePath, 'utf8');
 } catch (error) {
@@ -71,6 +77,9 @@ if (
     'COPY deploy/staging/trusted-launchers/opencode-openrouter-free /opt/vito/trusted-launchers/opencode-openrouter-free',
   ) ||
   !dockerfile.includes(
+    'COPY deploy/staging/trusted-launchers/opencode-openai-probe /opt/vito/trusted-launchers/opencode-openai-probe',
+  ) ||
+  !dockerfile.includes(
     'COPY deploy/staging/trusted-launchers/opencode-sqlite-identity-evidence.mjs /opt/vito/trusted-launchers/opencode-sqlite-identity-evidence.mjs',
   )
 ) {
@@ -79,6 +88,10 @@ if (
 if (
   !trustedLauncher.includes('XDG_DATA_HOME') ||
   !trustedLauncher.includes('opencode-sqlite-identity-evidence.mjs') ||
+  !trustedLauncher.includes('AUTH_FILE="$XDG_DATA_HOME/opencode/auth.json"') ||
+  !trustedLauncher.includes('OPENAI_API_KEY=') ||
+  !trustedLauncher.includes('export OPENAI_API_KEY') ||
+  !trustedLauncher.includes('rm -f "$AUTH_FILE"') ||
   !trustedLauncher.includes('model:"openai/gpt-6-astra"') ||
   !trustedLauncher.includes('process.env.CAPABILITY_CODE==="TEST_EXECUTION"') ||
   !trustedLauncher.includes('{action:"edit",resource:"*",effect:"deny"}') ||
@@ -91,6 +104,20 @@ if (
   !trustedLauncher.includes('{action:"shell",resource:"pnpm test *",effect:"allow"}')
 ) {
   fail('reviewed OpenCode launcher must pin the server-owned model, enforce SQLite identity evidence, and keep TEST_EXECUTION fail-closed with only canonical Flight-001 edit plus bounded read-only git/test authority');
+}
+
+if (
+  !openAiProbeLauncher.includes('XDG_DATA_HOME') ||
+  !openAiProbeLauncher.includes('AUTH_FILE="$XDG_DATA_HOME/opencode/auth.json"') ||
+  !openAiProbeLauncher.includes('OPENAI_API_KEY=') ||
+  !openAiProbeLauncher.includes('export OPENAI_API_KEY') ||
+  !openAiProbeLauncher.includes('rm -f "$AUTH_FILE"') ||
+  !openAiProbeLauncher.includes('model:"openai/gpt-6-astra"') ||
+  !openAiProbeLauncher.includes('default_agent:"plan"') ||
+  !openAiProbeLauncher.includes('{action:"edit",resource:"*",effect:"deny"}') ||
+  !openAiProbeLauncher.includes('{action:"shell",resource:"*",effect:"deny"}')
+) {
+  fail('OpenAI readiness probe must require the ephemeral server-owned API key, pin gpt-6-astra/plan, and deny edit/shell authority');
 }
 
 if (
@@ -115,10 +142,14 @@ if (
 }
 
 if (
+  !stagingCompose.includes('"profileId":"staging-openai-api"') ||
+  !stagingCompose.includes('"credentialRef":"cloud:openai:api:staging"') ||
   !stagingCompose.includes('"testExecutionLauncherAlias":"opencode"') ||
-  !stagingCompose.includes('"expectedProviderId":"openai","allowedModelIds":["gpt-6-astra"]')
+  !stagingCompose.includes('"expectedProviderId":"openai","allowedModelIds":["gpt-6-astra"]') ||
+  stagingCompose.includes('VITO_CLOUD_OPENCODE_DB_PATH') ||
+  stagingCompose.includes('/run/secrets/vito-cloud/opencode.db')
 ) {
-  fail('staging cloud profile must server-authorize only the governed gpt-6-astra model');
+  fail('staging OpenAI profile must use only the server-owned API credential path and must not mount ChatGPT OAuth state');
 }
 
 if (

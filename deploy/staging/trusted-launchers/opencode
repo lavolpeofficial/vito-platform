@@ -5,6 +5,25 @@ EVIDENCE=/opt/vito/trusted-launchers/opencode-sqlite-identity-evidence.mjs
 if [ "${1:-}" != "run" ]; then exec "$BIN" "$@"; fi
 : "${XDG_CONFIG_HOME:?XDG_CONFIG_HOME required}"
 : "${XDG_DATA_HOME:?XDG_DATA_HOME required}"
+
+AUTH_FILE="$XDG_DATA_HOME/opencode/auth.json"
+[ -f "$AUTH_FILE" ] || exit 55
+OPENAI_API_KEY="$(
+  node -e '
+    const fs=require("fs");
+    let value="";
+    try {
+      const parsed=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+      value=parsed && typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : "";
+    } catch { process.exit(55); }
+    if (!value || value.length > 4096 || /[\r\n\0]/.test(value)) process.exit(55);
+    process.stdout.write(value);
+  ' "$AUTH_FILE"
+)" || exit 55
+[ -n "$OPENAI_API_KEY" ] || exit 55
+export OPENAI_API_KEY
+rm -f "$AUTH_FILE"
+
 mkdir -p "$XDG_CONFIG_HOME/opencode"
 node -e '
 const fs=require("fs");
@@ -62,6 +81,7 @@ if [ -f "$DB" ]; then
   evidence_rc=$?
 fi
 set -e
+unset OPENAI_API_KEY
 if [ "$rc" -ne 0 ]; then exit "$rc"; fi
 [ "$evidence_rc" -eq 0 ] || exit "$evidence_rc"
 exit 0
