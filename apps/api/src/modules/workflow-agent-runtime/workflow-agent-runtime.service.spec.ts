@@ -174,6 +174,8 @@ describe('WorkflowAgentRuntimeService', () => {
 
     expect(result.disposition).toBe('TEST_RESULT_INVALID');
     expect(dispatch.mock.calls[0][0].prompt).toContain('"status":"PASS|FAIL|BLOCKED"');
+    expect(dispatch.mock.calls[0][0].prompt).toContain('docs/vito-flight-001-proof.md');
+    expect(dispatch.mock.calls[0][0].prompt).toContain('Shell authority is intentionally narrow');
     expect(completeStep).toHaveBeenCalledWith(expect.objectContaining({
       stepStatus: 'FAILED',
       metadata: expect.objectContaining({

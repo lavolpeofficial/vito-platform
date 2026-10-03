@@ -82,10 +82,15 @@ if (
   !trustedLauncher.includes('model:"openai/gpt-6-astra"') ||
   !trustedLauncher.includes('process.env.CAPABILITY_CODE==="TEST_EXECUTION"') ||
   !trustedLauncher.includes('{action:"edit",resource:"*",effect:"deny"}') ||
+  !trustedLauncher.includes('{action:"edit",resource:"docs/vito-flight-001-proof.md",effect:"allow"}') ||
   !trustedLauncher.includes('{action:"shell",resource:"*",effect:"deny"}') ||
-  !trustedLauncher.includes('{action:"shell",resource:"pnpm test",effect:"allow"}')
+  !trustedLauncher.includes('{action:"shell",resource:"git status *",effect:"allow"}') ||
+  !trustedLauncher.includes('{action:"shell",resource:"git diff *",effect:"allow"}') ||
+  !trustedLauncher.includes('{action:"shell",resource:"git rev-parse *",effect:"allow"}') ||
+  !trustedLauncher.includes('{action:"shell",resource:"pnpm test",effect:"allow"}') ||
+  !trustedLauncher.includes('{action:"shell",resource:"pnpm test *",effect:"allow"}')
 ) {
-  fail('reviewed OpenCode launcher must pin the server-owned model, enforce SQLite identity evidence, and keep TEST_EXECUTION read-only except for pnpm test');
+  fail('reviewed OpenCode launcher must pin the server-owned model, enforce SQLite identity evidence, and keep TEST_EXECUTION fail-closed with only canonical Flight-001 edit plus bounded read-only git/test authority');
 }
 
 if (
