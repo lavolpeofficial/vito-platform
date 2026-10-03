@@ -2,7 +2,7 @@ import { toValidatedCloudExecutionProfile } from './execution-tier.js';
 
 const base = {
   profileId: 'probe-test', providerCode: 'cloud.openai.main', credentialRef: 'cloud:openai:staging',
-  trustedLauncherAlias: 'opencode', expectedProviderId: 'openai', allowedModelIds: ['gpt-6-astra'],
+  trustedLauncherAlias: 'opencode', expectedProviderId: 'openai', allowedModelIds: ['gpt-5.6-sol'],
   maxDurationMs: 600000, maxParallelism: 1, enabled: true,
 };
 

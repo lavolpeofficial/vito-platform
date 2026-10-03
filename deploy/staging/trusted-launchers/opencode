@@ -31,7 +31,7 @@ const p=process.argv[1];
 const h=process.env.HOME;
 const isTest=process.env.CAPABILITY_CODE==="TEST_EXECUTION";
 const config=isTest ? {
-  model:"openai/gpt-6-astra",
+  model:"openai/gpt-5.6-sol",
   default_agent:"build",
   permissions:[
     {action:"read",resource:"*",effect:"allow"},
@@ -62,7 +62,7 @@ const config=isTest ? {
     {action:"external_directory",resource:h+"/.cache/opencode/bin/*",effect:"allow"}
   ]
 } : {
-  model:"openai/gpt-6-astra",
+  model:"openai/gpt-5.6-sol",
   permission:{external_directory:{
     "*":"deny",
     [h+"/.local/share/opencode/snapshot/**"]:"allow",

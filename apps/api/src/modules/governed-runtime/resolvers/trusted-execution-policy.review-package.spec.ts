@@ -26,7 +26,7 @@ const profile = (enabled = true): CloudExecutionProfile => ({
   trustedLauncherAlias: 'opencode',
   testExecutionLauncherAlias: 'opencode',
   expectedProviderId: 'openai',
-  allowedModelIds: ['gpt-6-astra'],
+  allowedModelIds: ['gpt-5.6-sol'],
   maxDurationMs: 600000,
   maxParallelism: 1,
   enabled,
