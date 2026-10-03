@@ -47,8 +47,13 @@ describe('WorkflowAgentRuntimeService', () => {
     completeStep.mockResolvedValue({ idempotent: false, outcome: { kind: 'NEXT_STEP' } });
     tryRecordOutcome.mockResolvedValue({ id: 'outcome-1', score: 1 });
     resolveRedTeamEvidence.mockResolvedValue({
-      schemaVersion: 'RED_TEAM_EVIDENCE_V1', workflowRunId: 'run-1', redTeamStepRunId: 'step-red',
-      testedRevisionSha: 'a'.repeat(40), entries: [], manifestSha256: 'f'.repeat(64),
+      schemaVersion: 'RED_TEAM_EVIDENCE_V2', workflowRunId: 'run-1', redTeamStepRunId: 'step-red',
+      testedRevisionSha: 'a'.repeat(40), entries: [], humanReleaseBoundary: {
+        authority: 'HUMAN_EXPLICIT_ONLY',
+        agentRuntimeDisposition: 'NON_AGENT_STEP',
+        humanReleaseGate: { agentExecutable: false, capabilityCode: null },
+        releaseExecution: { agentExecutable: false, capabilityCode: null },
+      }, manifestSha256: 'f'.repeat(64),
     });
     resolveCorrectionContext.mockResolvedValue({
       schemaVersion: 'CORRECTION_CONTEXT_V1', workflowRunId: 'run-1', correctionStepRunId: 'step-correction',
@@ -241,8 +246,10 @@ describe('WorkflowAgentRuntimeService', () => {
       prompt: expect.stringContaining('RED_TEAM_EVIDENCE_MANIFEST_SHA256: ' + 'f'.repeat(64)),
     }));
     expect(dispatch.mock.calls[0][0].prompt).toContain('Do not traverse external workflow directories');
+    expect(dispatch.mock.calls[0][0].prompt).toContain('CLEANED means workspace teardown completed before success');
+    expect(dispatch.mock.calls[0][0].prompt).toContain('HUMAN_RELEASE_GATE and RELEASE_EXECUTION have no agent-executable capability');
     expect(completeStep).toHaveBeenCalledWith(expect.objectContaining({
-      metadata: expect.objectContaining({ redTeamEvidenceManifest: expect.objectContaining({ schemaVersion: 'RED_TEAM_EVIDENCE_V1' }) }),
+      metadata: expect.objectContaining({ redTeamEvidenceManifest: expect.objectContaining({ schemaVersion: 'RED_TEAM_EVIDENCE_V2' }) }),
     }));
   });
 

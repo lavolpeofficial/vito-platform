@@ -511,6 +511,8 @@ export class WorkflowAgentRuntimeService {
     const evidenceContext = redTeamEvidenceManifest
       ? [
           'Authoritative mission-bound evidence follows. It was server-generated from the persisted causation chain and governed execution ledger.',
+          'Runtime postconditions in this manifest are ledger-bound server evidence: CLEANED means workspace teardown completed before success, settling contains the exact changed-file set plus a hash of the complete patch, and ledgerStatus is matched to the governed execution record.',
+          'The humanReleaseBoundary object is server-owned workflow authority evidence: HUMAN_RELEASE_GATE and RELEASE_EXECUTION have no agent-executable capability and remain explicit-human-only boundaries.',
           'Do not traverse external workflow directories. Review only the current workspace plus this manifest.',
           `RED_TEAM_EVIDENCE_MANIFEST_SHA256: ${redTeamEvidenceManifest.manifestSha256}`,
           `RED_TEAM_EVIDENCE_MANIFEST: ${JSON.stringify(redTeamEvidenceManifest)}`,
