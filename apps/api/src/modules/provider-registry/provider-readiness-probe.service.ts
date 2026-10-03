@@ -101,9 +101,10 @@ function classifyProbeResult(result: Awaited<ReturnType<RemoteExecutionWorkerSer
 }
 function classifyLimit(text:string) {
   const rules=[
-    ['PROJECT_SPEND_LIMIT','PROBE_PROJECT_SPEND_LIMIT','project[_ -]?(spend|usage)[_ -]?limit|project.{0,40}(spend|usage).{0,20}limit',ProviderQuotaStatus.EXHAUSTED],
-    ['ORGANIZATION_SPEND_LIMIT','PROBE_ORGANIZATION_SPEND_LIMIT','organi[sz]ation[_ -]?(spend|usage)[_ -]?limit|organi[sz]ation.{0,40}(spend|usage).{0,20}limit',ProviderQuotaStatus.EXHAUSTED],
-    ['CREDIT_BALANCE_EXHAUSTED','PROBE_CREDIT_BALANCE_EXHAUSTED','credit[_ -]?balance[_ -]?exhausted|insufficient[_ -]?(credit|quota)|quota[_ -]?(exceeded|exhausted)|usage limit has been reached',ProviderQuotaStatus.EXHAUSTED],
+    ['PROJECT_LIMIT_REACHED','PROBE_PROJECT_LIMIT_REACHED','project[_ -]?(spend|usage)[_ -]?limit|project.{0,40}(spend|usage).{0,20}limit',ProviderQuotaStatus.EXHAUSTED],
+    ['ORGANIZATION_LIMIT_REACHED','PROBE_ORGANIZATION_LIMIT_REACHED','organi[sz]ation[_ -]?(spend|usage)[_ -]?limit|organi[sz]ation.{0,40}(spend|usage).{0,20}limit',ProviderQuotaStatus.EXHAUSTED],
+    ['CREDIT_OR_QUOTA_EXHAUSTED','PROBE_CREDIT_OR_QUOTA_EXHAUSTED','credit[_ -]?balance[_ -]?exhausted|insufficient[_ -]?(credit|quota)|quota[_ -]?(exceeded|exhausted)',ProviderQuotaStatus.EXHAUSTED],
+    ['USAGE_LIMIT_REACHED','PROBE_USAGE_LIMIT_REACHED','usage limit has been reached',ProviderQuotaStatus.EXHAUSTED],
     ['RATE_LIMITED','PROBE_RATE_LIMITED','rate[_ -]?limit|too many requests|\\b429\\b',ProviderQuotaStatus.LIMITED],
   ] as const;
   for(const [kind,reasonCode,pattern,quotaStatus] of rules){const match=text.match(new RegExp(pattern,'u'));if(match){const normalized=match[0].replace(/\s+/gu,' ').trim().slice(0,160);return{kind,reasonCode,quotaStatus,fingerprint:`${kind}:${stableFingerprint(normalized)}`} as const;}}
