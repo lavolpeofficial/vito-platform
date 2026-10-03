@@ -100,8 +100,8 @@ if (
   !trustedLauncher.includes('{action:"shell",resource:"git status *",effect:"allow"}') ||
   !trustedLauncher.includes('{action:"shell",resource:"git diff *",effect:"allow"}') ||
   !trustedLauncher.includes('{action:"shell",resource:"git rev-parse *",effect:"allow"}') ||
-  !trustedLauncher.includes('{action:"shell",resource:"pnpm test",effect:"allow"}') ||
-  !trustedLauncher.includes('{action:"shell",resource:"pnpm test *",effect:"allow"}')
+  !trustedLauncher.includes('{action:"shell",resource:"pnpm --filter @vito/api test -- --runTestsByPath src/modules/cloud-governed-execution/flight-001-acceptance.spec.ts",effect:"allow"}') ||
+  trustedLauncher.includes('{action:"shell",resource:"pnpm test *",effect:"allow"}')
 ) {
   fail('reviewed OpenCode launcher must pin the server-owned model, enforce SQLite identity evidence, and keep TEST_EXECUTION fail-closed with only canonical Flight-001 edit plus bounded read-only git/test authority');
 }
