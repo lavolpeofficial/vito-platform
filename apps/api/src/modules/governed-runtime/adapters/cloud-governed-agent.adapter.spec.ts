@@ -318,7 +318,19 @@ describe('CloudGovernedAgentAdapter (CLOUD_GOVERNED tier, §9 gates)', () => {
         stdoutSha256Reference: 'gov://evidence/stdout-sha256/a4c3ed04a95a3da14a9d235c83d868bed7c0f45cf7f3faa751ee8f50598d2211',
         exitCode: 0,
       },
+      governedRuntimeEvidence: expect.objectContaining({
+        workspaceDisposition: 'CLEANED',
+        ephemeralMaterialDisposition: 'REMOVED',
+        settling: expect.objectContaining({
+          executionId: 'exec-001',
+          revisionReference: `gov://revision/${'a'.repeat(40)}`,
+          changedFiles: ['src/foo.ts'],
+          empty: false,
+          patchSha256Reference: expect.stringMatching(/^gov:\/\/evidence\/patch-sha256\/[a-f0-9]{64}$/),
+        }),
+      }),
     }));
+    expect(JSON.stringify(result.usageMetadata)).not.toContain('diff --git a/src/foo.ts');
   });
 
   it('maps explicit cloud cancellation to CANCELLED before provider-identity failure handling', async () => {

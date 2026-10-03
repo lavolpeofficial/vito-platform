@@ -23,7 +23,7 @@ import {
   codeBuildTargetMatchesContext,
   readCodeBuildExecutionTarget,
 } from './code-build-execution-target';
-import { buildGovernedEvidenceBinding } from '../../governed-invocation/governed-evidence-binding';
+import { buildGovernedEvidenceBinding, buildGovernedRuntimeEvidence } from '../../governed-invocation/governed-evidence-binding';
 
 const MAX_ARGS = 64;
 const MAX_ARG_LENGTH = 4096;
@@ -265,9 +265,11 @@ function mapWorkerResult(
     },
   };
   const evidenceBinding = buildGovernedEvidenceBinding(baseMetadata, baseMetadata);
+  const runtimeEvidence = buildGovernedRuntimeEvidence(baseMetadata);
   const usageMetadata = {
     durationMs: result.durationMs,
     ...(evidenceBinding ? { governedEvidenceBinding: evidenceBinding } : {}),
+    ...(runtimeEvidence ? { governedRuntimeEvidence: runtimeEvidence } : {}),
   };
 
   if (result.cancelled === true) {
