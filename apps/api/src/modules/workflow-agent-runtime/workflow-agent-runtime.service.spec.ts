@@ -226,6 +226,142 @@ describe('WorkflowAgentRuntimeService', () => {
     }));
   });
 
+  it('transitions VERIFY only when RELEASE_VERIFICATION returns a structured PASS', async () => {
+    findRun.mockResolvedValueOnce({
+      id: 'run-1', taskId: 'task-1', status: 'RUNNING',
+      currentStepType: EngineeringStepType.VERIFY, assuranceLevel: 'AL-3', correlationId: 'corr-1',
+    });
+    findStep.mockResolvedValueOnce({ id: 'step-verify', stepType: EngineeringStepType.VERIFY, attemptNumber: 1 });
+    capabilityForStep.mockReturnValueOnce(EngineeringCapability.RELEASE_VERIFICATION);
+    dispatch.mockResolvedValueOnce({
+      routingDecisionId: 'route-verify',
+      selectedProviderId: 'provider-1',
+      selectedProviderCode: 'cloud.openai.main',
+      experienceId: 'exp-verify',
+      execution: {
+        status: AgentExecutionStatus.SUCCEEDED,
+        invocationId: 'inv-verify',
+        outputReference: 'gov://execution/inv-verify',
+        providerExecutionMetadata: {
+          stdout: JSON.stringify({
+            status: 'PASS',
+            checksExecuted: 8,
+            checksFailed: 0,
+            blockingReasons: [],
+            evidenceRefs: ['gov://evidence/verify-pass'],
+          }),
+        },
+      },
+    });
+
+    const result = await service.executeCurrentStep('org-1', 'run-1');
+
+    expect(result.disposition).toBe('TRANSITIONED');
+    expect(dispatch.mock.calls[0][0].prompt).toContain('release-verification schema');
+    expect(dispatch.mock.calls[0][0].prompt).toContain('successful agent process exit is NOT sufficient');
+    expect(completeStep).toHaveBeenCalledWith(expect.objectContaining({
+      stepStatus: 'SUCCEEDED',
+      metadata: expect.objectContaining({
+        verificationResultProjectionStatus: 'VALID',
+        verificationResultStatus: 'PASS',
+        verificationResult: {
+          status: 'PASS',
+          checksExecuted: 8,
+          checksFailed: 0,
+          blockingReasons: [],
+          evidenceRefs: ['gov://evidence/verify-pass'],
+        },
+        executionEvidence: expect.objectContaining({
+          resultSummary: expect.objectContaining({
+            content: expect.stringContaining('"status":"PASS"'),
+          }),
+        }),
+      }),
+    }));
+  });
+
+  it('fails VERIFY closed when the agent process succeeds but verification is blocked or unstructured', async () => {
+    findRun.mockResolvedValue({
+      id: 'run-1', taskId: 'task-1', status: 'RUNNING',
+      currentStepType: EngineeringStepType.VERIFY, assuranceLevel: 'AL-3', correlationId: 'corr-1',
+    });
+    findStep.mockResolvedValue({ id: 'step-verify', stepType: EngineeringStepType.VERIFY, attemptNumber: 1 });
+    capabilityForStep.mockReturnValue(EngineeringCapability.RELEASE_VERIFICATION);
+
+    dispatch.mockResolvedValueOnce({
+      routingDecisionId: 'route-verify',
+      selectedProviderId: 'provider-1',
+      selectedProviderCode: 'cloud.openai.main',
+      experienceId: 'exp-verify-blocked',
+      execution: {
+        status: AgentExecutionStatus.SUCCEEDED,
+        invocationId: 'inv-verify-blocked',
+        outputReference: 'gov://execution/inv-verify-blocked',
+        providerExecutionMetadata: {
+          stdout: JSON.stringify({
+            status: 'BLOCKED',
+            checksExecuted: 4,
+            checksFailed: 0,
+            blockingReasons: ['PostgreSQL verification unavailable'],
+            evidenceRefs: [],
+          }),
+        },
+      },
+    });
+
+    let result = await service.executeCurrentStep('org-1', 'run-1');
+    expect(result.disposition).toBe('VERIFICATION_RESULT_INVALID');
+    expect(completeStep).toHaveBeenLastCalledWith(expect.objectContaining({
+      stepStatus: 'FAILED',
+      metadata: expect.objectContaining({
+        executionStatus: AgentExecutionStatus.SUCCEEDED,
+        verificationResultProjectionStatus: 'REJECTED',
+        verificationResultStatus: 'BLOCKED',
+        verificationResult: expect.objectContaining({
+          status: 'BLOCKED',
+          blockingReasons: ['PostgreSQL verification unavailable'],
+        }),
+      }),
+    }));
+
+    jest.clearAllMocks();
+    findRun.mockResolvedValue({
+      id: 'run-1', taskId: 'task-1', status: 'RUNNING',
+      currentStepType: EngineeringStepType.VERIFY, assuranceLevel: 'AL-3', correlationId: 'corr-1',
+    });
+    findStep.mockResolvedValue({ id: 'step-verify', stepType: EngineeringStepType.VERIFY, attemptNumber: 1 });
+    findTask.mockResolvedValue({
+      id: 'task-1', title: 'Verify release', description: 'Verify without release.',
+    });
+    capabilityForStep.mockReturnValue(EngineeringCapability.RELEASE_VERIFICATION);
+    completeStep.mockResolvedValue({ idempotent: false, outcome: { kind: 'BLOCKED' } });
+    tryRecordOutcome.mockResolvedValue({ id: 'outcome-verify', score: 0 });
+    dispatch.mockResolvedValueOnce({
+      routingDecisionId: 'route-verify',
+      selectedProviderId: 'provider-1',
+      selectedProviderCode: 'cloud.openai.main',
+      experienceId: 'exp-verify-prose',
+      execution: {
+        status: AgentExecutionStatus.SUCCEEDED,
+        invocationId: 'inv-verify-prose',
+        outputReference: 'gov://execution/inv-verify-prose',
+        providerExecutionMetadata: {
+          stdout: '## VERIFY outcome: FAILED / BLOCKED\nThe workflow must not advance.',
+        },
+      },
+    });
+
+    result = await service.executeCurrentStep('org-1', 'run-1');
+    expect(result.disposition).toBe('VERIFICATION_RESULT_INVALID');
+    expect(completeStep).toHaveBeenLastCalledWith(expect.objectContaining({
+      stepStatus: 'FAILED',
+      metadata: expect.objectContaining({
+        verificationResultProjectionStatus: 'INVALID',
+        verificationResultStatus: 'INVALID',
+      }),
+    }));
+  });
+
   it('injects only the server-resolved evidence manifest into RED_TEAM prompt and persists the binding', async () => {
     findRun.mockResolvedValueOnce({
       id: 'run-1', taskId: 'task-1', status: 'RUNNING',

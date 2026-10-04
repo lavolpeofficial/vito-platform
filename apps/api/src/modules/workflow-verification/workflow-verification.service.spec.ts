@@ -33,6 +33,57 @@ describe('WorkflowVerificationService', () => {
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'WORKFLOW_STEP_VERIFIED' }));
   });
 
+  it('verifies VERIFY only with a structured PASS projection', async () => {
+    findStep.mockResolvedValue({
+      id: 'step-verify',
+      stepType: EngineeringStepType.VERIFY,
+      status: 'SUCCEEDED',
+      attemptNumber: 1,
+      metadata: {
+        executionStatus: 'SUCCEEDED',
+        capabilityCode: 'RELEASE_VERIFICATION',
+        verificationResultProjectionStatus: 'VALID',
+        verificationResultStatus: 'PASS',
+      },
+    });
+    queryRaw.mockResolvedValueOnce([{
+      id: 'ver-pass',
+      status: 'VERIFIED',
+      ruleCode: 'RELEASE_VERIFICATION_PASSED',
+    }]);
+
+    const result = await service.verifyStep('org-1', 'run-1', 'step-verify');
+
+    expect(result.status).toBe('VERIFIED');
+    expect(result.ruleCode).toBe('RELEASE_VERIFICATION_PASSED');
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'WORKFLOW_STEP_VERIFIED',
+    }));
+  });
+
+  it('does not verify VERIFY when structured release-verification evidence is absent', async () => {
+    findStep.mockResolvedValue({
+      id: 'step-verify',
+      stepType: EngineeringStepType.VERIFY,
+      status: 'SUCCEEDED',
+      attemptNumber: 1,
+      metadata: {
+        executionStatus: 'SUCCEEDED',
+        capabilityCode: 'RELEASE_VERIFICATION',
+      },
+    });
+    queryRaw.mockResolvedValueOnce([{
+      id: 'ver-invalid',
+      status: 'INCONCLUSIVE',
+      ruleCode: 'VERIFICATION_RESULT_INVALID',
+    }]);
+
+    const result = await service.verifyStep('org-1', 'run-1', 'step-verify');
+
+    expect(result.status).toBe('INCONCLUSIVE');
+    expect(result.ruleCode).toBe('VERIFICATION_RESULT_INVALID');
+  });
+
   it('keeps BUILD success inconclusive until downstream verification exists', async () => {
     findStep.mockResolvedValue({
       id: 'step-1', stepType: EngineeringStepType.BUILD, status: 'SUCCEEDED', attemptNumber: 1,

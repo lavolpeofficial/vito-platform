@@ -9,6 +9,7 @@ import { WorkflowRuntimeService } from '../workflow-runtime/workflow-runtime.ser
 import { CodeBuildApprovalService } from '../engineering-release/code-build-approval.service';
 import { WorkflowReviewResultProjectorService } from './workflow-review-result-projector.service';
 import { WorkflowTestResultProjectorService } from './workflow-test-result-projector.service';
+import { WorkflowReleaseVerificationResultProjectorService } from './workflow-release-verification-result-projector.service';
 import { buildBoundedExecutionResultSummary } from '../governed-invocation/governed-evidence-binding';
 import { type RedTeamEvidenceManifest, WorkflowRedTeamEvidenceHandoffService } from './workflow-red-team-evidence-handoff.service';
 import { type CorrectionContextManifest, WorkflowCorrectionContextHandoffService } from './workflow-correction-context-handoff.service';
@@ -25,6 +26,7 @@ const MAX_CHANGED_FILE_CHARS = 512;
 export class WorkflowAgentRuntimeService {
   private readonly reviewProjector = new WorkflowReviewResultProjectorService();
   private readonly testResultProjector = new WorkflowTestResultProjectorService();
+  private readonly releaseVerificationResultProjector = new WorkflowReleaseVerificationResultProjectorService();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -239,10 +241,63 @@ export class WorkflowAgentRuntimeService {
         ? this.testResultProjector.project(dispatch.execution)
         : null;
 
+    const releaseVerificationResult =
+      (step.stepType === EngineeringStepType.VERIFY || step.stepType === EngineeringStepType.REMOTE_VERIFY) &&
+      completionStatus === 'SUCCEEDED'
+        ? this.releaseVerificationResultProjector.project(dispatch.execution)
+        : null;
+
     const correctionChangedFiles =
       step.stepType === EngineeringStepType.CORRECTION && completionStatus === 'SUCCEEDED'
         ? this.changedFilesFromExecutionEvidence(executionEvidence)
         : null;
+
+    if (
+      (step.stepType === EngineeringStepType.VERIFY || step.stepType === EngineeringStepType.REMOTE_VERIFY) &&
+      completionStatus === 'SUCCEEDED' &&
+      (!releaseVerificationResult || releaseVerificationResult.status !== 'PASS')
+    ) {
+      const transition = await this.workflowRuntime.completeStep({
+        organizationId,
+        workflowRunId,
+        workflowStepRunId: step.id,
+        stepStatus: 'FAILED',
+        metadata: {
+          source: 'WORKFLOW_AGENT_RUNTIME',
+          capabilityCode,
+          routingDecisionId: dispatch.routingDecisionId,
+          selectedProviderId: dispatch.selectedProviderId,
+          selectedProviderCode: dispatch.selectedProviderCode,
+          experienceId: dispatch.experienceId,
+          executionStatus,
+          executionEvidence,
+          verificationResultProjectionStatus: releaseVerificationResult ? 'REJECTED' : 'INVALID',
+          verificationResultStatus: releaseVerificationResult?.status ?? 'INVALID',
+          ...(releaseVerificationResult ? { verificationResult: releaseVerificationResult } : {}),
+        },
+      });
+      const outcomeEvaluation = await this.recordOutcome({
+        organizationId,
+        experienceId: dispatch.experienceId,
+        workflowRunId,
+        workflowStepRunId: step.id,
+        stepType: step.stepType,
+        capabilityCode,
+        executionStatus,
+        transitionKind: transition.outcome?.kind ?? null,
+      });
+      return Object.freeze({
+        disposition: 'VERIFICATION_RESULT_INVALID' as const,
+        workflowRunId,
+        workflowStepRunId: step.id,
+        stepType: step.stepType,
+        capabilityCode,
+        executionStatus,
+        dispatch,
+        transition,
+        outcomeEvaluation,
+      });
+    }
 
     if (step.stepType === EngineeringStepType.CORRECTION && completionStatus === 'SUCCEEDED' && (!correctionChangedFiles || correctionChangedFiles.length === 0)) {
       const transition = await this.workflowRuntime.completeStep({
@@ -350,6 +405,9 @@ export class WorkflowAgentRuntimeService {
         ...(correctionContextManifest ? { correctionContextManifest } : {}),
         ...(reviewResult ? { reviewProjectionStatus: 'VALID', reviewResult } : {}),
         ...(testResult ? { testResultProjectionStatus: 'VALID', testResult } : {}),
+        ...(releaseVerificationResult
+          ? { verificationResultProjectionStatus: 'VALID', verificationResultStatus: releaseVerificationResult.status, verificationResult: releaseVerificationResult }
+          : {}),
       },
     });
 
@@ -448,7 +506,12 @@ export class WorkflowAgentRuntimeService {
         changedFiles: this.boundedChangedFiles(settling?.changedFiles),
       });
     }
-    if (stepType === EngineeringStepType.TEST || stepType === EngineeringStepType.PACKAGE) {
+    if (
+      stepType === EngineeringStepType.TEST ||
+      stepType === EngineeringStepType.PACKAGE ||
+      stepType === EngineeringStepType.VERIFY ||
+      stepType === EngineeringStepType.REMOTE_VERIFY
+    ) {
       const resultSummary = buildBoundedExecutionResultSummary(providerMetadata ?? undefined, MAX_RESULT_SUMMARY_CHARS);
       if (resultSummary) evidence.resultSummary = resultSummary;
     }
@@ -543,6 +606,18 @@ export class WorkflowAgentRuntimeService {
           'Do not include markdown fences or prose outside the JSON object.',
         ]
       : [];
+    const verificationContract =
+      stepType === EngineeringStepType.VERIFY || stepType === EngineeringStepType.REMOTE_VERIFY
+        ? [
+            'Return ONLY one JSON object with this exact release-verification schema:',
+            '{"status":"PASS|FAIL|BLOCKED","checksExecuted":0,"checksFailed":0,"blockingReasons":["string"],"evidenceRefs":["gov://..."]}',
+            'Use PASS only when at least one verification check was actually executed, all mandatory checks passed, checksFailed is 0, and blockingReasons is empty.',
+            'Use FAIL when one or more executed mandatory checks failed. Use BLOCKED when any mandatory check or required evidence could not be executed or established.',
+            'A successful agent process exit is NOT sufficient for PASS. Repository tests, security-boundary checks, build verification, and required environment-backed checks must be reflected in the structured result.',
+            'Do not approve, invoke, or simulate HUMAN_RELEASE_GATE or RELEASE_EXECUTION. Do not modify tracked repository files.',
+            'Do not include markdown fences or prose outside the JSON object.',
+          ]
+        : [];
     return [
       `Execute the persisted VITO engineering workflow step: ${stepType}.`,
       `Task title: ${title}`,
@@ -551,6 +626,7 @@ export class WorkflowAgentRuntimeService {
       ...correctionContext,
       ...reviewContract,
       ...testContract,
+      ...verificationContract,
       'Operate only within this workflow step and return bounded execution evidence.',
     ].filter((value): value is string => Boolean(value)).join('\n').slice(0, MAX_TASK_CONTEXT_CHARS);
   }
