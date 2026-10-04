@@ -74,6 +74,10 @@ export class WorkflowVerificationService {
     const executionStatus = typeof metadata.executionStatus === 'string' ? metadata.executionStatus : null;
     const capabilityCode = typeof metadata.capabilityCode === 'string' ? metadata.capabilityCode : null;
     const experienceId = typeof metadata.experienceId === 'string' ? metadata.experienceId : null;
+    const verificationResultProjectionStatus =
+      typeof metadata.verificationResultProjectionStatus === 'string' ? metadata.verificationResultProjectionStatus : null;
+    const verificationResultStatus =
+      typeof metadata.verificationResultStatus === 'string' ? metadata.verificationResultStatus : null;
     const decision = this.decide({
       stepType: step.stepType as EngineeringStepType,
       stepStatus: step.status,
@@ -81,6 +85,8 @@ export class WorkflowVerificationService {
       blockReasonCode: run.blockReasonCode,
       executionStatus,
       capabilityCode,
+      verificationResultProjectionStatus,
+      verificationResultStatus,
     });
 
     const evidence = {
@@ -95,6 +101,8 @@ export class WorkflowVerificationService {
       executionStatus,
       capabilityCode,
       experienceId,
+      verificationResultProjectionStatus,
+      verificationResultStatus,
       reason: decision.reason,
     };
 
@@ -154,6 +162,8 @@ export class WorkflowVerificationService {
     blockReasonCode: string | null;
     executionStatus: string | null;
     capabilityCode: string | null;
+    verificationResultProjectionStatus: string | null;
+    verificationResultStatus: string | null;
   }): VerificationDecision {
     if (input.runStatus === 'BLOCKED' && input.stepStatus === 'WAITING' && input.blockReasonCode === 'PROVIDER_BLOCKED') {
       return Object.freeze({ status: 'BLOCKED', ruleCode: 'PROVIDER_BLOCK_STATE', reason: 'Provider policy or quota blocked execution.' });
@@ -172,9 +182,22 @@ export class WorkflowVerificationService {
     }
 
     if (input.stepType === EngineeringStepType.VERIFY || input.stepType === EngineeringStepType.REMOTE_VERIFY) {
-      return input.executionStatus === 'SUCCEEDED' && input.capabilityCode === 'RELEASE_VERIFICATION'
-        ? Object.freeze({ status: 'VERIFIED', ruleCode: 'RELEASE_VERIFICATION_SUCCEEDED', reason: 'Governed RELEASE_VERIFICATION completed successfully.' })
-        : Object.freeze({ status: 'INCONCLUSIVE', ruleCode: 'VERIFICATION_EVIDENCE_INCOMPLETE', reason: 'Verification step lacks matching governed RELEASE_VERIFICATION evidence.' });
+      if (input.executionStatus !== 'SUCCEEDED' || input.capabilityCode !== 'RELEASE_VERIFICATION') {
+        return Object.freeze({ status: 'INCONCLUSIVE', ruleCode: 'VERIFICATION_EVIDENCE_INCOMPLETE', reason: 'Verification step lacks matching governed RELEASE_VERIFICATION execution evidence.' });
+      }
+      if (input.verificationResultProjectionStatus !== 'VALID') {
+        return Object.freeze({ status: 'INCONCLUSIVE', ruleCode: 'VERIFICATION_RESULT_INVALID', reason: 'Release verification output was not projected into authoritative structured evidence.' });
+      }
+      if (input.verificationResultStatus === 'PASS') {
+        return Object.freeze({ status: 'VERIFIED', ruleCode: 'RELEASE_VERIFICATION_PASSED', reason: 'Governed RELEASE_VERIFICATION produced a structured PASS result.' });
+      }
+      if (input.verificationResultStatus === 'FAIL') {
+        return Object.freeze({ status: 'FAILED', ruleCode: 'RELEASE_VERIFICATION_FAILED', reason: 'Governed RELEASE_VERIFICATION produced a structured FAIL result.' });
+      }
+      if (input.verificationResultStatus === 'BLOCKED') {
+        return Object.freeze({ status: 'BLOCKED', ruleCode: 'RELEASE_VERIFICATION_BLOCKED', reason: 'Governed RELEASE_VERIFICATION produced a structured BLOCKED result.' });
+      }
+      return Object.freeze({ status: 'INCONCLUSIVE', ruleCode: 'VERIFICATION_RESULT_MISSING', reason: 'Release verification result status is missing or invalid.' });
     }
 
     if (input.stepType === EngineeringStepType.BUILD || input.stepType === EngineeringStepType.CORRECTION) {

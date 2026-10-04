@@ -19,6 +19,7 @@ services:
       - vito-staging-backend
 
   api:
+    init: true
     build:
       context: ../..
       dockerfile: Dockerfile
