@@ -6,6 +6,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { TenantContext } from '../../common/tenant/tenant-context';
 import { AgentWorkforceService } from './agent-workforce.service';
 import { EngineeringAgentProvisioningService } from './engineering-agent-provisioning.service';
+import { ReleaseVerificationProvisioningService } from './release-verification-provisioning.service';
 import { DispatchAgentTaskDto } from './dto/dispatch-agent-task.dto';
 
 @ApiTags('agent-workforce')
@@ -15,6 +16,7 @@ export class AgentWorkforceController {
   constructor(
     private readonly service: AgentWorkforceService,
     private readonly engineeringProvisioning: EngineeringAgentProvisioningService,
+    private readonly releaseVerificationProvisioning: ReleaseVerificationProvisioningService,
     private readonly tenantContext: TenantContext,
   ) {}
 
@@ -24,6 +26,14 @@ export class AgentWorkforceController {
   @ApiCreatedResponse({ description: 'Governed VITO engineering agent DRAFT bootstrap created or verified. No execution authority is enabled.' })
   provisionEngineeringAgent() {
     return this.engineeringProvisioning.provision();
+  }
+
+  @Post('engineering-agent/release-verification/provision')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiCreatedResponse({ description: 'Adds RELEASE_VERIFICATION as disabled authority without changing existing active engineering authority.' })
+  provisionReleaseVerification() {
+    return this.releaseVerificationProvisioning.provision();
   }
 
   @Post('dispatch')
