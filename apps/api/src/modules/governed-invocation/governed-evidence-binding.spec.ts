@@ -1,4 +1,5 @@
-import { buildBoundedExecutionResultSummary, buildGovernedEvidenceBinding } from './governed-evidence-binding';
+import { sanitizeProviderExecutionMetadata } from '@vito/contracts';
+import { buildBoundedExecutionResultSummary, buildGovernedEvidenceBinding, buildGovernedRuntimeEvidence } from './governed-evidence-binding';
 
 describe('governed evidence binding', () => {
   it('binds sanitized stdout and governed base revision without retaining raw output', () => {
@@ -51,4 +52,68 @@ describe('governed evidence binding', () => {
       charLength: 10,
     });
   });
+  it('binds real runtime postconditions without persisting the raw patch', () => {
+    const proof = buildGovernedRuntimeEvidence({
+      workspaceDisposition: 'CLEANED',
+      credentialDisposition: 'removed',
+      governedResultSettling: {
+        executionId: 'worker-exec-1',
+        baseSha: 'c'.repeat(40),
+        changedFiles: ['docs/vito-flight-001-proof.md'],
+        empty: false,
+        patch: 'raw patch body that must not survive',
+      },
+      providerIdentityPostcondition: {
+        enforced: true,
+        passed: true,
+        observedProviderId: 'openai',
+        observedModelId: 'gpt-5.6-sol',
+      },
+      flight001Acceptance: {
+        checked: true,
+        passed: true,
+        expectedPath: 'docs/vito-flight-001-proof.md',
+        expectedSha256: '1'.repeat(64),
+        actualSha256: '1'.repeat(64),
+      },
+    });
+    expect(proof).toEqual(expect.objectContaining({
+      workspaceDisposition: 'CLEANED',
+      ephemeralMaterialDisposition: 'REMOVED',
+      settling: expect.objectContaining({
+        executionId: 'worker-exec-1',
+        revisionReference: `gov://revision/${'c'.repeat(40)}`,
+        changedFiles: ['docs/vito-flight-001-proof.md'],
+        empty: false,
+        patchSha256Reference: expect.stringMatching(/^gov:\/\/evidence\/patch-sha256\/[a-f0-9]{64}$/),
+      }),
+      providerIdentityPostcondition: expect.objectContaining({ passed: true, observedProviderId: 'openai' }),
+      flight001Acceptance: expect.objectContaining({ checked: true, passed: true }),
+    }));
+    expect(JSON.stringify(proof)).not.toContain('raw patch body');
+    const sanitized = sanitizeProviderExecutionMetadata({ governedRuntimeEvidence: proof });
+    expect(sanitized).toEqual(expect.objectContaining({
+      governedRuntimeEvidence: expect.objectContaining({
+        settling: expect.objectContaining({
+          revisionReference: `gov://revision/${'c'.repeat(40)}`,
+          patchSha256Reference: expect.stringMatching(/^gov:\/\/evidence\/patch-sha256\/[a-f0-9]{64}$/),
+        }),
+      }),
+    }));
+  });
+
+  it('fails closed when cleanup or credential teardown evidence is missing', () => {
+    const base = {
+      governedResultSettling: {
+        executionId: 'worker-exec-1',
+        baseSha: 'd'.repeat(40),
+        changedFiles: [],
+        empty: true,
+        patch: '',
+      },
+    };
+    expect(buildGovernedRuntimeEvidence({ ...base, credentialDisposition: 'removed' })).toBeNull();
+    expect(buildGovernedRuntimeEvidence({ ...base, workspaceDisposition: 'CLEANED' })).toBeNull();
+  });
+
 });
