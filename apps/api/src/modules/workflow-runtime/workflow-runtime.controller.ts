@@ -7,7 +7,9 @@ import { TenantContext } from '../../common/tenant/tenant-context';
 import { HumanDecisionCorrectionService } from './human-decision-correction.service';
 import { HumanReleaseApprovalService } from './human-release-approval.service';
 import { LoopExhaustedTestRecoveryDto } from './dto/loop-exhausted-test-recovery.dto';
+import { ReleaseVerificationRecoveryDto } from './dto/release-verification-recovery.dto';
 import { LoopExhaustedTestRecoveryService } from './loop-exhausted-test-recovery.service';
+import { ReleaseVerificationRecoveryService } from './release-verification-recovery.service';
 import { WorkflowRuntimeService } from './workflow-runtime.service';
 
 @ApiTags('workflow-runtime')
@@ -19,6 +21,7 @@ export class WorkflowRuntimeController {
     private readonly humanDecisionCorrection: HumanDecisionCorrectionService,
     private readonly humanReleaseApproval: HumanReleaseApprovalService,
     private readonly loopExhaustedTestRecovery: LoopExhaustedTestRecoveryService,
+    private readonly releaseVerificationRecovery: ReleaseVerificationRecoveryService,
     private readonly tenantContext: TenantContext,
   ) {}
 
@@ -86,6 +89,27 @@ export class WorkflowRuntimeController {
     @Req() request: { user: AuthenticatedUser },
   ) {
     return this.loopExhaustedTestRecovery.recover({
+      organizationId: this.tenantContext.getOrThrow(),
+      workflowRunId,
+      approvedByUserId: request.user.userId,
+      isMachineIdentity: request.user.isMachineIdentity,
+      approvalRef: dto.approvalRef,
+    });
+  }
+
+  @Post(':workflowRunId/human-recovery/reopen-release-verification')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description:
+      'Explicit human recovery for a legacy false-positive HUMAN_RELEASE_GATE. Cancels the stale READY human gate, creates one fresh READY VERIFY step from the original upstream causation, preserves the correction-loop count and triggers no execution.',
+  })
+  recoverReleaseVerification(
+    @Param('workflowRunId') workflowRunId: string,
+    @Body() dto: ReleaseVerificationRecoveryDto,
+    @Req() request: { user: AuthenticatedUser },
+  ) {
+    return this.releaseVerificationRecovery.recover({
       organizationId: this.tenantContext.getOrThrow(),
       workflowRunId,
       approvedByUserId: request.user.userId,
