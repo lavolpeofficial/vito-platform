@@ -63,8 +63,8 @@ describe('EngineeringAgentProvisioningService', () => {
         status: DigitalEmployeeStatus.DRAFT,
       }),
     }));
-    expect(capabilityCreate).toHaveBeenCalledTimes(5);
-    expect(assignmentCreate).toHaveBeenCalledTimes(5);
+    expect(capabilityCreate).toHaveBeenCalledTimes(6);
+    expect(assignmentCreate).toHaveBeenCalledTimes(6);
     for (const call of assignmentCreate.mock.calls) {
       expect(call[0].data.isEnabled).toBe(false);
     }
@@ -74,6 +74,7 @@ describe('EngineeringAgentProvisioningService', () => {
       EngineeringCapability.TEST_EXECUTION,
       EngineeringCapability.REVIEW_PACKAGE,
       EngineeringCapability.RED_TEAM,
+      EngineeringCapability.RELEASE_VERIFICATION,
     ]);
     expect(result.capabilitiesEnabled).toBe(false);
     expect(result.requiresActivationGate).toBe(true);
@@ -127,6 +128,7 @@ describe('EngineeringAgentProvisioningService', () => {
       [EngineeringCapability.TEST_EXECUTION, RiskLevel.MEDIUM, false],
       [EngineeringCapability.REVIEW_PACKAGE, RiskLevel.MEDIUM, false],
       [EngineeringCapability.RED_TEAM, RiskLevel.MEDIUM, false],
+      [EngineeringCapability.RELEASE_VERIFICATION, RiskLevel.MEDIUM, false],
     ] as const;
     capabilityFind.mockImplementation(async ({ where }: any) => {
       const found = declarations.find(([code]) => code === where.code)!;

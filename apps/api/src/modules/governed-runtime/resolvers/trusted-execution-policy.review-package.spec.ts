@@ -91,6 +91,28 @@ describe('TrustedExecutionPolicyResolver REVIEW_PACKAGE authority', () => {
     );
   });
 
+  it('adds the server-owned RELEASE_VERIFICATION launcher after all proofs agree', async () => {
+    const resolver = new TrustedExecutionPolicyResolver(
+      ROOT,
+      providerResolver as any,
+      new CloudExecutionProfileRegistry([profile()]),
+      trustedExecutableResolver as any,
+    );
+    const policy = await resolver.resolve({
+      ...BASE_CONTEXT,
+      capabilityCode: EngineeringCapability.RELEASE_VERIFICATION,
+    });
+    expect(policy?.trustedReviewerAgentAliases).toEqual(['opencode']);
+    expect(policy?.trustedCodingAgentAliases ?? []).toEqual([]);
+    expect(trustedExecutableResolver.resolve).toHaveBeenCalledWith(
+      'opencode',
+      expect.objectContaining({
+        providerId: 'provider-1',
+        capabilityCode: EngineeringCapability.RELEASE_VERIFICATION,
+      }),
+    );
+  });
+
   it.each([
     ['disabled profile', ProviderType.CLOUD_LLM, false, true, 'cloud.openai.main'],
     ['local provider', ProviderType.LOCAL_TOOL, true, true, 'cloud.openai.main'],

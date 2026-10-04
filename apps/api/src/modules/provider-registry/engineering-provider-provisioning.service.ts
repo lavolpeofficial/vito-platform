@@ -15,6 +15,7 @@ const ENGINEERING_PROVIDER = Object.freeze({
     EngineeringCapability.TEST_EXECUTION,
     EngineeringCapability.REVIEW_PACKAGE,
     EngineeringCapability.RED_TEAM,
+    EngineeringCapability.RELEASE_VERIFICATION,
   ]),
   assuranceLevels: Object.freeze(['AL1', 'AL2', 'AL3', 'AL4']),
 });

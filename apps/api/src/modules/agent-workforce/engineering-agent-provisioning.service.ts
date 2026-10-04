@@ -19,6 +19,7 @@ const ENGINEERING_CAPABILITIES = Object.freeze([
   Object.freeze({ code: EngineeringCapability.TEST_EXECUTION, name: 'Test execution', riskLevel: RiskLevel.MEDIUM, requiresApproval: false }),
   Object.freeze({ code: EngineeringCapability.REVIEW_PACKAGE, name: 'Review package', riskLevel: RiskLevel.MEDIUM, requiresApproval: false }),
   Object.freeze({ code: EngineeringCapability.RED_TEAM, name: 'Red team review', riskLevel: RiskLevel.MEDIUM, requiresApproval: false }),
+  Object.freeze({ code: EngineeringCapability.RELEASE_VERIFICATION, name: 'Release verification', riskLevel: RiskLevel.MEDIUM, requiresApproval: false }),
 ]);
 
 @Injectable()

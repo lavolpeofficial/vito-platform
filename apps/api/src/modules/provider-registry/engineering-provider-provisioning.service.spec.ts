@@ -33,6 +33,7 @@ describe('EngineeringProviderProvisioningService', () => {
         EngineeringCapability.TEST_EXECUTION,
         EngineeringCapability.REVIEW_PACKAGE,
         EngineeringCapability.RED_TEAM,
+        EngineeringCapability.RELEASE_VERIFICATION,
       ],
     });
     listCapabilities.mockResolvedValue([]);
@@ -65,7 +66,7 @@ describe('EngineeringProviderProvisioningService', () => {
       status: 'DISABLED',
       modelFamily: 'openai',
     }));
-    expect(assignCapability).toHaveBeenCalledTimes(5);
+    expect(assignCapability).toHaveBeenCalledTimes(6);
     for (const call of assignCapability.mock.calls) {
       expect(call[0].isEnabled).toBe(false);
     }
@@ -97,6 +98,7 @@ describe('EngineeringProviderProvisioningService', () => {
         EngineeringCapability.TEST_EXECUTION,
         EngineeringCapability.REVIEW_PACKAGE,
         EngineeringCapability.RED_TEAM,
+        EngineeringCapability.RELEASE_VERIFICATION,
       ],
     });
     listCapabilities.mockResolvedValueOnce([
@@ -105,6 +107,7 @@ describe('EngineeringProviderProvisioningService', () => {
       { capabilityCode: EngineeringCapability.TEST_EXECUTION, isEnabled: false },
       { capabilityCode: EngineeringCapability.REVIEW_PACKAGE, isEnabled: false },
       { capabilityCode: EngineeringCapability.RED_TEAM, isEnabled: false },
+      { capabilityCode: EngineeringCapability.RELEASE_VERIFICATION, isEnabled: false },
     ]);
 
     const result = await service().provision();
@@ -126,6 +129,7 @@ describe('EngineeringProviderProvisioningService', () => {
         EngineeringCapability.TEST_EXECUTION,
         EngineeringCapability.REVIEW_PACKAGE,
         EngineeringCapability.RED_TEAM,
+        EngineeringCapability.RELEASE_VERIFICATION,
       ],
     });
 
@@ -146,6 +150,7 @@ describe('EngineeringProviderProvisioningService', () => {
         EngineeringCapability.TEST_EXECUTION,
         EngineeringCapability.REVIEW_PACKAGE,
         EngineeringCapability.RED_TEAM,
+        EngineeringCapability.RELEASE_VERIFICATION,
       ],
     });
     listCapabilities.mockResolvedValueOnce([
