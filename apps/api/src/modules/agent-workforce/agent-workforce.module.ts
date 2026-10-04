@@ -11,6 +11,7 @@ import { MissionContextModule } from '../mission-context/mission-context.module'
 import { AgentWorkforceController } from './agent-workforce.controller';
 import { AgentWorkforceService } from './agent-workforce.service';
 import { EngineeringAgentProvisioningService } from './engineering-agent-provisioning.service';
+import { ReleaseVerificationProvisioningService } from './release-verification-provisioning.service';
 import { WorkflowAgentAssignmentController } from './workflow-agent-assignment.controller';
 import { WorkflowAgentAssignmentService } from './workflow-agent-assignment.service';
 import { WorkflowExecutionIdentityService } from './workflow-execution-identity.service';
@@ -31,6 +32,7 @@ import { WorkflowExecutionPlanService } from './workflow-execution-plan.service'
   providers: [
     AgentWorkforceService,
     EngineeringAgentProvisioningService,
+    ReleaseVerificationProvisioningService,
     WorkflowExecutionIdentityService,
     WorkflowExecutionPlanService,
     WorkflowAgentAssignmentService,
@@ -38,6 +40,7 @@ import { WorkflowExecutionPlanService } from './workflow-execution-plan.service'
   exports: [
     AgentWorkforceService,
     EngineeringAgentProvisioningService,
+    ReleaseVerificationProvisioningService,
     WorkflowExecutionPlanService,
     WorkflowAgentAssignmentService,
   ],
