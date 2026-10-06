@@ -1,0 +1,24 @@
+.voice-page { max-width: 940px; }
+.voice-heading { display:flex; justify-content:space-between; gap:24px; align-items:flex-start; margin-bottom:34px; }
+.voice-heading h1 { margin:8px 0 14px; font-size:clamp(38px,5vw,58px); }
+.voice-heading p { max-width:650px; color:var(--muted); line-height:1.65; }
+.voice-center { display:grid; gap:14px; }
+.voice-panel { border:1px solid var(--line); background:var(--surface); padding:24px; }
+.voice-panel-heading { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:22px; }
+.voice-panel-heading h2 { margin:8px 0 0; }
+.voice-label { display:block; margin-bottom:8px; color:#c2ccc7; font-size:11px; font-weight:650; }
+.voice-transcript-panel textarea { width:100%; resize:vertical; border:1px solid var(--line-strong); border-radius:0; outline:0; background:#0b110f; padding:15px; color:var(--text); font:inherit; line-height:1.55; }
+.voice-transcript-panel textarea:focus { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
+.voice-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:14px; }
+.voice-button, .voice-examples button { border:1px solid var(--line-strong); background:transparent; padding:12px 16px; color:var(--text); cursor:pointer; font:inherit; font-size:12px; }
+.voice-button:hover, .voice-examples button:hover { border-color:var(--accent); color:var(--accent); }
+.voice-button-active { border-color:#ffb35c; color:#ffb35c; }
+.voice-submit { margin-top:0; }
+.voice-support { margin:14px 0 0; color:#6f7e77; font-size:11px; }
+.voice-response-panel { background:linear-gradient(135deg,var(--surface),#0d1512); }
+.voice-response { min-height:76px; margin:0; color:#dfe9e2; font-size:17px; line-height:1.55; }
+.voice-boundary { display:flex; gap:10px; align-items:center; margin-top:22px; border-left:2px solid var(--accent); padding-left:12px; color:var(--muted); font-size:11px; }
+.voice-boundary strong { color:var(--text); }
+.voice-examples { display:flex; flex-wrap:wrap; gap:9px; }
+.voice-examples button span { display:block; margin-top:5px; color:#ffb35c; font-size:10px; }
+@media (max-width:680px) { .voice-heading { display:block; } .voice-heading .status-chip { display:inline-block; margin-top:14px; } .voice-panel { padding:18px; } .voice-actions > * { flex:1 1 100%; } }
