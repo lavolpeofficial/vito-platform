@@ -1,11 +1,12 @@
 export type NavigationItem = Readonly<{
-  href: '/operations' | '/source-vault' | '/planning' | '/workflows' | '/verification' | '/workforce' | '/governance' | '/learning' | '/memory' | '/audit';
+  href: '/voice' | '/operations' | '/source-vault' | '/planning' | '/workflows' | '/verification' | '/workforce' | '/governance' | '/learning' | '/memory' | '/audit';
   label: string;
   description: string;
   icon: 'pulse' | 'vault' | 'planning' | 'workflow' | 'verification' | 'agents' | 'governance' | 'learning' | 'memory' | 'audit';
 }>;
 
 export const navigationItems: readonly NavigationItem[] = [
+  { href: '/voice', label: 'VITO Voice', description: 'Sprache, Transkript und sichere Befehle', icon: 'pulse' },
   { href: '/operations', label: 'Operations', description: 'Systemzustand und operative Lage', icon: 'pulse' },
   { href: '/source-vault', label: 'Source Vault', description: 'Quellen, Verarbeitung und Herkunft', icon: 'vault' },
   { href: '/planning', label: 'Goal & Planning', description: 'Ziele und governbare Pläne', icon: 'planning' },
