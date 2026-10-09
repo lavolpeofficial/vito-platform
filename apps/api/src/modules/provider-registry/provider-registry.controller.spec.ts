@@ -36,6 +36,21 @@ describe('ProviderRegistryController authority boundary', () => {
     expect(engineeringProvisioning.provision).toHaveBeenCalledTimes(1);
   });
 
+  it('does not allow generic provider creation to inject credentialRequirement authority', async () => {
+    registry.createProvider.mockResolvedValue({ id: 'provider-cred-1' });
+
+    await controller.createProvider({
+      providerCode: 'p-cred',
+      displayName: 'P Cred',
+      supportedCapabilities: [],
+      credentialRequirement: 'NOT_REQUIRED',
+    } as any);
+
+    expect(registry.createProvider).toHaveBeenCalledWith(
+      expect.not.objectContaining({ credentialRequirement: 'NOT_REQUIRED' }),
+    );
+  });
+
   it('derives provider CRUD tenant exclusively from TenantContext', async () => {
     registry.createProvider.mockResolvedValue({ id: 'provider-1' });
     await controller.createProvider({ providerCode: 'p1', displayName: 'P1', supportedCapabilities: [] });

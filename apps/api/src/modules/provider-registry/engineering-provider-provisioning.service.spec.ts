@@ -26,6 +26,7 @@ describe('EngineeringProviderProvisioningService', () => {
       displayName: 'OpenAI Cloud Coding',
       providerType: 'CLOUD_LLM',
       status: 'DISABLED',
+      credentialRequirement: 'REQUIRED',
       modelFamily: 'openai',
       supportedCapabilities: [
         EngineeringCapability.CODE_PLAN,
@@ -64,6 +65,7 @@ describe('EngineeringProviderProvisioningService', () => {
       providerCode: 'cloud.openai.main',
       providerType: 'CLOUD_LLM',
       status: 'DISABLED',
+      credentialRequirement: 'REQUIRED',
       modelFamily: 'openai',
     }));
     expect(assignCapability).toHaveBeenCalledTimes(6);
@@ -91,6 +93,7 @@ describe('EngineeringProviderProvisioningService', () => {
       providerCode: 'cloud.openai.main',
       providerType: 'CLOUD_LLM',
       status: 'DISABLED',
+      credentialRequirement: 'REQUIRED',
       modelFamily: 'openai',
       supportedCapabilities: [
         EngineeringCapability.CODE_PLAN,
@@ -114,6 +117,26 @@ describe('EngineeringProviderProvisioningService', () => {
     expect(createProvider).not.toHaveBeenCalled();
     expect(assignCapability).not.toHaveBeenCalled();
     expect(result.capabilitiesEnabled).toBe(false);
+  });
+
+  it('fails closed when the existing OpenAI provider credential requirement is not REQUIRED', async () => {
+    findProviderByCode.mockResolvedValueOnce({
+      id: 'provider-1',
+      providerCode: 'cloud.openai.main',
+      providerType: 'CLOUD_LLM',
+      status: 'DISABLED',
+      credentialRequirement: 'UNKNOWN',
+      modelFamily: 'openai',
+      supportedCapabilities: [
+        EngineeringCapability.CODE_PLAN,
+        EngineeringCapability.CODE_BUILD,
+        EngineeringCapability.TEST_EXECUTION,
+        EngineeringCapability.REVIEW_PACKAGE,
+      ],
+    });
+
+    await expect(service().provision()).rejects.toBeInstanceOf(ConflictException);
+    expect(assignCapability).not.toHaveBeenCalled();
   });
 
   it('fails closed for an active or otherwise mismatched provider', async () => {
@@ -143,6 +166,7 @@ describe('EngineeringProviderProvisioningService', () => {
       providerCode: 'cloud.openai.main',
       providerType: 'CLOUD_LLM',
       status: 'DISABLED',
+      credentialRequirement: 'REQUIRED',
       modelFamily: 'openai',
       supportedCapabilities: [
         EngineeringCapability.CODE_PLAN,
