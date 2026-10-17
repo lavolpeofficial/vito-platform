@@ -77,3 +77,27 @@ test('accepts only the explicitly configured reverse-proxy public origin', () =>
     else environment.VITO_CONTROL_CENTER_PUBLIC_ORIGIN = previous;
   }
 });
+
+test('private SSH browser origin is exact and cannot be supplied by forwarded headers', () => {
+  const previous = process.env.VITO_CONTROL_CENTER_PUBLIC_ORIGIN;
+  try {
+    process.env.VITO_CONTROL_CENTER_PUBLIC_ORIGIN = 'http://localhost:34122';
+    for (const [origin, expected] of [
+      ['http://localhost:34122', true],
+      ['http://localhost:34120', false],
+      // The request's own origin remains allowed by the existing guard.
+      ['http://127.0.0.1:34122', true],
+      ['https://localhost:34122', false],
+      ['http://localhost.attacker.invalid:34122', false],
+      ['null', false],
+    ] as const) {
+      assert.equal(isSameOriginMutation({
+        headers: new Headers({ origin, 'x-forwarded-host': 'localhost:34122', 'x-forwarded-proto': 'http' }),
+        nextUrl: new URL('http://127.0.0.1:34122/api/auth/login'),
+      } as never), expected, origin);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.VITO_CONTROL_CENTER_PUBLIC_ORIGIN;
+    else process.env.VITO_CONTROL_CENTER_PUBLIC_ORIGIN = previous;
+  }
+});
