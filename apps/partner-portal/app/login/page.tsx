@@ -12,7 +12,7 @@ export default function LoginPage() {
           <p>Klar orientieren. Professionell handeln. Nachhaltig wachsen.</p>
         </div>
         <div className="review-notice"><strong>Review Build</strong><p>Auth0 EU ist bewusst noch nicht verbunden. Diese Oberfläche dient der Owner-Kontrolle ohne produktive Identitäts- oder Kundendaten.</p></div>
-        <Link className="button primary login-button" href="/">Review Portal öffnen</Link>
+        <div className="login-actions"><Link className="button primary login-button" href="/">Review Portal öffnen</Link><Link className="button secondary login-button" href="/apply">Partner werden</Link></div>
       </section>
       <section className="login-mountain"><MountainMark /><blockquote>UNDERSTAND<br />TRANSFORM<br />EVOLVE</blockquote></section>
     </main>
