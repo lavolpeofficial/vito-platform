@@ -1,4 +1,5 @@
-import { documents } from '@/lib/demo-data';
+import Link from 'next/link';
+import { knowledgeDocuments } from '@/lib/content';
 
 export default function DocumentsPage() {
   return (
@@ -6,16 +7,16 @@ export default function DocumentsPage() {
       <header className="page-head">
         <span className="eyebrow">Knowledge</span>
         <h1>Documents</h1>
-        <p>Nur aktuelle, freigegebene Versionen. Alte Dateien werden nicht standardmäßig angeboten.</p>
+        <p>Nur aktuelle Review-Fassungen. Rechtlich verbindliche Dokumente werden vor Produktivbetrieb separat freigegeben.</p>
       </header>
-      <div className="filter-bar"><span>Alle Kategorien</span><span>DE / IT</span><span>APPROVED + CURRENT</span></div>
+      <div className="filter-bar"><span>Alle Kategorien</span><span>DE / IT</span><span>REVIEW APPROVED</span></div>
       <section className="document-list">
-        {documents.map((doc) => (
-          <article key={doc.title}>
-            <div className="file-mark">{doc.type}</div>
+        {knowledgeDocuments.map((doc) => (
+          <article key={doc.slug}>
+            <div className="file-mark">DOC</div>
             <div><strong>{doc.title}</strong><small>{doc.category} · {doc.language}</small></div>
             <div className="doc-version">v{doc.version}<small>{doc.status}</small></div>
-            <button type="button" className="button secondary small" disabled title="Document storage is not connected in review mode">Noch nicht verbunden</button>
+            <Link className="button secondary small" href={'/documents/' + doc.slug}>Öffnen</Link>
           </article>
         ))}
       </section>
