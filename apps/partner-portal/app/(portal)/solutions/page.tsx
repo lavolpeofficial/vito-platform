@@ -6,7 +6,7 @@ export default function SolutionsPage() {
     <>
       <header className="page-head">
         <span className="eyebrow">Portfolio</span>
-        <h1>Solutions</h1>
+        <h1>Lösungen</h1>
         <p>Jede Lösung hat klare Einsatzgrenzen, Preisrahmen und Partnerrechte. Partnerstatus bedeutet nicht automatisch Verkaufsbefugnis.</p>
       </header>
       <section className="solution-grid">
