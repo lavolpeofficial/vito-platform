@@ -1,11 +1,5 @@
-const assets = [
-  ['Akquise Erstkontakt · Italien', 'EMAIL_TEMPLATE', 'IT', 'v2.1'],
-  ['Telefonleitfaden · KMU', 'PHONE_SCRIPT', 'IT', 'v1.4'],
-  ['Discovery Guide', 'DISCOVERY_GUIDE', 'DE / IT', 'v1.0'],
-  ['Einwandbehandlung · Preis & KI', 'OBJECTION_HANDLING', 'IT', 'v1.1'],
-  ['Lead Flow Demo', 'DEMO', 'DE / IT', 'v0.8'],
-  ['Automotive Solution Case', 'CASE', 'IT', 'v1.0'],
-];
+import Link from 'next/link';
+import { salesAssets } from '@/lib/content';
 
 export default function SalesPage() {
   return (
@@ -15,14 +9,15 @@ export default function SalesPage() {
         <h1>Sales Hub</h1>
         <p>Nur freigegebene, aktuelle Versionen. Akquise, Discovery und Cases bleiben einheitlich und governance-fähig.</p>
       </header>
-      <div className="filter-bar"><span>Sprache: Alle</span><span>Offer: Alle</span><span>Asset: Alle</span><span>Status: APPROVED</span></div>
+      <div className="filter-bar"><span>Sprache: Alle</span><span>Offer: Alle</span><span>Asset: Alle</span><span>Status: REVIEW APPROVED</span></div>
       <section className="asset-grid">
-        {assets.map(([title, type, language, version]) => (
-          <article className="asset-card" key={title}>
-            <span className="asset-type">{type}</span>
-            <h2>{title}</h2>
-            <p>{language} · {version} · APPROVED</p>
-            <button className="button secondary" type="button" disabled title="Asset storage is not connected in review mode">Vorschau · nach Integration</button>
+        {salesAssets.map((asset) => (
+          <article className="asset-card" key={asset.slug}>
+            <span className="asset-type">{asset.category}</span>
+            <h2>{asset.title}</h2>
+            <p>{asset.summary}</p>
+            <p>{asset.language} · v{asset.version} · {asset.status}</p>
+            <Link className="button secondary" href={'/sales/' + asset.slug}>Öffnen</Link>
           </article>
         ))}
       </section>
