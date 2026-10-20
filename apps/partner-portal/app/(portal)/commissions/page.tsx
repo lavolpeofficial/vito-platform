@@ -9,7 +9,7 @@ export default function CommissionsPage() {
     <>
       <header className="page-head">
         <span className="eyebrow">Finance</span>
-        <h1>Commissions</h1>
+        <h1>Provisionen</h1>
         <p>Rechnung, Zahlung, CNR und Provisionsanspruch bleiben getrennte Objekte. Provision entsteht erst auf eligible CNR.</p>
       </header>
       <section className="metric-grid compact-metrics">
