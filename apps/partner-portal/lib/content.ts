@@ -106,6 +106,54 @@ export const knowledgeDocuments: readonly PortalContent[] = [
       { heading: 'Prinzip', body: ['UNDERSTAND → STRUCTURE → DIGITALIZE → AUTOMATE → AI WHERE USEFUL → HUMAN CONTROL → MEASURE → OPTIMIZE.'] },
     ],
   },
+,
+  {
+    slug: 'security-privacy',
+    title: 'Security & Privacy Factsheet',
+    kind: 'DOCUMENT',
+    category: 'TRUST & GOVERNANCE',
+    language: 'DE',
+    version: '0.9',
+    status: 'DRAFT_REVIEW',
+    summary: 'Zielarchitektur für Identität, Datenzugriff, Audit und sichere Betriebsgrenzen des Partnerportals.',
+    sections: [
+      { heading: 'Review-Status', body: ['Noch keine Aussage über einen produktiven Partnerportal-Betrieb: Auth0, Datenbank, AuditService und öffentliche Route sind bewusst noch nicht verbunden.', 'Die Review-Anwendung verwendet keine produktiven Kundendaten.'] },
+      { heading: 'Zielkontrollen', body: ['EU-orientierte Hosting-/Identity-Architektur.', 'Rollen, Authorizations und Portfolio Permissions nach Least-Privilege-Prinzip.', 'Audit für kritische Änderungen wie Autorisierung, Lead-Konflikte, Preisfreigaben und Provisionen.', 'Trennung von Partnerdaten, Business-Kundendaten, ADOREN Personal, Finance und internen Daten.'] },
+      { heading: 'Browser-Schutz', body: ['Review-Build setzt unter anderem X-Frame-Options DENY, nosniff, restriktive Permissions-Policy und no-referrer.'] },
+      { heading: 'Vor Production', body: ['Security/Data Review, Tenant-Isolation, Retention/Deletion, Backup/Recovery und Incident-Prozess müssen vor Freigabe nachgewiesen werden.'] },
+    ],
+  },
+  {
+    slug: 'delivery-method',
+    title: 'Project Delivery Method',
+    kind: 'DOCUMENT',
+    category: 'DELIVERY',
+    language: 'DE',
+    version: '1.0',
+    status: 'APPROVED_REVIEW',
+    summary: 'Einheitlicher Projektpfad von Won bis Handover oder CARE.',
+    sections: [
+      { heading: 'Flow', body: ['WON → HANDOVER → KICKOFF → BASELINE → DESIGN → BUILD → QA → PILOT → ACCEPTANCE → HANDOVER → STABILIZE → CARE / CLOSE.'] },
+      { heading: 'Gates', body: ['Kein Build ohne bestätigten Scope.', 'Kein Production Go ohne QA und definierte Acceptance Criteria.', 'Keine Scope-Erweiterung ohne Change Request.'] },
+      { heading: 'Umgebungen', body: ['DEV / LOCAL → STAGING → PRODUCTION.', 'Produktive Systeme sind kein Experimentierfeld.'] },
+      { heading: 'Nach Projekt', body: ['Handover an den Kunden oder separat definierter CARE-Scope.'] },
+    ],
+  },
+  {
+    slug: 'brand-usage',
+    title: 'URTALI Brand Usage',
+    kind: 'DOCUMENT',
+    category: 'BRAND',
+    language: 'DE',
+    version: '0.9',
+    status: 'DRAFT_REVIEW',
+    summary: 'Grundregeln für URTALI, LA VOLPE und freigegebene Partnerkommunikation.',
+    sections: [
+      { heading: 'Markenbild', body: ['URTALI: tiefes Navy, Eisblau/Weiß und warmes Gold als Akzent.', 'Die Bergwelt vermittelt Klarheit, Höhe, Präzision und Überblick; sie ist Markenwelt, nicht zwingend Bestandteil jeder Logovariante.'] },
+      { heading: 'Partnernutzung', body: ['Nur freigegebene Logos, Cases, Vorlagen und aktuelle Dokumentversionen verwenden.', 'Keine eigenen Leistungsversprechen, Logos oder Referenzclaims aus freigegebenem Material ableiten.'] },
+      { heading: 'Referenzen', body: ['CONCEPT, DEMO, PILOT und VERIFIED CUSTOMER CASE müssen klar voneinander unterschieden werden.', 'Kundenname oder Logo nur bei explizit freigegebener Nutzung.'] },
+    ],
+  }
 ];
 
 export const salesAssets: readonly PortalContent[] = [
