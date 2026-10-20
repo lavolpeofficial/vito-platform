@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { UrtaliWordmark } from '@/components/urtali-wordmark';
 import { academyModules, commissions, metrics, opportunities, partner, solutions } from '@/lib/demo-data';
 
 function money(value: number) {
@@ -41,7 +42,7 @@ export default function DashboardPage() {
       <section className="northstar-hero bridge-hero">
         <div className="northstar-brand-copy">
           <span className="eyebrow">CONNECTING PEOPLE · CREATING OPPORTUNITIES</span>
-          <h1>URTALI PARTNER</h1>
+          <h1><UrtaliWordmark /> <span>PARTNER</span></h1>
           <h2>Partner Operating System</h2>
           <p><strong>Gemeinsam weiter.</strong><br />Menschen verbinden. Chancen erkennen. Nachhaltig wachsen.</p>
         </div>
