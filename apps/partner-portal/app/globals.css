@@ -437,3 +437,9 @@ small { color: var(--muted); }
 .search-results small { margin-top: 3px; font-size: 9px; }
 .search-results b { color: #8195a7; }
 .empty-search { border-top: 1px solid var(--line); padding: 18px 4px; color: var(--muted); font-size: 10px; }
+
+
+.opportunity-actions { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; background: white; padding: 16px; }
+.opportunity-actions .success-box { flex-basis: 100%; margin-top: 4px; }
+.policy-table .data-row { grid-template-columns: 1.5fr .5fr .8fr .8fr .8fr; }
+.policy-note { margin-top: 14px; border: 1px solid #dfcaa7; border-left-width: 3px; border-radius: 8px; background: #fff9ef; padding: 13px 15px; }
