@@ -48,7 +48,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <header className="portal-topbar">
           <div>
             <span className="eyebrow">Partner Operating System</span>
-            <span className="review-badge">V1.1 REVIEW</span>
+            <Link className="review-badge" href="/review">V1.1 REVIEW</Link>
           </div>
           <div className="partner-mini">
             <div><strong>{partner.fullName}</strong><small>{partner.role} · {partner.authorization}</small></div>
