@@ -106,7 +106,6 @@ export const knowledgeDocuments: readonly PortalContent[] = [
       { heading: 'Prinzip', body: ['UNDERSTAND → STRUCTURE → DIGITALIZE → AUTOMATE → AI WHERE USEFUL → HUMAN CONTROL → MEASURE → OPTIMIZE.'] },
     ],
   },
-,
   {
     slug: 'security-privacy',
     title: 'Security & Privacy Factsheet',
