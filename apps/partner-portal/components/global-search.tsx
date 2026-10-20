@@ -2,12 +2,14 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { academyModules, documents, opportunities, solutions } from '@/lib/demo-data';
+import { academyModules, opportunities, solutions } from '@/lib/demo-data';
+import { knowledgeDocuments, salesAssets } from '@/lib/content';
 
 const items = [
   ...academyModules.map((item) => ({ kind: 'Academy', title: item.title, meta: item.id, href: '/academy/' + item.id })),
   ...solutions.map((item) => ({ kind: 'Solution', title: item.name, meta: item.label, href: '/solutions' })),
-  ...documents.map((item) => ({ kind: 'Document', title: item.title, meta: item.category + ' · v' + item.version, href: '/documents' })),
+  ...knowledgeDocuments.map((item) => ({ kind: 'Document', title: item.title, meta: item.category + ' · v' + item.version, href: '/documents/' + item.slug })),
+  ...salesAssets.map((item) => ({ kind: 'Sales', title: item.title, meta: item.category + ' · v' + item.version, href: '/sales/' + item.slug })),
   ...opportunities.map((item) => ({ kind: 'Opportunity', title: item.company, meta: item.stage + ' · ' + item.primaryPath, href: '/opportunities/' + item.id })),
 ];
 
