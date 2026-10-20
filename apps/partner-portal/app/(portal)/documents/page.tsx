@@ -15,7 +15,7 @@ export default function DocumentsPage() {
             <div className="file-mark">{doc.type}</div>
             <div><strong>{doc.title}</strong><small>{doc.category} · {doc.language}</small></div>
             <div className="doc-version">v{doc.version}<small>{doc.status}</small></div>
-            <button type="button" className="button secondary small">Vorschau</button>
+            <button type="button" className="button secondary small" disabled title="Document storage is not connected in review mode">Noch nicht verbunden</button>
           </article>
         ))}
       </section>
