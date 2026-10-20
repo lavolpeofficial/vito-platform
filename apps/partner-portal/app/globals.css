@@ -2299,3 +2299,409 @@ body {
       filter .16s ease;
   }
 }
+
+
+/* V1.7.1 — premium 3D / gloss treatment for all interior partner portal pages */
+
+/* Shared premium surfaces */
+.panel,
+.solution-card,
+.asset-card,
+.table-card,
+.document-list article,
+.academy-status,
+.module-row,
+.lead-form,
+.search-surface,
+.content-view > header,
+.content-view > section,
+.quiz,
+.review-notice,
+.formula-note,
+.governance-grid div {
+  border-color: rgba(185, 203, 216, .92);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.995) 0%, rgba(249,252,254,.985) 100%);
+  box-shadow:
+    0 14px 34px rgba(28, 59, 84, .075),
+    0 3px 10px rgba(28, 59, 84, .035),
+    inset 0 1px 0 rgba(255,255,255,.98);
+}
+
+.panel,
+.solution-card,
+.asset-card,
+.table-card,
+.academy-status,
+.lead-form,
+.search-surface,
+.content-view > header,
+.content-view > section,
+.quiz {
+  position: relative;
+  overflow: hidden;
+}
+
+.panel::before,
+.solution-card::before,
+.asset-card::before,
+.table-card::before,
+.academy-status::before,
+.lead-form::before,
+.search-surface::before,
+.content-view > header::before,
+.content-view > section::before,
+.quiz::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(115deg, rgba(255,255,255,.30), transparent 22%, transparent 76%, rgba(197, 151, 76, .025)),
+    radial-gradient(circle at 92% -12%, rgba(149, 189, 219, .07), transparent 26%);
+}
+
+/* Page headers */
+.page-head .eyebrow,
+.opportunity-hero .eyebrow,
+.content-view .eyebrow {
+  text-shadow: 0 1px 0 rgba(255,255,255,.85);
+}
+
+.page-head h1,
+.opportunity-hero h1,
+.content-view > header h1 {
+  color: #102238;
+  text-shadow:
+    0 1px 0 rgba(255,255,255,.95),
+    0 6px 18px rgba(24, 50, 74, .045);
+}
+
+.page-head p,
+.opportunity-hero p,
+.content-view > header p {
+  color: #5f7387;
+}
+
+/* Gold labels and dividers */
+.solution-top > span,
+.asset-type,
+.page-head .eyebrow,
+.panel .eyebrow,
+.content-view .eyebrow {
+  color: #b07c31;
+}
+
+.solution-card dl div,
+.portfolio-list div,
+.admin-row,
+.support-row,
+.document-list article,
+.data-row,
+.commission-mini-table > div {
+  border-color: rgba(202, 214, 223, .82);
+}
+
+/* Solution / sales asset cards */
+.solution-card:hover,
+.asset-card:hover,
+.document-list article:hover,
+.module-row:hover {
+  transform: translateY(-1px);
+  border-color: rgba(194, 149, 73, .30);
+  box-shadow:
+    0 18px 38px rgba(28, 59, 84, .095),
+    0 0 20px rgba(189, 139, 55, .045),
+    inset 0 1px 0 rgba(255,255,255,.98);
+}
+
+.solution-card h2,
+.asset-card h2 {
+  text-shadow: 0 1px 0 white;
+}
+
+.permit {
+  border: 1px solid rgba(160, 117, 48, .14);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.72);
+}
+
+.permit-ok {
+  background: linear-gradient(180deg, #edf8f1, #e0f1e8);
+}
+
+/* Academy */
+.academy-status {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(213, 168, 84, .08), transparent 22rem),
+    linear-gradient(180deg, #ffffff, #f8fbfd);
+}
+
+.progress {
+  overflow: hidden;
+  box-shadow: inset 0 1px 3px rgba(15, 38, 60, .10);
+}
+.progress > span {
+  background:
+    linear-gradient(90deg, #5c9b79 0%, #31815b 64%, #286f50 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.25),
+    0 0 12px rgba(47, 126, 89, .10);
+}
+
+.module-row {
+  box-shadow:
+    0 7px 18px rgba(28, 59, 84, .05),
+    inset 0 1px 0 rgba(255,255,255,.98);
+}
+
+.module-number,
+.file-mark {
+  background:
+    linear-gradient(180deg, #fffdf8, #fff5e5);
+  border-color: rgba(189, 139, 55, .35);
+  color: #a66f24;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.9),
+    0 4px 10px rgba(174, 121, 40, .06);
+}
+
+/* Tables */
+.table-card {
+  background: #fff;
+}
+
+.data-header {
+  background:
+    linear-gradient(180deg, #f7fafc, #eef4f8);
+  color: #5b7085;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.95),
+    inset 0 -1px 0 rgba(185, 203, 216, .78);
+}
+
+.data-row:not(.data-header):hover {
+  background:
+    linear-gradient(90deg, rgba(237,245,251,.55), rgba(255,250,240,.34));
+}
+
+.stage {
+  border: 1px solid rgba(255,255,255,.38);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.48),
+    0 3px 9px rgba(22, 48, 72, .05);
+}
+
+/* Forms */
+.lead-form {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(202, 226, 242, .15), transparent 24rem),
+    linear-gradient(180deg, #ffffff, #fafcfd);
+}
+
+.form-grid input,
+.form-grid select,
+.form-grid textarea,
+.search-box input {
+  border-color: rgba(181, 200, 214, .95);
+  background:
+    linear-gradient(180deg, #ffffff, #fbfdfe);
+  box-shadow:
+    inset 0 1px 2px rgba(20, 48, 72, .035),
+    0 1px 0 rgba(255,255,255,.9);
+}
+
+.form-grid input:focus,
+.form-grid select:focus,
+.form-grid textarea:focus,
+.search-box input:focus {
+  outline: none;
+  border-color: rgba(181, 135, 69, .66);
+  box-shadow:
+    0 0 0 3px rgba(181, 135, 69, .09),
+    inset 0 1px 2px rgba(20,48,72,.03);
+}
+
+.review-notice,
+.scope-guard,
+.policy-note,
+.success-box {
+  border-color: rgba(190, 207, 220, .92);
+  background:
+    linear-gradient(180deg, rgba(250,253,255,.98), rgba(244,249,252,.96));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.94);
+}
+
+/* Opportunity detail */
+.opportunity-hero {
+  position: relative;
+}
+
+.opportunity-value {
+  border: 1px solid rgba(185, 203, 216, .88);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.98), rgba(247,250,252,.96));
+  box-shadow:
+    0 12px 26px rgba(28,59,84,.07),
+    inset 0 1px 0 white;
+}
+
+.score-grid div {
+  border-color: rgba(190, 207, 220, .9);
+  background:
+    linear-gradient(180deg, #ffffff, #f7fafc);
+  box-shadow: inset 0 1px 0 white;
+}
+
+.opportunity-actions {
+  border-color: rgba(185, 203, 216, .92);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.97), rgba(247,250,252,.95));
+  box-shadow:
+    0 12px 28px rgba(28,59,84,.065),
+    inset 0 1px 0 white;
+}
+
+/* Documents */
+.document-list article {
+  background:
+    linear-gradient(180deg, #ffffff, #f9fbfd);
+}
+
+.doc-version {
+  color: #435d74;
+}
+
+/* Commissions */
+.compact-metrics article {
+  border: 1px solid rgba(185, 203, 216, .92);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(222, 181, 100, .08), transparent 55%),
+    linear-gradient(180deg, #ffffff, #f8fbfd);
+  box-shadow:
+    0 10px 24px rgba(28,59,84,.065),
+    inset 0 1px 0 white;
+}
+
+.compact-metrics strong {
+  text-shadow: 0 1px 0 white;
+}
+
+.formula-note {
+  border: 1px solid rgba(198, 151, 76, .22);
+  background:
+    linear-gradient(180deg, #fffdf8, #fff8ec);
+  color: #7a5923;
+}
+
+/* Support / VITO */
+.vito-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(179, 200, 215, .9);
+  background:
+    radial-gradient(circle at 86% 10%, rgba(115, 167, 207, .18), transparent 36%),
+    linear-gradient(135deg, #102d49, #153e60);
+  color: #fff;
+  box-shadow:
+    0 18px 38px rgba(23, 52, 77, .12),
+    inset 0 1px 0 rgba(255,255,255,.10);
+}
+
+.vito-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 18%, rgba(255,255,255,.08) 34%, transparent 50%);
+}
+
+.vito-card h2,
+.vito-card p,
+.vito-card .eyebrow {
+  position: relative;
+  z-index: 1;
+}
+.vito-card h2 { color: #fff; }
+.vito-card p { color: #d3e0e9; }
+
+/* Profile / governance */
+.profile-grid .panel,
+.portfolio-panel,
+.admin-grid .panel {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(196, 220, 237, .09), transparent 38%),
+    linear-gradient(180deg, #ffffff, #f9fbfd);
+}
+
+.governance-grid div,
+.trust-grid div {
+  background:
+    linear-gradient(180deg, #ffffff, #f6fafc);
+  box-shadow:
+    inset 0 1px 0 white,
+    0 4px 11px rgba(28,59,84,.035);
+}
+
+/* Search */
+.search-results > a {
+  border-color: rgba(199, 212, 222, .82);
+}
+.search-results > a:hover {
+  background:
+    linear-gradient(90deg, rgba(237,245,251,.62), rgba(255,249,238,.36));
+}
+
+/* Long-form content */
+.content-view > header {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(212, 170, 89, .08), transparent 32%),
+    linear-gradient(180deg, #ffffff, #f9fbfd);
+}
+
+.content-view > section h2 {
+  color: #173552;
+}
+
+/* Quiz */
+.quiz fieldset {
+  border-color: rgba(189, 205, 218, .9);
+  background:
+    linear-gradient(180deg, #fff, #f9fbfd);
+  box-shadow: inset 0 1px 0 white;
+}
+
+/* Secondary buttons */
+.button.secondary,
+.owner-review-link .button {
+  border-color: rgba(181, 200, 214, .95);
+  background:
+    linear-gradient(180deg, #ffffff, #f3f7fa);
+  box-shadow:
+    inset 0 1px 0 white,
+    0 4px 11px rgba(28,59,84,.04);
+}
+
+.button.secondary:hover,
+.owner-review-link .button:hover {
+  border-color: rgba(190, 145, 70, .34);
+  background:
+    linear-gradient(180deg, #fffefb, #fff8ed);
+  transform: translateY(-1px);
+}
+
+/* Keep motion subtle and optional */
+@media (prefers-reduced-motion: no-preference) {
+  .solution-card,
+  .asset-card,
+  .document-list article,
+  .module-row,
+  .button.secondary,
+  .owner-review-link .button {
+    transition:
+      transform .16s ease,
+      box-shadow .16s ease,
+      border-color .16s ease,
+      background .16s ease;
+  }
+}
