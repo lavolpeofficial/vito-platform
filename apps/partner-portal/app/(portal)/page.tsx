@@ -13,7 +13,7 @@ export default function DashboardPage() {
       <section className="hero">
         <div className="hero-copy">
           <span className="eyebrow">Gemeinsam höher.</span>
-          <h1>Buongiorno, {partner.name}.</h1>
+          <h1>Willkommen, {partner.name}.</h1>
           <p>Dein Partner-Cockpit verbindet Wissen, Leads, Opportunities, Autorisierung und Vergütung in einem kontrollierten Arbeitsfluss.</p>
         </div>
         <MountainMark />
@@ -33,8 +33,8 @@ export default function DashboardPage() {
         <article><span>Opportunities</span><strong>{metrics.opportunities}</strong></article>
         <article><span>Pipeline</span><strong>{money(metrics.pipeline)}</strong></article>
         <article><span>ADOREN offen</span><strong>{metrics.adorePending}</strong></article>
-        <article><span>Provision pending</span><strong>{money(metrics.commissionPending)}</strong></article>
-        <article><span>Provision eligible</span><strong>{money(metrics.commissionEligible)}</strong></article>
+        <article><span>Provision offen</span><strong>{money(metrics.commissionPending)}</strong></article>
+        <article><span>Provision freigegeben</span><strong>{money(metrics.commissionEligible)}</strong></article>
       </section>
 
       <section className="split-grid">
