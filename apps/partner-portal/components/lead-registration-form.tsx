@@ -19,13 +19,13 @@ export function LeadRegistrationForm() {
     };
     const current = JSON.parse(localStorage.getItem('urtali-partner-review-leads') || '[]');
     localStorage.setItem('urtali-partner-review-leads', JSON.stringify([lead, ...current]));
-    setResult('Lead wurde nur lokal im Review-Browser gespeichert. Keine Kundendaten wurden übertragen.');
+    setResult('Synthetischer Lead wurde nur lokal im Review-Browser gespeichert. Es wurden keine Daten an einen Server übertragen.');
     event.currentTarget.reset();
   }
 
   return (
     <form className="lead-form" onSubmit={submit}>
-      <div className="review-notice"><strong>Review Mode</strong><p>Diese Maske speichert Testeinträge ausschließlich lokal im Browser. Keine Produktions-API ist verbunden.</p></div>
+      <div className="review-notice"><strong>Review Mode</strong><p>Diese Maske ist ausschließlich für synthetische Testdaten. Testeinträge bleiben lokal im Browser; keine Produktions-API ist verbunden.</p></div>
       <div className="form-grid">
         <label>Company Name<input name="company" required /></label>
         <label>Website<input name="website" type="url" /></label>
@@ -40,7 +40,7 @@ export function LeadRegistrationForm() {
         <label className="wide">Known Need<textarea name="need" rows={4} /></label>
         <label className="wide">Notes<textarea name="notes" rows={3} /></label>
       </div>
-      <label className="check"><input type="checkbox" required /> Ich bestätige, nur geschäftlich erforderliche Testdaten zu verwenden.</label>
+      <label className="check"><input type="checkbox" required /> Ich bestätige, ausschließlich synthetische Testdaten und keine realen Kontakt- oder Kundendaten zu verwenden.</label>
       <button className="button primary" type="submit">Lead zur Review-Liste hinzufügen</button>
       {result && <div className="success-box">{result}</div>}
     </form>
