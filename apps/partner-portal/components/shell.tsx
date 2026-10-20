@@ -8,12 +8,12 @@ import { partner } from '@/lib/demo-data';
 const nav = [
   ['/', 'Home', 'HE'],
   ['/academy', 'Academy', 'AC'],
-  ['/solutions', 'Solutions', 'SO'],
+  ['/solutions', 'Lösungen', 'SO'],
   ['/sales', 'Sales Hub', 'SA'],
   ['/leads', 'Leads', 'LE'],
   ['/opportunities', 'Opportunities', 'OP'],
-  ['/documents', 'Documents', 'DO'],
-  ['/commissions', 'Commissions', 'CO'],
+  ['/documents', 'Dokumente', 'DO'],
+  ['/commissions', 'Provisionen', 'CO'],
   ['/support', 'Support', 'SU'],
   ['/profile', 'Profile', 'PR'],
 ] as const;
