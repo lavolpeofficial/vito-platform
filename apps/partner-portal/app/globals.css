@@ -1998,3 +1998,18 @@ small { color: var(--muted); }
 .northstar-brand-copy h1 > span:last-child {
   letter-spacing: .06em;
 }
+
+
+/* V1.6.2 — corrected URTALI wordmark glyph */
+.urtali-a {
+  display: none;
+}
+
+.urtali-a-char {
+  display: inline-block;
+  font-family: inherit;
+  font-size: 1em;
+  line-height: 1;
+  transform: scaleX(.92) translateY(.015em);
+  transform-origin: 50% 100%;
+}
