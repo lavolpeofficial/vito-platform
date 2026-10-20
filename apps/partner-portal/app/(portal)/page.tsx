@@ -33,9 +33,9 @@ const trust = [
 
 export default function DashboardPage() {
   const next = opportunities[0];
-  const visibleAcademy = academyModules.slice(0, 5);
-  const visibleOpportunities = opportunities.slice(0, 5);
-  const visibleCommissions = commissions.slice(0, 4);
+  const visibleAcademy = academyModules.slice(0, 4);
+  const visibleOpportunities = opportunities.slice(0, 4);
+  const visibleCommissions = commissions.slice(0, 3);
 
   return (
     <div className="northstar-home">
