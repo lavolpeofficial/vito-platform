@@ -46,3 +46,20 @@ Default development port: 3002.
 3. Auth0 EU integration design.
 4. API/domain integration with tenant isolation and AuditService.
 5. Staging-only acceptance before any public route.
+
+
+## Owner review locally
+
+The review server binds to loopback only.
+
+    pnpm install --frozen-lockfile
+    pnpm --filter @vito/partner-portal test
+    pnpm --filter @vito/partner-portal dev
+
+Then open:
+
+- http://127.0.0.1:3002/review
+- http://127.0.0.1:3002/
+- http://127.0.0.1:3002/admin
+
+Start with `/review`; it distinguishes owner-review surfaces from deliberately blocked integrations.
