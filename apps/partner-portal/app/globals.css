@@ -1942,3 +1942,59 @@ small { color: var(--muted); }
     background: rgba(250, 251, 252, .78);
   }
 }
+
+
+/* V1.6.1 — official URTALI wordmark: A without crossbar */
+.urtali-wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  white-space: nowrap;
+  letter-spacing: inherit;
+  color: inherit;
+}
+
+.urtali-a {
+  position: relative;
+  display: inline-block;
+  width: .66em;
+  height: .82em;
+  margin: 0 .015em;
+  transform: translateY(.02em);
+}
+
+.urtali-a::before,
+.urtali-a::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: .075em;
+  height: 100%;
+  border-radius: .02em;
+  background: currentColor;
+  transform-origin: 50% 100%;
+}
+
+.urtali-a::before {
+  left: 45%;
+  transform: rotate(20deg);
+}
+
+.urtali-a::after {
+  right: 45%;
+  transform: rotate(-20deg);
+}
+
+.portal-brand strong .urtali-wordmark {
+  display: inline-flex;
+}
+
+.northstar-brand-copy h1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .22em;
+}
+
+.northstar-brand-copy h1 > span:last-child {
+  letter-spacing: .06em;
+}
