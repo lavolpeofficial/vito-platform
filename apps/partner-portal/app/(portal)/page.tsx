@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { MountainMark } from '@/components/mountain';
 import { academyModules, commissions, metrics, opportunities, partner, solutions } from '@/lib/demo-data';
 
 function money(value: number) {
@@ -39,16 +38,12 @@ export default function DashboardPage() {
 
   return (
     <div className="northstar-home">
-      <section className="northstar-hero">
+      <section className="northstar-hero bridge-hero">
         <div className="northstar-brand-copy">
-          <span className="eyebrow">UNDERSTAND · TRANSFORM · EVOLVE</span>
+          <span className="eyebrow">CONNECTING PEOPLE · CREATING OPPORTUNITIES</span>
           <h1>URTALI PARTNER</h1>
           <h2>Partner Operating System</h2>
-          <p><strong>Gemeinsam höher.</strong><br />Klar orientieren. Professionell handeln. Nachhaltig wachsen.</p>
-        </div>
-
-        <div className="northstar-mountain">
-          <MountainMark />
+          <p><strong>Gemeinsam weiter.</strong><br />Menschen verbinden. Chancen erkennen. Nachhaltig wachsen.</p>
         </div>
 
         <div className="northstar-values">
