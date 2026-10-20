@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { academyModules, partner } from '@/lib/demo-data';
 
 export default function AcademyPage() {
@@ -14,13 +15,16 @@ export default function AcademyPage() {
         <div><span>Nächstes Gate</span><strong>ADVISORY_ALLOWED</strong></div>
       </section>
       <section className="module-list">
-        {academyModules.map((module) => (
-          <article key={module.id} className={'module-row module-' + module.status.toLowerCase()}>
+        {academyModules.map((module) => {
+          const content = <>
             <div className="module-number">{module.id}</div>
             <div><strong>{module.title}</strong><small>{module.minutes} Min · {module.status.replaceAll('_', ' ')}</small></div>
             <div className="module-action">{module.status === 'COMPLETED' ? '✓' : module.status === 'LOCKED' ? '—' : 'Öffnen'}</div>
-          </article>
-        ))}
+          </>;
+          return module.status === 'LOCKED'
+            ? <article key={module.id} className={'module-row module-' + module.status.toLowerCase()}>{content}</article>
+            : <Link key={module.id} href={'/academy/' + module.id} className={'module-row module-' + module.status.toLowerCase()}>{content}</Link>;
+        })}
       </section>
     </>
   );
