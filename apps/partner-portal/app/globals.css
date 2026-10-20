@@ -1,10 +1,10 @@
 :root {
   color-scheme: light;
-  --navy: #0b1f38;
+  --navy: #0e2039;
   --navy-2: #123251;
   --ink: #102238;
   --muted: #65768a;
-  --gold: #b98736;
+  --gold: #b58745;
   --gold-soft: #f5ead7;
   --ice: #edf5fb;
   --ice-2: #dfeaf3;
@@ -2012,4 +2012,10 @@ small { color: var(--muted); }
   line-height: 1;
   transform: scaleX(.92) translateY(.015em);
   transform-origin: 50% 100%;
+}
+
+
+/* URTALI Brand Style V1 — canonical wordmark accent */
+.urtali-a-char {
+  color: var(--gold);
 }
