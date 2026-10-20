@@ -104,16 +104,16 @@ export const solutions: Array<{
 ];
 
 export const demoLeads = [
-  { id: 'lead-auto-royal', company: 'Auto Royal Group', status: 'ACCEPTED', protection: '18.01.2027', nextAction: 'Follow-up heute' },
-  { id: 'lead-villa-calabria', company: 'Villa Calabria', status: 'REVIEW', protection: '—', nextAction: 'Informationen ergänzen' },
-  { id: 'lead-bianchi', company: 'Bianchi Costruzioni', status: 'ACCEPTED', protection: '02.02.2027', nextAction: 'ADOREN senden' },
-  { id: 'lead-hotel', company: 'Hotel Belvedere', status: 'NURTURE', protection: '—', nextAction: 'Review im Dezember' },
+  { id: 'lead-auto-royal', company: 'Demo Auto Calabria', status: 'ACCEPTED', protection: '18.01.2027', nextAction: 'Follow-up heute' },
+  { id: 'lead-villa-calabria', company: 'Demo Immobiliare Sud', status: 'REVIEW', protection: '—', nextAction: 'Informationen ergänzen' },
+  { id: 'lead-bianchi', company: 'Demo Costruzioni Ionio', status: 'ACCEPTED', protection: '02.02.2027', nextAction: 'ADOREN senden' },
+  { id: 'lead-hotel', company: 'Demo Hotel Tirreno', status: 'NURTURE', protection: '—', nextAction: 'Review im Dezember' },
 ];
 
 export const opportunities = [
   {
     id: 'auto-royal',
-    company: 'Auto Royal Group',
+    company: 'Demo Auto Calabria',
     stage: 'DISCOVERY' as OpportunityStage,
     value: 12900,
     primaryPath: 'DIGITALIS Automation',
@@ -124,7 +124,7 @@ export const opportunities = [
   },
   {
     id: 'abc-srl',
-    company: 'ABC SRL',
+    company: 'Demo Servizi SRL',
     stage: 'PROPOSAL_SENT' as OpportunityStage,
     value: 3500,
     primaryPath: 'DIGITALIS Discovery',
@@ -135,7 +135,7 @@ export const opportunities = [
   },
   {
     id: 'hotel-mare',
-    company: 'Hotel Mare',
+    company: 'Demo Hotel Mare',
     stage: 'QUALIFIED' as OpportunityStage,
     value: 2750,
     primaryPath: 'ADOREN Business Orientation',
@@ -146,7 +146,7 @@ export const opportunities = [
   },
   {
     id: 'lago-resort',
-    company: 'Lago Resort',
+    company: 'Demo Lago Resort',
     stage: 'NURTURE' as OpportunityStage,
     value: 4500,
     primaryPath: 'DIGITALIS Discovery',
@@ -158,10 +158,10 @@ export const opportunities = [
 ];
 
 export const commissions = [
-  { opportunity: 'ABC SRL', cnr: 5000, rate: 8, amount: 400, status: 'PAID' },
-  { opportunity: 'XYZ Auto', cnr: 10000, rate: 12, amount: 1200, status: 'ELIGIBLE' },
-  { opportunity: 'Hotel Mare', cnr: 3000, rate: 15, amount: 450, status: 'PENDING' },
-  { opportunity: 'Lago Resort', cnr: 4500, rate: 8, amount: 360, status: 'CALCULATED' },
+  { opportunity: 'Demo Servizi SRL', cnr: 5000, rate: 8, amount: 400, status: 'PAID' },
+  { opportunity: 'Demo Auto Nord', cnr: 10000, rate: 12, amount: 1200, status: 'ELIGIBLE' },
+  { opportunity: 'Demo Hotel Mare', cnr: 3000, rate: 15, amount: 450, status: 'PENDING' },
+  { opportunity: 'Demo Lago Resort', cnr: 4500, rate: 8, amount: 360, status: 'CALCULATED' },
 ];
 
 export const documents = [
