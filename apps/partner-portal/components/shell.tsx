@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { partner } from '@/lib/demo-data';
+import { UrtaliWordmark } from '@/components/urtali-wordmark';
 
 const nav = [
   ['/', 'Home', 'HE'],
@@ -25,7 +26,7 @@ export function Shell({ children }: { children: ReactNode }) {
     <div className="portal-shell">
       <aside className="portal-sidebar">
         <Link className="portal-brand" href="/">
-          <strong>URTALI</strong>
+          <strong><UrtaliWordmark /></strong>
           <span>SYSTEMS</span>
           <small>PARTNER</small>
         </Link>
