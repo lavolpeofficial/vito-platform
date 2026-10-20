@@ -6,7 +6,10 @@ const areas = [
   ['Sales Hub', 'READY FOR OWNER REVIEW', 'Versionierte Review Assets'],
   ['Leads', 'READY FOR OWNER REVIEW', 'Nur browser-lokal im Review Mode'],
   ['Opportunities', 'READY FOR OWNER REVIEW', 'Qualification + ADOREN B2B boundary'],
-  ['Documents', 'READY FOR OWNER REVIEW', 'APPROVED + CURRENT Logik'],
+  ['Documents', 'READY FOR OWNER REVIEW', 'Inhalte jetzt im Portal lesbar'],
+  ['Sales Content', 'READY FOR OWNER REVIEW', 'Outreach, Discovery, Objections, Cases'],
+  ['Global Search', 'READY FOR OWNER REVIEW', 'Academy, Solutions, Docs, Sales, Opportunities'],
+  ['Policies', 'READY FOR OWNER REVIEW', 'Version + ACK_REQUIRED sichtbar'],
   ['Commissions', 'READY FOR OWNER REVIEW', 'Invoice != Payment != CNR != Ledger'],
   ['Admin Control Center', 'READY FOR OWNER REVIEW', 'Applications, Conflicts, Authorizations, Governance'],
 ];
