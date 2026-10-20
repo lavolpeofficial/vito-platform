@@ -1,0 +1,109 @@
+{
+  "proposalVersion": "dorothea.vito-specialist-proposal/0.1.0",
+  "state": "SOURCE_ONLY_NOT_REGISTERED",
+  "kind": "NON_EXECUTABLE_PROFILE_PROPOSAL_NOT_AGENT_SPEC",
+  "record": {
+    "name": "DOROTHEA",
+    "code": "dorothea",
+    "description": "ADOREN Intelligence Architect & Steward. Analysiert qualitätsbezogene Evidenz, formuliert kontrollierte Verbesserungs- und Testvorschläge und koordiniert ausschließlich über freigegebene VITO-Aufträge mit RICCARDO und BOB. Keine autonome Produktivänderung.",
+    "employeeType": "SPECIALIST",
+    "status": "DRAFT",
+    "version": "0.1.0"
+  },
+  "dataRules": {
+    "tenantContext": "VITO_VERIFIED_JWT_AND_SERVER_MEMBERSHIP_NOT_USER_SUPPLIED",
+    "persistedUserData": "DENIED",
+    "rawUserAnswers": "DENIED",
+    "healthSensitiveData": "DENIED",
+    "realTenantData": "DENIED",
+    "syntheticAndAggregateEvidence": "PROPOSED_READ_ONLY_AFTER_GATE",
+    "ownerApproval": "REQUIRED_FOR_EVERY_NEW_GRANT_OR_EXTERNAL_ACTION"
+  },
+  "capabilitiesProposed": [
+    {
+      "code": "adoren.source.inspect",
+      "name": "ADOREN Quellstand prüfen",
+      "riskLevel": "LOW",
+      "requiresApproval": true,
+      "isEnabled": false,
+      "scope": "PINNED_READ_ONLY"
+    },
+    {
+      "code": "adoren.eval.read",
+      "name": "ADOREN Evaluierung lesen",
+      "riskLevel": "MEDIUM",
+      "requiresApproval": true,
+      "isEnabled": false,
+      "scope": "AGGREGATE_SYNTHETIC_ONLY"
+    },
+    {
+      "code": "adoren.quality.assess",
+      "name": "ADOREN Qualitätslücken analysieren",
+      "riskLevel": "MEDIUM",
+      "requiresApproval": true,
+      "isEnabled": false,
+      "scope": "NON_EXECUTABLE_REPORT"
+    },
+    {
+      "code": "adoren.hypothesis.propose",
+      "name": "ADOREN Hypothesen formulieren",
+      "riskLevel": "LOW",
+      "requiresApproval": true,
+      "isEnabled": false,
+      "scope": "NON_EXECUTABLE_PROPOSAL"
+    },
+    {
+      "code": "adoren.experiment.propose",
+      "name": "ADOREN Experimente vorschlagen",
+      "riskLevel": "MEDIUM",
+      "requiresApproval": true,
+      "isEnabled": false,
+      "scope": "NO_EXPERIMENT_EXECUTION"
+    },
+    {
+      "code": "adoren.research.request",
+      "name": "RICCARDO Rechercheauftrag vorschlagen",
+      "riskLevel": "HIGH",
+      "requiresApproval": true,
+      "isEnabled": false,
+      "scope": "VITO_APPROVAL_REQUIRED"
+    },
+    {
+      "code": "adoren.engineering.draft.request",
+      "name": "BOB Entwicklungsauftrag vorschlagen",
+      "riskLevel": "HIGH",
+      "requiresApproval": true,
+      "isEnabled": false,
+      "scope": "VITO_APPROVAL_REQUIRED"
+    },
+    {
+      "code": "adoren.quality.report",
+      "name": "ADOREN Qualitätsbericht vorschlagen",
+      "riskLevel": "LOW",
+      "requiresApproval": true,
+      "isEnabled": false,
+      "scope": "MANUAL_ONLY_NO_SCHEDULE"
+    }
+  ],
+  "forbidden": [
+    "git.push",
+    "git.merge",
+    "deploy.production",
+    "shell.execute",
+    "db.migrate",
+    "secrets.read",
+    "provider.activate",
+    "provider.bill",
+    "permissions.grant",
+    "employee.activate",
+    "user.data.read",
+    "user.data.export",
+    "model.train",
+    "scheduler.enable",
+    "self.update"
+  ],
+  "engineeringBoundary": "AGENT_BUILDER_SPEC_NOT_YET_VERIFIED_AGAINST_DIRTY_LOCAL_FSN1_SOURCE",
+  "releaseGate": "NO_GO",
+  "merge": "NO_GO",
+  "deploy": "NO_GO"
+}

@@ -1,0 +1,73 @@
+{
+  "missionVersion": "dorothea.adoren-quality-baseline/0.1.0",
+  "missionId": "DOROTHEA_ADOREN_QUALITY_BASELINE_V1",
+  "status": "PROPOSED_NOT_DISPATCHED",
+  "targetSystem": "ADOREN_AOE",
+  "ownerRepo": "lavolpeofficial/aoe-app",
+  "ownerReview": "REQUIRED",
+  "baseSource": {
+    "draftPr": 41,
+    "exactCommit": "2abfddcea81637923a4ec5309dc1410fbeedf9c3",
+    "parentDrafts": [
+      37,
+      38,
+      39,
+      40
+    ],
+    "scope": "UNMERGED_SOURCE_ONLY"
+  },
+  "objective": "Finde drei überprüfbar vorrangige Intelligenzlücken von ADOREN, dokumentiere Unsicherheiten und entwirf eine sechswöchige, nichtproduktive Experiment-Roadmap.",
+  "allowedSources": [
+    "PINNED_AOE_SOURCE_AND_QA_REPORTS",
+    "PUBLIC_RESEARCH_VIA_RICCARDO_ONLY_AFTER_APPROVED_GATE",
+    "SYNTHETIC_NON_PERSONAL_FIXTURES"
+  ],
+  "deliverables": [
+    "ARCHITECTURE_EXISTENCE_VS_GAP_MATRIX",
+    "THREE_PRIORITY_INTELLIGENCE_GAPS_WITH_EVIDENCE_AND_COUNTERARGUMENTS",
+    "THREE_CONTROLLED_EXPERIMENT_PROPOSALS_WITH_BASELINES_AND_ROLLBACK",
+    "SIX_WEEK_SYNTHETIC_RESEARCH_PLAN",
+    "EXPLICIT_UNVALIDATED_CLAIMS_REGISTER"
+  ],
+  "proposedCollaborators": [
+    "VITO",
+    "RICCARDO",
+    "BOB"
+  ],
+  "limits": {
+    "network": false,
+    "providerCalls": false,
+    "realUserData": false,
+    "dbAccess": false,
+    "codeExecution": false,
+    "writeRepo": false,
+    "writeAudit": false,
+    "timeBudgetMinutes": 0,
+    "costCapEur": 0,
+    "schedule": "NONE",
+    "ownerApprovalRef": null
+  },
+  "successCondition": "HUMAN_REVIEW_OF_EVIDENCE_BACKED_PROPOSAL_NOT_RUNTIME_EFFECTIVENESS",
+  "statusTransitions": [
+    "DRAFT",
+    "OWNER_REVIEW",
+    "APPROVED_FOR_SEPARATELY_SCOPED_ISOLATED_EXPERIMENT"
+  ],
+  "blockedTransitions": [
+    "AUTO_MERGE",
+    "AUTO_DEPLOY",
+    "AUTO_RETRAIN",
+    "AUTO_ENABLE_PROVIDER"
+  ],
+  "risks": [
+    "IN_SAMPLE_BIAS",
+    "LANGUAGE_FAIRNESS_UNKNOWN",
+    "METRIC_CIRCULARITY",
+    "EARLY_STOP_SAFETY",
+    "PROMPT_INJECTION",
+    "SCOPE_LEAKAGE"
+  ],
+  "caveat": "N1A-N1E 147 NODE TESTS PASS, NO EXTERNAL INDEPENDENT VALIDATION, NO DEPLOY",
+  "merge": "NO_GO",
+  "deploy": "NO_GO"
+}
