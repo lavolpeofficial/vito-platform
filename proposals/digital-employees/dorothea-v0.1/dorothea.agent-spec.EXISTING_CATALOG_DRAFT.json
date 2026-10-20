@@ -1,0 +1,116 @@
+{
+  "protocolVersion": "vito.agent-spec.v1",
+  "code": "dorothea",
+  "name": "DOROTHEA",
+  "version": "0.1.0",
+  "employeeType": "SPECIALIST",
+  "mission": "ADOREN Intelligence Steward: Audit versioned and approved synthetic/aggregate quality evidence, surface gaps, propose hypotheses, controlled experiments, improvement tasks via VITO. Research and engineering execution remain with RICCARDO and BOB. No personal data access, runtime mutation, external provider or independent authorization.",
+  "mode": "READ_ONLY",
+  "capabilities": [
+    {
+      "code": "knowledge.read",
+      "name": "Wissen lesen",
+      "description": "Liest freigegebene Wissenseinträge.",
+      "riskLevel": "LOW",
+      "requiresApproval": true,
+      "defaultEnabled": false
+    },
+    {
+      "code": "research.quality.check",
+      "name": "URTALI Research & Quality Engine",
+      "description": "Prüft Research, Content, Quellen und Capability-Verträge deterministisch.",
+      "riskLevel": "LOW",
+      "requiresApproval": true,
+      "defaultEnabled": false
+    },
+    {
+      "code": "tasks.suggest",
+      "name": "Aufgaben vorschlagen",
+      "description": "Bereitet TODOs und nächste Schritte vor.",
+      "riskLevel": "LOW",
+      "requiresApproval": true,
+      "defaultEnabled": false
+    },
+    {
+      "code": "vito.dialogue",
+      "name": "Mit VITO kommunizieren",
+      "description": "Nutzt den internen VITO-Kontextkanal.",
+      "riskLevel": "LOW",
+      "requiresApproval": true,
+      "defaultEnabled": false
+    },
+    {
+      "code": "audit.read",
+      "name": "Audit lesen",
+      "description": "Liest tenant-gebundene Governance-Evidenz.",
+      "riskLevel": "LOW",
+      "requiresApproval": true,
+      "defaultEnabled": false
+    },
+    {
+      "code": "workflows.observe",
+      "name": "Workflows beobachten",
+      "description": "Erkennt blockierte oder fehlgeschlagene Workflows.",
+      "riskLevel": "LOW",
+      "requiresApproval": true,
+      "defaultEnabled": false
+    },
+    {
+      "code": "daily.report",
+      "name": "Tagesbericht erstellen",
+      "description": "Erstellt aus Read-only-Daten einen Berichtsentwurf.",
+      "riskLevel": "LOW",
+      "requiresApproval": true,
+      "defaultEnabled": false
+    }
+  ],
+  "dataAccess": {
+    "read": [],
+    "write": []
+  },
+  "connectors": [],
+  "execution": {
+    "authority": "NONE",
+    "humanGateRequiredFor": [
+      "employee.activate",
+      "capability.enable",
+      "research.external",
+      "engineering.execute",
+      "git.merge",
+      "deploy.production"
+    ],
+    "excluded": [
+      "payment.confirm",
+      "git.push",
+      "git.merge",
+      "deploy.production",
+      "shell.execute",
+      "db.migrate",
+      "secrets.read",
+      "user.data.read",
+      "user.data.export",
+      "model.train",
+      "scheduler.enable",
+      "self.update",
+      "provider.activate",
+      "provider.bill"
+    ]
+  },
+  "runtime": {
+    "stagingOnly": true,
+    "route": "/dorothea",
+    "apiRoutes": []
+  },
+  "verification": {
+    "requiredChecks": [
+      "SOURCE",
+      "BUILD",
+      "HEALTH",
+      "ROUTE",
+      "API_CONTRACT",
+      "PERSISTENCE",
+      "AUDIT",
+      "CLEANUP"
+    ]
+  }
+}
