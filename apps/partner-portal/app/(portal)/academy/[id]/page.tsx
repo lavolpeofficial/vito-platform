@@ -22,7 +22,7 @@ export default async function AcademyModulePage({ params }: { params: Promise<{ 
       <header className="page-head compact-head"><span className="eyebrow">{module.id} · {module.minutes} Min</span><h1>{module.title}</h1><p>Video, Handout, Praxisbeispiel und kurzer Wissenstest bilden eine Einheit.</p></header>
       <section className="academy-detail-grid">
         <article className="video-slot"><div className="play-mark">▶</div><strong>Video Slot · {module.title}</strong><small>Review-Platzhalter · kein externes Video eingebunden</small></article>
-        <article className="panel"><span className="eyebrow">Kernpunkte</span><ul className="learning-list">{moduleNotes.map((note) => <li key={note}>{note}</li>)}</ul><button className="button secondary" type="button">Handout · Review Placeholder</button></article>
+        <article className="panel"><span className="eyebrow">Kernpunkte</span><ul className="learning-list">{moduleNotes.map((note) => <li key={note}>{note}</li>)}</ul><button className="button secondary" type="button" disabled>Handout · nach Content-Freigabe</button></article>
       </section>
       <AcademyQuiz />
     </>
