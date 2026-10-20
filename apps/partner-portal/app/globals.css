@@ -446,3 +446,13 @@ small { color: var(--muted); }
 
 .referral-table .data-row { grid-template-columns: 1fr .8fr 1.4fr .8fr; }
 .support-row button:disabled { cursor: not-allowed; opacity: .5; }
+
+
+.content-view { max-width: 920px; }
+.content-view > header { margin-bottom: 18px; border: 1px solid var(--line); border-radius: 16px; background: white; padding: 28px; }
+.content-view > header h1 { margin: 10px 0 8px; font-size: clamp(38px, 5vw, 62px); }
+.content-view > header p { color: var(--muted); font-size: 13px; line-height: 1.7; }
+.content-view > section { margin-top: 12px; border: 1px solid var(--line); border-radius: 12px; background: white; padding: 22px 24px; }
+.content-view > section h2 { margin-bottom: 12px; font-size: 18px; }
+.content-view > section p { margin: 7px 0; color: #52697c; font-size: 11px; line-height: 1.7; }
+.content-view > .scope-guard { margin-top: 14px; border: 1px solid #dfcaa7; border-left-width: 3px; border-radius: 8px; background: #fff9ef; padding: 14px 16px; }
