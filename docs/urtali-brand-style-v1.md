@@ -250,3 +250,36 @@ Changes to:
 - core visual direction
 
 require explicit owner approval.
+
+
+## 14. Premium depth / gloss standard
+
+URTALI surfaces should not look flat or generic. The approved visual direction uses restrained dimensionality and controlled light.
+
+Required:
+- subtle 3D depth through layered shadows
+- one fine bright edge or highlight on important surfaces
+- restrained metallic gold gradients for priority accents
+- glass / gloss effects only where they support hierarchy
+- realistic light direction and low-noise reflections
+- clear separation between primary, secondary and background surfaces
+- strong but elegant contrast in hero visuals
+- precise edges; avoid blur that weakens the visual metaphor
+
+For the URTALI wordmark:
+- the crossbar-less A/Λ is metallic gold
+- use dimensional gold with darker outer tones and a narrow highlight
+- preserve clean geometry
+- do not make the glyph look like a V
+- do not use a flat yellow fill
+
+For UI:
+- depth must remain subtle enough for professional B2B software
+- buttons may use a restrained gold metallic gradient
+- cards use cool shadows and fine highlights
+- dark navy headers may carry a soft reflected-light streak
+- premium does not mean more decoration; hierarchy and readability remain primary
+
+Target feeling:
+
+> PRECISION · DEPTH · LIGHT · CONTROL
