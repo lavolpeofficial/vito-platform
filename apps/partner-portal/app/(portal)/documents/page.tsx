@@ -6,7 +6,7 @@ export default function DocumentsPage() {
     <>
       <header className="page-head">
         <span className="eyebrow">Knowledge</span>
-        <h1>Documents</h1>
+        <h1>Dokumente</h1>
         <p>Nur aktuelle Review-Fassungen. Rechtlich verbindliche Dokumente werden vor Produktivbetrieb separat freigegeben.</p>
       </header>
       <div className="filter-bar"><span>Alle Kategorien</span><span>DE / IT</span><span>REVIEW APPROVED</span></div>
