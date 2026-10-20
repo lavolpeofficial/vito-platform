@@ -17,7 +17,7 @@ export default function SupportPage() {
       </header>
       <section className="support-grid">
         <article className="vito-card"><span className="eyebrow">VITO Partner Copilot</span><h2>Integration vorbereitet</h2><p>VITO soll später Authorization, Portfolio und Opportunity-Kontext berücksichtigen. In dieser Review-Version werden keine produktiven Agenten aufgerufen.</p><button className="button secondary" disabled>VITO noch nicht verbunden</button></article>
-        <article className="panel"><span className="eyebrow">Human Support</span>{support.map(([name, desc]) => <div className="support-row" key={name}><strong>{name}</strong><span>{desc}</span><button type="button">Ticket</button></div>)}</article>
+        <article className="panel"><span className="eyebrow">Human Support</span>{support.map(([name, desc]) => <div className="support-row" key={name}><strong>{name}</strong><span>{desc}</span><button type="button" disabled>nach Integration</button></div>)}</article>
       </section>
     </>
   );
