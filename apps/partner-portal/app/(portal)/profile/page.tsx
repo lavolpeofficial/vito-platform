@@ -18,7 +18,7 @@ export default function ProfilePage() {
           {solutions.map((solution) => <div key={solution.id}><strong>{solution.name}</strong><span>{solution.permission}</span></div>)}
         </div>
       </section>
-      <div className="owner-review-link"><a className="button secondary" href="/review">Review Checklist</a><a className="button secondary" href="/admin">Partner Control Center · Owner Review</a></div><section className="governance-grid">
+      <div className="owner-review-link"><a className="button secondary" href="/policies">Policies</a><a className="button secondary" href="/review">Review Checklist</a><a className="button secondary" href="/admin">Partner Control Center · Owner Review</a></div><section className="governance-grid">
         {['Partner Agreement · accepted','Commission Policy v1.0 · accepted','Lead Protection Policy v1.0 · accepted','Code of Conduct · accepted','Privacy & Data Handling · accepted','Brand Usage Policy · accepted'].map((item) => <div key={item}>✓ {item}</div>)}
       </section>
     </>
