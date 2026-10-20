@@ -22,7 +22,7 @@ export default function SalesPage() {
             <span className="asset-type">{type}</span>
             <h2>{title}</h2>
             <p>{language} · {version} · APPROVED</p>
-            <button className="button secondary" type="button">Vorschau</button>
+            <button className="button secondary" type="button" disabled title="Asset storage is not connected in review mode">Vorschau · nach Integration</button>
           </article>
         ))}
       </section>
