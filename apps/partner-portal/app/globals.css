@@ -2705,3 +2705,84 @@ body {
       background .16s ease;
   }
 }
+
+
+/* V1.7.2 — precise metallic URTALI crossbar-less A */
+.urtali-wordmark {
+  align-items: baseline;
+}
+
+.urtali-a-char {
+  position: relative;
+  display: inline-block;
+  width: .74em;
+  height: .86em;
+  margin: 0 .015em;
+  color: transparent !important;
+  line-height: 1;
+  transform: translateY(.03em);
+  filter: drop-shadow(0 2px 3px rgba(91, 59, 17, .12));
+}
+
+.urtali-a-char::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(
+    50% 0%,
+    100% 100%,
+    80% 100%,
+    50% 28%,
+    20% 100%,
+    0% 100%
+  );
+  background:
+    linear-gradient(
+      105deg,
+      #7f531d 0%,
+      #b87b2d 18%,
+      #e5ba68 42%,
+      #f4d99a 51%,
+      #c98d37 66%,
+      #8d5a20 100%
+    );
+  box-shadow:
+    inset 1px 0 0 rgba(255,255,255,.32),
+    inset -1px 0 0 rgba(89,55,15,.22);
+}
+
+.urtali-a-char::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(
+    50% 0%,
+    100% 100%,
+    80% 100%,
+    50% 28%,
+    20% 100%,
+    0% 100%
+  );
+  background:
+    linear-gradient(
+      118deg,
+      transparent 0 38%,
+      rgba(255,255,255,.62) 46%,
+      rgba(255,248,218,.26) 52%,
+      transparent 61% 100%
+    );
+  mix-blend-mode: screen;
+  opacity: .72;
+}
+
+.portal-brand strong .urtali-a-char {
+  filter:
+    drop-shadow(0 0 5px rgba(221, 171, 78, .24))
+    drop-shadow(0 2px 3px rgba(0,0,0,.18));
+}
+
+.bridge-hero .northstar-brand-copy h1 .urtali-a-char {
+  filter:
+    drop-shadow(0 0 9px rgba(224, 173, 76, .24))
+    drop-shadow(0 3px 4px rgba(72, 45, 13, .10));
+}
