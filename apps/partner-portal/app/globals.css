@@ -2019,3 +2019,283 @@ small { color: var(--muted); }
 .urtali-a-char {
   color: var(--gold);
 }
+
+
+/* V1.7 — URTALI premium 3D / gloss treatment applied to the live portal */
+body {
+  background:
+    radial-gradient(circle at 82% -8%, rgba(194, 220, 240, .92), transparent 34rem),
+    linear-gradient(180deg, #f8fbfd 0%, #f1f6fa 52%, #eef4f8 100%);
+}
+
+.portal-sidebar {
+  background:
+    radial-gradient(circle at 18% 18%, rgba(190, 140, 62, .10), transparent 20rem),
+    radial-gradient(circle at 32% 88%, rgba(94, 135, 174, .18), transparent 22rem),
+    linear-gradient(180deg, #102944 0%, #0b2037 50%, #081827 100%);
+  box-shadow:
+    14px 0 42px rgba(7, 24, 42, .18),
+    inset -1px 0 0 rgba(226, 190, 114, .12);
+}
+
+.portal-brand strong {
+  text-shadow: 0 2px 16px rgba(0,0,0,.22);
+}
+.portal-brand strong .urtali-a-char {
+  color: #c99543;
+  text-shadow:
+    0 0 8px rgba(218, 166, 75, .30),
+    0 0 18px rgba(218, 166, 75, .16);
+}
+
+.portal-nav-link {
+  border-color: rgba(255,255,255,.02);
+  background: linear-gradient(180deg, rgba(255,255,255,.015), rgba(255,255,255,0));
+}
+
+.portal-nav-link:hover {
+  border-color: rgba(225, 190, 118, .22);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.025));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+}
+
+.portal-nav-link[aria-current="page"] {
+  border-color: rgba(231, 193, 111, .52);
+  background:
+    linear-gradient(90deg, rgba(214, 166, 76, .22), rgba(255,255,255,.07) 42%, rgba(255,255,255,.025));
+  box-shadow:
+    inset 3px 0 0 #d5a84f,
+    inset 0 1px 0 rgba(255,255,255,.10),
+    0 0 20px rgba(203, 154, 70, .10);
+}
+
+.portal-nav-link[aria-current="page"] i {
+  background: linear-gradient(180deg, #edc777, #c99138);
+  border-color: #e5bb68;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.45),
+    0 4px 12px rgba(189, 132, 43, .24);
+}
+
+.portal-topbar {
+  border-bottom-color: rgba(177, 197, 212, .72);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.96), rgba(246,250,252,.90));
+  box-shadow:
+    0 8px 28px rgba(27, 55, 82, .05),
+    inset 0 -1px 0 rgba(255,255,255,.8);
+}
+
+.review-badge {
+  border-color: rgba(197, 150, 71, .44);
+  background: linear-gradient(180deg, #fffdf8, #fff4df);
+  box-shadow:
+    inset 0 1px 0 white,
+    0 4px 12px rgba(180, 128, 47, .07);
+}
+
+.northstar-hero.bridge-hero {
+  min-height: 360px;
+  border: 1px solid rgba(170, 196, 215, .92);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(250, 252, 253, .94) 0%,
+      rgba(250, 252, 253, .78) 25%,
+      rgba(250, 252, 253, .16) 46%,
+      rgba(250, 252, 253, .06) 59%,
+      rgba(250, 252, 253, .52) 77%,
+      rgba(250, 252, 253, .90) 100%
+    ),
+    url('/brand/urtali-partner-bridge-hero.webp') center 48% / cover no-repeat;
+  box-shadow:
+    0 24px 54px rgba(36, 73, 103, .12),
+    0 5px 14px rgba(42, 70, 94, .07),
+    inset 0 1px 0 rgba(255,255,255,.95);
+}
+
+.northstar-hero.bridge-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.22), transparent 16%, transparent 78%, rgba(12,37,61,.08)),
+    linear-gradient(115deg, rgba(255,255,255,.22), transparent 36%, rgba(255,220,150,.08) 58%, transparent 76%);
+  mix-blend-mode: screen;
+}
+
+.northstar-hero.bridge-hero::after {
+  background:
+    radial-gradient(circle at 58% 74%, rgba(235, 180, 81, .24), transparent 26%),
+    linear-gradient(180deg, rgba(255,255,255,.03), rgba(8,31,52,.08));
+}
+
+.bridge-hero .northstar-brand-copy {
+  text-shadow: 0 1px 0 rgba(255,255,255,.88);
+}
+
+.bridge-hero .northstar-brand-copy h1 {
+  letter-spacing: .055em;
+  filter: drop-shadow(0 3px 9px rgba(7, 28, 48, .08));
+}
+
+.bridge-hero .northstar-brand-copy h1 .urtali-a-char {
+  color: #c78d35;
+  text-shadow:
+    0 1px 0 #f7deb0,
+    0 0 12px rgba(218, 166, 75, .28);
+}
+
+.bridge-hero .northstar-values {
+  border-color: rgba(195, 151, 76, .30);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.86), rgba(249,250,251,.72));
+  box-shadow:
+    0 16px 36px rgba(18, 45, 68, .14),
+    inset 0 1px 0 rgba(255,255,255,.95);
+  backdrop-filter: blur(10px) saturate(1.15);
+}
+
+.bridge-hero .northstar-values > div > b {
+  background: linear-gradient(180deg, #17324f, #0d2239);
+  border: 1px solid rgba(255,255,255,.05);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.12),
+    0 5px 14px rgba(14, 35, 58, .16);
+}
+
+.northstar-journey article {
+  border-color: rgba(198, 211, 221, .96);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.98), rgba(247,250,252,.96));
+  box-shadow:
+    0 7px 16px rgba(31, 61, 86, .055),
+    inset 0 1px 0 rgba(255,255,255,1);
+}
+
+.northstar-journey article:hover {
+  transform: translateY(-1px);
+  border-color: rgba(198, 151, 70, .32);
+  box-shadow:
+    0 10px 20px rgba(31, 61, 86, .08),
+    0 0 16px rgba(201, 149, 64, .06);
+}
+
+.northstar-workcard {
+  border-color: rgba(187, 204, 216, .92);
+  box-shadow:
+    0 14px 30px rgba(28, 59, 84, .08),
+    0 3px 9px rgba(28, 59, 84, .04),
+    inset 0 1px 0 white;
+}
+
+.northstar-workcard > header {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 84% 10%, rgba(118, 171, 211, .22), transparent 42%),
+    linear-gradient(135deg, #0d2945 0%, #154266 58%, #123651 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.12),
+    inset 0 -1px 0 rgba(5, 22, 37, .35);
+}
+
+.northstar-workcard > header::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(115deg, transparent 0 18%, rgba(255,255,255,.09) 32%, transparent 48%),
+    radial-gradient(circle at 15% -20%, rgba(227, 185, 98, .16), transparent 34%);
+}
+
+.workcard-icon {
+  position: relative;
+  z-index: 1;
+  border-color: rgba(224,186,108,.78);
+  background:
+    linear-gradient(180deg, rgba(17,48,77,.78), rgba(7,27,46,.90));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.14),
+    0 5px 15px rgba(0,0,0,.16),
+    0 0 12px rgba(214, 166, 76, .06);
+}
+
+.workcard-body {
+  background:
+    linear-gradient(180deg, #ffffff 0%, #fbfdfe 100%);
+}
+
+.mini-next-action {
+  border-color: rgba(210, 165, 88, .46);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(233, 195, 119, .15), transparent 42%),
+    linear-gradient(135deg, #fffaf1, #fbfdff 72%);
+  box-shadow:
+    inset 0 1px 0 white,
+    0 8px 20px rgba(151, 109, 45, .06);
+}
+
+.mini-next-action a,
+.button.primary {
+  border: 1px solid rgba(157, 105, 31, .20);
+  background:
+    linear-gradient(180deg, #f0c36a 0%, #d99f40 52%, #c7892c 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.52),
+    0 5px 14px rgba(177, 121, 38, .18);
+}
+
+.mini-next-action a:hover,
+.button.primary:hover {
+  filter: brightness(1.035) saturate(1.03);
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.58),
+    0 8px 18px rgba(177, 121, 38, .22);
+}
+
+.mini-metrics div,
+.commission-kpis > div,
+.academy-mini-row,
+.authorization-mini div {
+  background:
+    linear-gradient(180deg, #ffffff, #f8fbfd);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.95),
+    0 4px 10px rgba(28,59,84,.035);
+}
+
+.panel,
+.solution-card,
+.asset-card,
+.table-card,
+.document-list article {
+  box-shadow:
+    0 12px 28px rgba(31, 61, 86, .07),
+    inset 0 1px 0 rgba(255,255,255,.92);
+}
+
+.avatar {
+  background: linear-gradient(180deg, #173857, #0d2239);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.14),
+    0 5px 14px rgba(15,34,55,.16);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .portal-nav-link,
+  .northstar-journey article,
+  .mini-next-action a,
+  .button.primary {
+    transition:
+      transform .16s ease,
+      box-shadow .16s ease,
+      border-color .16s ease,
+      filter .16s ease;
+  }
+}
