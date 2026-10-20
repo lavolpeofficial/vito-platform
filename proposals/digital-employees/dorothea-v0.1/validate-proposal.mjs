@@ -58,7 +58,7 @@ export function validateDorotheaProposal(profile,mission){
   l.ownerApprovalRef!==null)fail('MISSION_EXECUTION_LOCK_INVALID');
  if(!Array.isArray(mission.deliverables)||mission.deliverables.length<3||
   !Array.isArray(mission.proposedCollaborators)||
-  mission.proposedCollaborators.sort().join()!=='BOB,RICCARDO,VITO'||
+  [...mission.proposedCollaborators].sort().join()!=='BOB,RICCARDO,VITO'||
   mission.merge!=='NO_GO'||mission.deploy!=='NO_GO')
   fail('MISSION_OUTPUT_OR_GATES_INVALID');
  return Object.freeze({status:'PASS_PROPOSAL_ONLY',employee:p.code,
