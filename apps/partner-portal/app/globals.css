@@ -2786,3 +2786,177 @@ body {
     drop-shadow(0 0 9px rgba(224, 173, 76, .24))
     drop-shadow(0 3px 4px rgba(72, 45, 13, .10));
 }
+
+
+/* V1.7.3 — stronger visible depth after owner screenshot review */
+.portal-brand strong {
+  font-size: 30px;
+  letter-spacing: .125em;
+}
+
+.portal-brand strong .urtali-wordmark {
+  filter: drop-shadow(0 5px 12px rgba(0,0,0,.20));
+}
+
+.northstar-hero.bridge-hero {
+  background-position: center 64%;
+  box-shadow:
+    0 28px 62px rgba(28, 61, 88, .16),
+    0 8px 22px rgba(28, 61, 88, .09),
+    inset 0 1px 0 rgba(255,255,255,.98),
+    inset 0 -1px 0 rgba(128, 154, 176, .18);
+}
+
+.bridge-hero .northstar-values {
+  box-shadow:
+    0 20px 44px rgba(18, 45, 68, .17),
+    0 5px 14px rgba(18, 45, 68, .08),
+    inset 0 1px 0 rgba(255,255,255,1),
+    inset 0 -1px 0 rgba(176, 137, 70, .08);
+}
+
+.northstar-journey article,
+.northstar-shortcuts > a {
+  box-shadow:
+    0 11px 24px rgba(29, 61, 87, .085),
+    0 2px 7px rgba(29, 61, 87, .045),
+    inset 0 1px 0 #fff;
+}
+
+.northstar-workcard,
+.solution-card,
+.asset-card,
+.table-card,
+.panel,
+.academy-status,
+.module-row,
+.lead-form,
+.search-surface,
+.content-view > header,
+.content-view > section {
+  box-shadow:
+    0 18px 40px rgba(27, 58, 84, .10),
+    0 5px 14px rgba(27, 58, 84, .055),
+    inset 0 1px 0 rgba(255,255,255,.98);
+}
+
+.northstar-workcard {
+  border-color: rgba(172, 195, 211, .98);
+}
+
+.northstar-workcard > header {
+  background:
+    radial-gradient(circle at 84% -10%, rgba(150, 203, 239, .28), transparent 45%),
+    linear-gradient(132deg, #0b2742 0%, #174d73 54%, #113955 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.18),
+    inset 0 -2px 0 rgba(4, 20, 35, .28),
+    0 7px 16px rgba(9, 35, 57, .12);
+}
+
+.northstar-workcard > header::after {
+  opacity: 1;
+  background:
+    linear-gradient(112deg, transparent 0 22%, rgba(255,255,255,.14) 34%, rgba(255,255,255,.035) 43%, transparent 55%),
+    radial-gradient(circle at 11% -30%, rgba(232, 190, 101, .24), transparent 36%);
+}
+
+.solution-card,
+.asset-card,
+.panel,
+.table-card,
+.module-row,
+.document-list article {
+  border-color: rgba(178, 199, 214, .98);
+}
+
+.solution-card::after,
+.asset-card::after,
+.panel::after,
+.table-card::after,
+.academy-status::after,
+.lead-form::after,
+.search-surface::after,
+.content-view > header::after,
+.content-view > section::after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  top: 1px;
+  height: 38%;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.48), rgba(255,255,255,0));
+  opacity: .62;
+}
+
+.solution-card {
+  background:
+    radial-gradient(circle at 92% 0%, rgba(192, 218, 236, .16), transparent 34%),
+    linear-gradient(180deg, #ffffff 0%, #f8fbfd 100%);
+}
+
+.solution-card:hover,
+.asset-card:hover,
+.module-row:hover,
+.document-list article:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 22px 46px rgba(27, 58, 84, .13),
+    0 7px 17px rgba(27, 58, 84, .06),
+    0 0 24px rgba(186, 135, 51, .055),
+    inset 0 1px 0 rgba(255,255,255,1);
+}
+
+.compact-metrics article,
+.opportunity-value,
+.score-grid div,
+.governance-grid div,
+.trust-grid div,
+.mini-metrics div,
+.commission-kpis > div {
+  box-shadow:
+    0 8px 18px rgba(27, 58, 84, .065),
+    inset 0 1px 0 rgba(255,255,255,1);
+}
+
+.mini-next-action a,
+.button.primary {
+  background:
+    linear-gradient(180deg, #f6d17f 0%, #e5ad4d 38%, #cf9130 74%, #bb7923 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.72),
+    inset 0 -1px 0 rgba(111, 70, 16, .24),
+    0 7px 17px rgba(177, 121, 38, .24),
+    0 0 18px rgba(226, 176, 77, .10);
+}
+
+.urtali-a-char::before {
+  background:
+    linear-gradient(
+      102deg,
+      #6f4515 0%,
+      #9e6522 14%,
+      #d39b43 35%,
+      #f5d58c 47%,
+      #fff0bd 51%,
+      #dca34c 59%,
+      #a96825 79%,
+      #754718 100%
+    );
+}
+
+.urtali-a-char::after {
+  opacity: .90;
+  background:
+    linear-gradient(
+      116deg,
+      transparent 0 34%,
+      rgba(255,255,255,.18) 40%,
+      rgba(255,249,217,.88) 48%,
+      rgba(255,255,255,.30) 54%,
+      transparent 63% 100%
+    );
+}
