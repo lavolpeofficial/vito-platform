@@ -28,9 +28,9 @@ export function Shell({ children }: { children: ReactNode }) {
         <Link className="portal-brand" href="/">
           <strong><UrtaliWordmark /></strong>
           <span>SYSTEMS</span>
-          <small>PARTNER</small>
+          <small>ALLIANCE</small>
         </Link>
-        <nav className="portal-nav" aria-label="Partner navigation">
+        <nav className="portal-nav" aria-label="Alliance navigation">
           {nav.map(([href, label, mark]) => {
             const active = href === '/' ? pathname === '/' : pathname.startsWith(href);
             return (
@@ -48,7 +48,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <section className="portal-workspace">
         <header className="portal-topbar">
           <div>
-            <span className="eyebrow">Partner Operating System</span>
+            <span className="eyebrow">URTALI ALLIANCE</span>
             <Link className="topbar-search" href="/search">Search</Link><Link className="review-badge" href="/review">V1.1 REVIEW</Link>
           </div>
           <div className="partner-mini">
