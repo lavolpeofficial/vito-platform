@@ -2960,3 +2960,79 @@ body {
       transparent 63% 100%
     );
 }
+
+
+/* V1.7.4 — owner review fix: clean hero crop + restrained URTALI A */
+.northstar-hero.bridge-hero {
+  min-height: 350px;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(250,252,253,.96) 0%,
+      rgba(250,252,253,.86) 24%,
+      rgba(250,252,253,.18) 45%,
+      rgba(250,252,253,.07) 60%,
+      rgba(250,252,253,.58) 78%,
+      rgba(250,252,253,.91) 100%
+    ),
+    url('/brand/urtali-partner-bridge-hero-v2.webp') center center / cover no-repeat;
+  background-position: center center;
+}
+
+.northstar-hero.bridge-hero::before {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.12), transparent 20%, transparent 78%, rgba(13,38,61,.06)),
+    linear-gradient(115deg, rgba(255,255,255,.12), transparent 40%, rgba(255,220,150,.045) 60%, transparent 78%);
+}
+
+.northstar-hero.bridge-hero::after {
+  background:
+    radial-gradient(circle at 52% 72%, rgba(228,174,76,.14), transparent 25%),
+    linear-gradient(180deg, rgba(255,255,255,.02), rgba(8,31,52,.055));
+}
+
+/* The A/Λ follows the approved subtle URTALI reference: elegant gold, not glossy chrome. */
+.urtali-a-char {
+  width: .72em;
+  height: .84em;
+  transform: translateY(.025em);
+  filter: drop-shadow(0 1px 1px rgba(83,54,18,.08));
+}
+
+.urtali-a-char::before {
+  background:
+    linear-gradient(
+      104deg,
+      #956629 0%,
+      #b57b31 24%,
+      #c99143 48%,
+      #d5a35e 56%,
+      #bd8435 76%,
+      #9a6728 100%
+    );
+  box-shadow: none;
+}
+
+.urtali-a-char::after {
+  opacity: .26;
+  background:
+    linear-gradient(
+      116deg,
+      transparent 0 42%,
+      rgba(255,245,212,.48) 49%,
+      transparent 57% 100%
+    );
+  mix-blend-mode: screen;
+}
+
+.portal-brand strong .urtali-a-char,
+.bridge-hero .northstar-brand-copy h1 .urtali-a-char {
+  filter: drop-shadow(0 1px 1px rgba(83,54,18,.08));
+  text-shadow: none;
+}
+
+@media (max-width: 1180px) {
+  .northstar-hero.bridge-hero {
+    background-position: center center;
+  }
+}
