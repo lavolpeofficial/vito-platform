@@ -41,10 +41,9 @@ export default function DashboardPage() {
     <div className="northstar-home">
       <section className="northstar-hero bridge-hero">
         <div className="northstar-brand-copy">
-          <span className="eyebrow">CONNECTING PEOPLE · CREATING OPPORTUNITIES</span>
-          <h1><UrtaliWordmark /> <span>PARTNER</span></h1>
-          <h2>Partner Operating System</h2>
-          <p><strong>Gemeinsam weiter.</strong><br />Menschen verbinden. Chancen erkennen. Nachhaltig wachsen.</p>
+          <h1><UrtaliWordmark /> <span>ALLIANCE</span></h1>
+          <h2 className="bridge-title">BRIDGE</h2>
+          <p className="bridge-claim"><em>Connecting People · Creating Opportunities.</em></p>
         </div>
 
         <div className="northstar-values">
