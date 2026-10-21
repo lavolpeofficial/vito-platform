@@ -40,7 +40,6 @@ export default function DashboardPage() {
   return (
     <div className="northstar-home">
       <section className="northstar-hero bridge-hero">
-        <div className="bridge-tunnel" aria-hidden="true" />
         <div className="northstar-brand-copy">
           <span className="eyebrow">CONNECTING PEOPLE · CREATING OPPORTUNITIES</span>
           <h1><UrtaliWordmark /> <span>PARTNER</span></h1>
