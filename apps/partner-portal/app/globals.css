@@ -3036,3 +3036,40 @@ body {
     background-position: center center;
   }
 }
+
+
+/* V1.8 — URTALI ALLIANCE / BRIDGE naming hierarchy */
+.bridge-hero .northstar-brand-copy h1 {
+  margin: 0;
+}
+
+.bridge-hero .bridge-title {
+  margin: 12px 0 8px;
+  color: #102238;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(34px, 3.2vw, 52px);
+  font-weight: 500;
+  letter-spacing: .12em;
+  line-height: 1;
+  text-transform: uppercase;
+  text-shadow:
+    0 1px 0 rgba(255,255,255,.95),
+    0 5px 14px rgba(22, 48, 72, .055);
+}
+
+.bridge-hero .bridge-claim {
+  margin: 0;
+  color: #8f641f;
+  font-size: clamp(12px, 1.05vw, 16px);
+  font-weight: 600;
+  letter-spacing: .06em;
+  line-height: 1.45;
+}
+
+.bridge-hero .bridge-claim em {
+  font-style: italic;
+}
+
+.portal-brand small {
+  color: #d9b66e;
+}
