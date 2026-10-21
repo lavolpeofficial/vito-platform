@@ -1,0 +1,33 @@
+name: Partner Portal Review
+
+on:
+  pull_request:
+    paths:
+      - 'apps/partner-portal/**'
+      - '.github/workflows/partner-portal-review.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.17.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install review dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: Domain tests
+        run: pnpm --filter @vito/partner-portal test
+      - name: Typecheck
+        run: pnpm --filter @vito/partner-portal typecheck
+      - name: Build
+        run: pnpm --filter @vito/partner-portal build
