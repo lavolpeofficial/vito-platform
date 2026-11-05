@@ -60,7 +60,7 @@ async function login(label,origin){
 }
 await new Promise((ok,err)=>mock.once('error',err).listen(apiPort,'127.0.0.1',ok));
 const child=spawn(process.execPath,[join(app,'node_modules/next/dist/bin/next'),'start','--hostname','127.0.0.1','--port',String(uiPort)],{
- cwd:app,stdio:'ignore',env:{...process.env,NODE_ENV:'production',NEXT_TELEMETRY_DISABLED:'1',VITO_API_BASE_URL:'http://127.0.0.1:'+apiPort,VITO_CONTROL_OWNER_USER_ID:users.owner.id,VITO_CONTROL_OWNER_ORGANIZATION_ID:org,VITO_CONTROL_CENTER_PUBLIC_ORIGIN:'http://127.0.0.1:'+uiPort}
+ cwd:app,stdio:'ignore',env:{...process.env,NODE_ENV:'production',NEXT_TELEMETRY_DISABLED:'1',VITO_API_BASE_URL:'http://127.0.0.1:'+apiPort,VITO_CONTROL_OWNER_ONLY:'true',VITO_CONTROL_OWNER_USER_ID:users.owner.id,VITO_CONTROL_OWNER_ORGANIZATION_ID:org,VITO_CONTROL_CENTER_PUBLIC_ORIGIN:'http://127.0.0.1:'+uiPort}
 });
 try{
  let up=false;for(let i=0;i<80;i++){if(child.exitCode!==null)throw Error('NEXT_EXITED_EARLY');try{const r=await call('/login');if(r.status===200){up=true;break}}catch{}await delay(180)}
