@@ -18,6 +18,11 @@ const owner={id:ownerId,organizationId:orgId,role:UserRole.OWNER,status:'ACTIVE'
 const otherOwner={...owner,id:otherId,email:'other@example.invalid'};
 const machine={...owner,id:otherId,email:'machine@example.invalid',role:UserRole.MEMBER,
  isMachineIdentity:true,machineScope:'operator:tasks'};
+
+type FixtureUser = Omit<typeof owner, 'role' | 'machineScope'> & {
+ role: UserRole;
+ machineScope: string | null;
+};
 const keys=['VITO_PRIVATE_HUMAN_API_OWNER_ONLY','VITO_PRIVATE_HUMAN_OWNER_USER_ID',
  'VITO_PRIVATE_HUMAN_OWNER_ORGANIZATION_ID','JWT_SECRET'] as const;
 let old:Record<string,string|undefined>;
@@ -34,14 +39,14 @@ afterEach(()=>{
   else process.env[k]=old[k];
  }
 });
-function jwtFixture(user:typeof owner){
+function jwtFixture(user:FixtureUser){
  const prisma={user:{findUnique:jest.fn().mockResolvedValue(user)}} as unknown as PrismaService;
  return new JwtStrategy(prisma);
 }
 function credentials(email='owner@example.invalid'){
  return {email,password,organizationSlug:'la-volpe'};
 }
-function loginFixture(user:typeof owner){
+function loginFixture(user:FixtureUser){
  const prisma={
   organization:{findUnique:jest.fn().mockResolvedValue(org)},
   user:{findFirst:jest.fn().mockResolvedValue(user),update:jest.fn().mockResolvedValue(user)},
@@ -49,7 +54,7 @@ function loginFixture(user:typeof owner){
  const jwt={signAsync:jest.fn().mockResolvedValue('synthetic.test.jwt')} as unknown as JwtService;
  return new AuthService(prisma,jwt);
 }
-function payload(user:typeof owner){
+function payload(user:FixtureUser){
  return {sub:user.id,org_id:user.organizationId,role:user.role,token_version:user.tokenVersion};
 }
 
