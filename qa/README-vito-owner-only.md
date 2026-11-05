@@ -6,7 +6,7 @@
 
 Verify the actual built Next.js VITO Control Center's login, session cookie, server API helper and owner-only authorization with **synthetic** user and organization records. No real accounts, authentication secrets, production database or Internet services are required.
 
-Test program: `qa/vito-owner-only-synthetic-loopback.mjs`. Uses only the Node standard library. It runs an HMAC-checked synthetic API server on `127.0.0.1:33878` and the *already built* Control Center on `127.0.0.1:33977`. Both processes terminate after the check. It sets fake user/organization pin values **only in the private child-process environment**. It never changes live server configuration.
+Test program: `qa/vito-owner-only-synthetic-loopback.mjs`. Uses only the Node standard library. It runs an HMAC-checked synthetic API server on `127.0.0.1:33878` and the *already built* Control Center on `127.0.0.1:33977`. Both processes terminate after the check. It sets the explicit private UI activation flag and fake user/organization pin values **only in the private child-process environment**. It never changes live server configuration.
 
 ### Preconditions
 
@@ -42,6 +42,6 @@ The full original R376 and R377 source trees and the running live R376/R369 cont
 
 ## Production release remains blocked
 
-Before any activation, obtain securely verified local user/organization IDs, evidence of the true live deployment, real owner sign-in, other-human denial using isolated staging identities, a verified machine workflow, MFA/recovery controls and ingress restrictions. The backend human-only feature flag remains **OFF by default**. The real owner pins must never be committed, pasted into public GitHub or logged. Deploy only through a separate explicit Owner/Security release approval.
+Before any activation, obtain securely verified local user/organization IDs, evidence of the true live deployment, real owner sign-in, other-human denial using isolated staging identities, a verified machine workflow, MFA/recovery controls and ingress restrictions. Both the UI and backend private-owner flags remain **OFF by default**. The UI flag must be enabled deliberately with the exact verified owner pins. With missing or invalid pins, enabled private mode fails closed and would lock out the human owner. The real owner pins must never be committed, pasted into public GitHub or logged. Deploy only through a separate explicit Owner/Security release approval.
 
 Future LA VOLPE ID OIDC federation is separate from these local JWT tests.
