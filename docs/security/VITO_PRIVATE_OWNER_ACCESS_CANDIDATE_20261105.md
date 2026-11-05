@@ -98,3 +98,12 @@ A machine identity remains bound to its current machine scope/route and current 
 **Residual risks / NO-GO:** public health endpoints, identity-provider availability, legacy human tokens, exposed API network ingress, unannotated NestJS routes, permission scopes and production proxy rules require independent audit. This candidate has **not** inspected or changed the live ingress or machine credentials. No new public SSO login, no provider creation, no DB schema, no deploy, no merge. The existing Auth0 LA VOLPE ID design remains separate and not yet wired to VITO.
 
 **QA reporting rule:** Tests passing in GitHub Actions count only after the final current-HEAD run has completed successfully. Previous 16/16 policy tests were synthetic; real end-to-end browser/API security is pending.
+
+
+### Staging bypass closure (additional review change)
+
+`JwtAuthGuard.tryInsecureHeaderFallback()` now rejects `X-Organization-Id` fallback whenever `VITO_PRIVATE_HUMAN_API_OWNER_ONLY=true`, **even in development/staging**. Otherwise an unsigned organization header could authorize role-less endpoints if the legacy development option were also enabled. The old local development fallback remains available only while private owner-only API mode is disabled.
+
+Three Jest regression cases in `jwt-auth.guard.private-owner.spec.ts` cover private deny, normal legacy non-private dev fallback and disabled fallback. These do not prove ingress/WAF protections or production network isolation.
+
+**Current implementation scope:** VITO private human API gating is optional and defaults to `false`, while the control-center owner pin is enforced in the draft UI. Both must be configured with verified values before a coordinated, auditable activation; otherwise a naive deployment of the UI candidate could lock out the owner.
