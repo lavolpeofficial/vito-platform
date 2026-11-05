@@ -10,6 +10,11 @@ export type VitoOwnerPolicy = Readonly<{
   ownerOrganizationId?: string;
 }>;
 
+/** An explicit rollout switch: new code must not lock out the Owner just because the pin has not been installed. */
+export function isVitoControlOwnerOnlyEnabled(env: Readonly<Record<string, string | undefined>> = process.env): boolean {
+  return env.VITO_CONTROL_OWNER_ONLY === 'true';
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function isVitoInteractiveOwner(
