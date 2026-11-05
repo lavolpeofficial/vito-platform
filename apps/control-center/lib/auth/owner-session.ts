@@ -8,9 +8,10 @@ import { isVitoInteractiveOwner, type VitoOwnerPolicy } from './owner-access.ts'
  * The backend validates JWT and current user+tenant status on each read.
  * This is NOT a shared OIDC/SSO implementation.
  */
-export async function resolveVitoOwnerSession(
+export async function resolveVitoSession(
   token: string,
   client: Pick<VitoApiClient, 'get'>,
+  ownerOnly: boolean,
   policy?: VitoOwnerPolicy,
 ): Promise<AuthenticatedSession | null> {
   const ids = parseJwtIdentifiers(token);
@@ -21,5 +22,14 @@ export async function resolveVitoOwnerSession(
   ]);
   if (user.id !== ids.userId || user.organizationId !== ids.organizationId || organization.id !== ids.organizationId) return null;
   const session: AuthenticatedSession = { user, organization };
-  return isVitoInteractiveOwner(session, policy) ? session : null;
+  return !ownerOnly || isVitoInteractiveOwner(session, policy) ? session : null;
+}
+
+/** Explicit fail-closed owner resolver, retained for isolated security tests and callers that always require owner access. */
+export async function resolveVitoOwnerSession(
+  token: string,
+  client: Pick<VitoApiClient, 'get'>,
+  policy?: VitoOwnerPolicy,
+): Promise<AuthenticatedSession | null> {
+  return resolveVitoSession(token, client, true, policy);
 }
