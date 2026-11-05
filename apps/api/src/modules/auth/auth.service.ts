@@ -6,6 +6,7 @@ import { normalizeEmail } from '../../common/utils/normalize-email';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
+import { canUsePrivateVitoHumanLogin, privateHumanAccessConfigFromEnv } from './private-human-access-policy';
 
 /**
  * Bcrypt-Hash von irgendeinem festen, nie verwendeten Passwort. Wird für
@@ -94,6 +95,12 @@ export class AuthService {
 
     const passwordMatches = await bcrypt.compare(dto.password, user.passwordHash);
     if (!passwordMatches) {
+      throw invalidCredentials();
+    }
+
+    // Private VITO interactive login can be activated only after owner gating.
+    // A machine identity must not use this password login in private mode.
+    if (!canUsePrivateVitoHumanLogin(user, privateHumanAccessConfigFromEnv())) {
       throw invalidCredentials();
     }
 

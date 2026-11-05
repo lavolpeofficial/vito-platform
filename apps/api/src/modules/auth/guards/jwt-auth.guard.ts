@@ -74,7 +74,12 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 
   private tryInsecureHeaderFallback(request: Request): boolean {
-    if (process.env.ALLOW_INSECURE_TENANT_HEADER !== 'true') {
+    // Private human owner-only mode must never accept a header-based tenant
+    // identity, including non-production staging and local validation.
+    if (
+      process.env.VITO_PRIVATE_HUMAN_API_OWNER_ONLY === 'true' ||
+      process.env.ALLOW_INSECURE_TENANT_HEADER !== 'true'
+    ) {
       throw new UnauthorizedException('Authentifizierung erforderlich.');
     }
 

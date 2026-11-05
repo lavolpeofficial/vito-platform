@@ -1,25 +1,22 @@
 import { cookies } from 'next/headers';
 import { createPublicVitoApiClient } from '@/lib/api/server';
-import { parseJwtIdentifiers, parseOrganization, parseUser, type AuthenticatedSession } from './contracts';
+import { resolveVitoSession } from './owner-session';
+import { isVitoControlOwnerOnlyEnabled } from './owner-access';
+import type { AuthenticatedSession } from './contracts';
 import { SESSION_COOKIE_NAME } from './cookie';
 
 export { SESSION_COOKIE_NAME } from './cookie';
 
+/**
+ * Existing VITO JWT + current user/tenant are re-verified via backend.
+ * After an explicit private rollout switch, require a pinned human Owner.
+ */
 export async function getAuthenticatedSession(): Promise<AuthenticatedSession | null> {
   const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
   if (!token) return null;
-
-  const identifiers = parseJwtIdentifiers(token);
-  if (!identifiers) return null;
-
   try {
     const client = createPublicVitoApiClient().withAccessToken(token);
-    const [user, organization] = await Promise.all([
-      client.get(`/users/${encodeURIComponent(identifiers.userId)}`, parseUser),
-      client.get(`/organizations/${encodeURIComponent(identifiers.organizationId)}`, parseOrganization),
-    ]);
-    if (user.id !== identifiers.userId || user.organizationId !== organization.id) return null;
-    return { user, organization };
+    return await resolveVitoSession(token, client, isVitoControlOwnerOnlyEnabled());
   } catch {
     return null;
   }
