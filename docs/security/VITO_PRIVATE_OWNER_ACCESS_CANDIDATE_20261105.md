@@ -76,3 +76,25 @@ This candidate restricts **interactive Control Center entry and its server-side 
 ## Governance
 
 Control Tower `lavolpeofficial/orientation-systems` issue #8 currently declares OSSERVATORE-LIVE as the active mission while historical `ops/control-tower-v0.1` notes are inconsistent. Treat this as an isolated Owner-GO development candidate requiring central priority alignment, not an autonomous mission switch. The VITO implementation repository owns its Control Center code; the central SSO product architecture is a separate cross-repository contract for LA VOLPE ID.
+
+
+## 2026-11-05 · VITO private HUMAN API follow-up (same PR, opt-in)
+
+The baseline VITO NestJS API accepts organization-scoped human JWTs, even where the Next.js Control Center has the owner-only check. An owner-only web cockpit does **not** by itself protect direct API access from other valid human credentials. This is a documented second trust boundary, not a production verification.
+
+The same isolated PR now adds:
+- `apps/api/src/modules/auth/private-human-access-policy.ts`: deterministic policy requiring an exact backend-verified local `user.id`, `organizationId`, role OWNER, and `isMachineIdentity=false`; machine identities must have a nonempty scope and still pass the existing globally registered `ScopedMachineIdentityGuard`.
+- `JwtStrategy.validate()`: **only when the explicitly enabled server flag is true**, validate the freshly DB-loaded user against the private human owner pins before accepting a human JWT for backend API requests. Other human JWTs then fail, even when their roles say OWNER.
+- `AuthService.login()`: in the same opt-in mode, do not issue interactive password-login tokens to any other human or to a machine account. Failed attempts keep generic credentials errors.
+- `apps/api/src/modules/auth/private-human-access-policy.spec.ts`: 14 Jest tests covering default-disabled compatibility, one-owner authorization, other human deny, machine-scope preservation, malformed config, role/organization mismatch and env behavior.
+- `.env.example`: new opt-in flags, default disabled and owner IDs blank.
+
+**Activation plan:** after the actual live VITO user and organization have been identified securely, run a private staging two-person test and a scoped machine execution smoke, then configure `VITO_PRIVATE_HUMAN_OWNER_USER_ID` and `VITO_PRIVATE_HUMAN_OWNER_ORGANIZATION_ID` **server-side**, and only then enable `VITO_PRIVATE_HUMAN_API_OWNER_ONLY=true`. This must be paired with the separate front-end `VITO_CONTROL_OWNER_USER_ID` and `VITO_CONTROL_OWNER_ORGANIZATION_ID` values representing the **same verified principal**. Never put the real IDs, JWTs or credentials in the repo.
+
+If pins are missing/invalid, private human API admission becomes fail-closed when enabled, which could lock out the Owner. An explicit roll-back route and recovery test are mandatory before production activation. Turning on the flag without pins is **not** approved.
+
+A machine identity remains bound to its current machine scope/route and current DB-backed token checks. The guard does not grant general machine access. If the environment uses non-machine service users for automation, classify and migrate them through approved procedures before any activation; otherwise they will be rejected.
+
+**Residual risks / NO-GO:** public health endpoints, identity-provider availability, legacy human tokens, exposed API network ingress, unannotated NestJS routes, permission scopes and production proxy rules require independent audit. This candidate has **not** inspected or changed the live ingress or machine credentials. No new public SSO login, no provider creation, no DB schema, no deploy, no merge. The existing Auth0 LA VOLPE ID design remains separate and not yet wired to VITO.
+
+**QA reporting rule:** Tests passing in GitHub Actions count only after the final current-HEAD run has completed successfully. Previous 16/16 policy tests were synthetic; real end-to-end browser/API security is pending.
