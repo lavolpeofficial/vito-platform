@@ -23,6 +23,14 @@ pnpm --filter @vito/control-center exec next build --webpack
 node qa/vito-owner-only-synthetic-loopback.mjs
 ```
 
+Also run the **separate explicit activation-switch test** on the same private build:
+
+```bash
+node qa/vito-owner-only-activation-switch-smoke.mjs
+```
+
+This exercises four fully built Next.js HTTP modes against synthetic identities, with 25 assertions in total: flag absent, flag `false`, flag `true` without pins (fail closed), and flag `true` with exact owner pins. It confirms the unmodified backend-verified login remains usable when owner-only activation is OFF, while an enabled and correctly pinned mode blocks other humans. Both private servers use loopback only and terminate after test execution. No real identities or databases are involved.
+
 The harness writes a **local, synthetic-only** report to `.local-qa/R378_OWNER_LOGIN_LOOPBACK_E2E_RESULT.json`. This directory is untracked and should never be published.
 
 ### Acceptance criteria (25 checks)
