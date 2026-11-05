@@ -4,6 +4,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuthenticatedUser } from '../../../common/auth/authenticated-user.interface';
 import { JwtPayload } from '../interfaces/jwt-payload.interface';
+import { canAccessPrivateVitoApi, privateHumanAccessConfigFromEnv } from '../private-human-access-policy';
 
 /**
  * Tenant-Sicherheitsprüfung (Sprint-2-Anforderung 7):
@@ -78,6 +79,13 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     }
 
     if (payload.token_version !== user.tokenVersion) {
+      throw new UnauthorizedException('Token nicht mehr gültig.');
+    }
+
+    // Opt-in private owner boundary for human API principals.
+    // Machine identities keep the existing separate scope guard.
+    // Do not trust token role/subject without the fresh DB-backed user above.
+    if (!canAccessPrivateVitoApi(user, privateHumanAccessConfigFromEnv())) {
       throw new UnauthorizedException('Token nicht mehr gültig.');
     }
 
