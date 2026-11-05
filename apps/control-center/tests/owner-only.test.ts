@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isVitoInteractiveOwner } from '../lib/auth/owner-access.ts';
-import { resolveVitoOwnerSession } from '../lib/auth/owner-session.ts';
+import { isVitoControlOwnerOnlyEnabled, isVitoInteractiveOwner } from '../lib/auth/owner-access.ts';
+import { resolveVitoOwnerSession, resolveVitoSession } from '../lib/auth/owner-session.ts';
 import type { AuthenticatedSession } from '../lib/auth/contracts.ts';
 import type { VitoApiClient } from '../lib/api/client.ts';
 
@@ -95,4 +95,21 @@ test('malformed JWT selector never calls backend',async()=>{
 test('backend failures are propagated so callers can fail closed',async()=>{
  const broken={get:async()=>{throw Error('backend offline');}} as unknown as Pick<VitoApiClient,'get'>;
  await assert.rejects(resolveVitoOwnerSession(token(),broken,policy),/backend offline/);
+});
+
+test('private interactive rollout flag defaults off and requires exact true',()=>{
+ assert.equal(isVitoControlOwnerOnlyEnabled({}),false);
+ assert.equal(isVitoControlOwnerOnlyEnabled({VITO_CONTROL_OWNER_ONLY:'false'}),false);
+ assert.equal(isVitoControlOwnerOnlyEnabled({VITO_CONTROL_OWNER_ONLY:'TRUE'}),false);
+ assert.equal(isVitoControlOwnerOnlyEnabled({VITO_CONTROL_OWNER_ONLY:'true'}),true);
+});
+test('disabled private mode preserves backend-verified non-owner session, never forgery',async()=>{
+ const api=fakeApi({...session.user,role:'ADMIN'});
+ assert.equal((await resolveVitoSession(token(),api,false))?.user.role,'ADMIN');
+ assert.equal(await resolveVitoSession(token(),api,true,policy),null);
+ assert.equal(await resolveVitoSession(token(),fakeApi({...session.user,id:otherUser}),false),null);
+});
+test('enabled private mode denies unknown pins, even for verified OWNER',async()=>{
+ assert.equal(await resolveVitoSession(token(),fakeApi(),true,{}),null);
+ assert.equal((await resolveVitoSession(token(),fakeApi(),true,policy))?.user.id,userId);
 });
