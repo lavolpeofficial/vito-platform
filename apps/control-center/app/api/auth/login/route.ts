@@ -4,7 +4,7 @@ import { VitoApiError } from '@/lib/api/error';
 import { parseLoginCredentials, parseLoginResult, parseOrganization, parseSessionLifetime } from '@/lib/auth/contracts';
 import { isSameOriginMutation, publicAuthError } from '@/lib/auth/request';
 import { SESSION_COOKIE_NAME } from '@/lib/auth/session';
-import { isVitoInteractiveOwner } from '@/lib/auth/owner-access';
+import { isVitoControlOwnerOnlyEnabled, isVitoInteractiveOwner } from '@/lib/auth/owner-access';
 
 export async function POST(request: NextRequest) {
   if (!isSameOriginMutation(request)) {
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
 
     // Owner-only interactive Cockpit: a generic VITO org OWNER is insufficient.
     // The check runs on server-verified API data, before the cookie is issued.
-    if (!isVitoInteractiveOwner({ user: login.user, organization })) {
+    if (isVitoControlOwnerOnlyEnabled() && !isVitoInteractiveOwner({ user: login.user, organization })) {
       return NextResponse.json({ error: 'Invalid credentials.' }, { status: 401 });
     }
 
