@@ -104,5 +104,3 @@ finally{
  mock.closeAllConnections();
  await new Promise(ok=>mock.close(ok));
 }
-
-[executed on device: ubuntu-4gb-hel1-1 (fe3754ea-5627-4a36-b351-e958ef584b11)]
