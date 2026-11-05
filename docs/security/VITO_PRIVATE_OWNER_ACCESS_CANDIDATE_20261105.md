@@ -21,7 +21,7 @@
 3. exact server-only `VITO_CONTROL_OWNER_ORGANIZATION_ID` (UUID);
 4. user role `OWNER` and matching user and organization membership.
 
-No e-mail string, organization slug, browser role flag, PREMIUM subscription, BRIDGE partner role, or another organization's OWNER role grants access. Missing or malformed configuration denies by default.
+No e-mail string, organization slug, browser role flag, PREMIUM subscription, BRIDGE partner role, or another organization's OWNER role grants private access. The UI owner-only mode is explicitly activated by `VITO_CONTROL_OWNER_ONLY=true`; while active, missing or malformed pins deny by default. When the flag is absent/false, the previously existing backend-verified VITO JWT and tenant session behavior remains intact.
 
 `owner-session.ts` resolves current user+organization from the real VITO JWT-backed API, and then applies this policy. It is used:
 - when an existing session is restored;
@@ -89,7 +89,7 @@ The same isolated PR now adds:
 - `apps/api/src/modules/auth/private-human-access-policy.spec.ts`: 14 Jest tests covering default-disabled compatibility, one-owner authorization, other human deny, machine-scope preservation, malformed config, role/organization mismatch and env behavior.
 - `.env.example`: new opt-in flags, default disabled and owner IDs blank.
 
-**Activation plan:** after the actual live VITO user and organization have been identified securely, run a private staging two-person test and a scoped machine execution smoke, then configure `VITO_PRIVATE_HUMAN_OWNER_USER_ID` and `VITO_PRIVATE_HUMAN_OWNER_ORGANIZATION_ID` **server-side**, and only then enable `VITO_PRIVATE_HUMAN_API_OWNER_ONLY=true`. This must be paired with the separate front-end `VITO_CONTROL_OWNER_USER_ID` and `VITO_CONTROL_OWNER_ORGANIZATION_ID` values representing the **same verified principal**. Never put the real IDs, JWTs or credentials in the repo.
+**Activation plan:** after the actual live VITO user and organization have been identified securely, run a private staging two-person test and a scoped machine execution smoke, then configure `VITO_PRIVATE_HUMAN_OWNER_USER_ID` and `VITO_PRIVATE_HUMAN_OWNER_ORGANIZATION_ID` **server-side**, and only then enable `VITO_PRIVATE_HUMAN_API_OWNER_ONLY=true`. This must be paired with the separate front-end `VITO_CONTROL_OWNER_USER_ID` and `VITO_CONTROL_OWNER_ORGANIZATION_ID` values representing the **same verified principal**, and the explicit `VITO_CONTROL_OWNER_ONLY=true` UI switch. Never put the real IDs, JWTs or credentials in the repo.
 
 If pins are missing/invalid, private human API admission becomes fail-closed when enabled, which could lock out the Owner. An explicit roll-back route and recovery test are mandatory before production activation. Turning on the flag without pins is **not** approved.
 
@@ -106,4 +106,4 @@ A machine identity remains bound to its current machine scope/route and current 
 
 Three Jest regression cases in `jwt-auth.guard.private-owner.spec.ts` cover private deny, normal legacy non-private dev fallback and disabled fallback. These do not prove ingress/WAF protections or production network isolation.
 
-**Current implementation scope:** VITO private human API gating is optional and defaults to `false`, while the control-center owner pin is enforced in the draft UI. Both must be configured with verified values before a coordinated, auditable activation; otherwise a naive deployment of the UI candidate could lock out the owner.
+**Current implementation scope:** Both backend (`VITO_PRIVATE_HUMAN_API_OWNER_ONLY`) and UI (`VITO_CONTROL_OWNER_ONLY`) owner-only enforcement are explicit opt-ins and default to disabled. The UI retains legacy backend-verified session behavior until the switch is enabled. If enabled with empty/incorrect pins, the Owner would be denied; deploy and switch activation must therefore be coordinated and separately approved.
