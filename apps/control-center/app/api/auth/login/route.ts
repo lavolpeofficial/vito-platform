@@ -4,6 +4,7 @@ import { VitoApiError } from '@/lib/api/error';
 import { parseLoginCredentials, parseLoginResult, parseOrganization, parseSessionLifetime } from '@/lib/auth/contracts';
 import { isSameOriginMutation, publicAuthError } from '@/lib/auth/request';
 import { SESSION_COOKIE_NAME } from '@/lib/auth/session';
+import { isVitoInteractiveOwner } from '@/lib/auth/owner-access';
 
 export async function POST(request: NextRequest) {
   if (!isSameOriginMutation(request)) {
@@ -39,6 +40,12 @@ export async function POST(request: NextRequest) {
       .get(`/organizations/${encodeURIComponent(login.user.organizationId)}`, parseOrganization);
     if (organization.id !== login.user.organizationId || organization.slug !== credentials.organizationSlug) {
       return NextResponse.json({ error: 'The tenant context could not be verified.' }, { status: 502 });
+    }
+
+    // Owner-only interactive Cockpit: a generic VITO org OWNER is insufficient.
+    // The check runs on server-verified API data, before the cookie is issued.
+    if (!isVitoInteractiveOwner({ user: login.user, organization })) {
+      return NextResponse.json({ error: 'Invalid credentials.' }, { status: 401 });
     }
 
     const response = NextResponse.json({ session: { user: login.user, organization } });
