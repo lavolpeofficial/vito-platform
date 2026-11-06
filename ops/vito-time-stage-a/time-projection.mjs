@@ -30,7 +30,9 @@ export function projectTimeAgenda({tasks,bus,organizationId,now}) {
     dedupe.add(id);
     const updated=iso(t.updatedAt),created=iso(t.createdAt);
     if(updated<created) throw Error('TIME_EVENT_ORDER_INVALID');
-    events.push(Object.freeze({id,kind:'TASK_ACTIVITY',title:title(t.title),at:updated,taskId:t.id,status:t.status,source:'VITO_TASKS',verifiedComplete:false,deadlineAt:null,followupRequired:t.status==='WAITING'}));
+    // VITO Task.dueAt exists but is nullable: never infer missing deadlines.
+    const deadlineAt=t.dueAt == null ? null : iso(t.dueAt);
+    events.push(Object.freeze({id,kind:'TASK_ACTIVITY',title:title(t.title),at:updated,taskId:t.id,status:t.status,source:'VITO_TASKS',verifiedComplete:false,deadlineAt,followupRequired:t.status==='WAITING'}));
     if(t.status==='COMPLETED') warnings.push('COMPLETED_REQUIRES_INDEPENDENT_EVIDENCE:'+t.id);
   }
   for(const b of bus) {
