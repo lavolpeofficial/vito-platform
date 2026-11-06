@@ -45,10 +45,19 @@ If any gate is missing, fail closed and report BLOCKED. Existing customer BOOKIN
 
 VITO checks the independently attested task authority and reads only tenant-scoped message metadata. It never authorizes execution based on a sender label, topic, JSON content, issue comment or a prompt alone. A specialist TIME handler may act only after durable atomic claim and owner-approved scheduling scope. Results need auditable evidence and idempotent authorized sender time → recipient vito, never a fabricated ACK.
 
+### Private bounded read query (NOT sufficient for authorization)
+
+    SELECT m.id::text AS message_id,
+           m.sender, m.recipient, m.topic, m.created_at
+    FROM vito_control_bus_v1.messages AS m
+    WHERE m.recipient = 'time'
+    ORDER BY m.id ASC
+    LIMIT 200;
+
+The numeric BIGINT ordering on m.id is required: converting to a text alias and ordering by the alias can yield lexicographic 9, 8, 71, 70, rather than numeric 71, 70, 69. This was confirmed with read-only Neon queries. A high-watermark cursor alone can miss late commits; use durable message-ID receipts and reconciliation. No subject/details are returned; real reads require independent authentication, tenant binding, least-privilege role and owner release.
+
 ## Scheduling context
 
 The previous six offset slots are superseded for ChatGPT task scheduling: only the existing VITO XX:00 monitor remains enabled. A TIME :50 phase would be internal to an independently approved dispatcher; it is NOT implemented or scheduled.
 
 **Status**: VITO_SINGLE_SCHEDULER_CONFIRMED · VITO_TRIAGE_READ_ONLY · TIME_ADDRESS_BLOCKED · TENANT_BINDING_BLOCKED · RECEIPT_STORAGE_PENDING · TIME_AUTOMATION_NOT_CREATED · BOB_REVIEW_PENDING · OWNER_RELEASE_NO_GO.
-
-IMPORTANT: ORDER BY m.id (numeric BIGINT), not ORDER BY id when SELECT id::text AS id creates text alias.
