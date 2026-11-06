@@ -21,7 +21,8 @@ recorded_receipts AS (
    AND r.topic = 'report'
    AND r.details ->> 'in_reply_to' = d.id::text
    AND r.details ->> 'receipt_state' = 'RECEIVED'
-   AND r.details ->> 'evidence_level' = 'UNSIGNED_SHARED_DB_ACCOUNT'
+   -- Receipt format can vary; no cryptographic signer is assumed.
+   -- The status below is ALWAYS unverified, even when a receipt row exists.
 ),
 receipt_latest AS (
   SELECT dispatch_id, MAX(receipt_id) AS receipt_id
