@@ -1,0 +1,32 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {buildPrivateAgenda,planNotificationOutbox,classifyDeliveryEvidence} from './time-private-agenda.mjs';
+const organizationId='61d0453c-6e2a-4540-aab7-8ee0c2dc44e4';
+const taskId='48eb9a45-d7b7-434d-a410-28df5a672ae7';
+const recordId='cabd58ca-ed3a-4286-934b-8dce2d9b0661';
+const task={id:taskId,organizationId,title:'Approval checkpoint',status:'WAITING',createdAt:'2026-11-06T09:00:00Z',updatedAt:'2026-11-06T09:15:00Z',dueAt:'2026-11-07T11:00:00+01:00',description:'secret PII'};
+const message={externalMessageId:'65',senderLabel:'vito',topic:'blocker',observedAt:'2026-11-06T10:00:00Z',details:'secret'};
+const base={organizationId,now:'2026-11-07T09:00:00Z',tasks:[task],bus:[]};
+function agenda(x={}){return buildPrivateAgenda({...base,...x})}
+function plan(a,extra={}){return planNotificationOutbox({agenda:a,organizationId,now:'2026-11-07T09:00:00Z',...extra})}
+test('existing VITO dueAt becomes actual deadline; timezone normalizes',()=>{const a=agenda();assert.equal(a.events[0].deadlineAt,'2026-11-07T10:00:00.000Z');assert.equal(a.schedule[0].at,'2026-11-07T10:00:00.000Z');});
+test('never infers deadline from updatedAt',()=>{const a=agenda({tasks:[{...task,dueAt:null}]});assert.equal(a.events[0].deadlineAt,null);assert.equal(a.schedule.length,0);});
+test('completed task has activity but no active reminders',()=>{const a=agenda({tasks:[{...task,status:'COMPLETED'}]});assert.equal(a.schedule.length,0);assert.equal(a.warnings.length,1);});
+test('invalid date aborts instead of silently shifting',()=>assert.throws(()=>agenda({tasks:[{...task,dueAt:'tomorrow'}]}),/TIMESTAMP_INVALID/));
+test('blocks raw BUS data without proven tenant scope',()=>assert.throws(()=>agenda({bus:[message]}),/BUS_SCOPE_UNVERIFIED/));
+test('allows only pre-scoped BUS metadata when explicit server binding provided',()=>{const a=agenda({bus:[message],busVerified:true});assert.equal(a.events.length,2);assert.equal(a.schedule.length,1);assert.equal(JSON.stringify(a).includes('secret'),false);});
+test('owner-approved explicit followup appears but is not dispatched',()=>{const a=agenda({followups:[{organizationId,recordId,eventId:'task:'+taskId,followupAt:'2026-11-07T09:30:00Z',source:'OWNER_APPROVED_TIME_RECORD'}]});assert.equal(a.schedule.length,2);assert.equal(a.notificationSendingEnabled,false);});
+test('unverified followup blocked',()=>assert.throws(()=>agenda({followups:[{organizationId,recordId,eventId:'task:'+taskId,followupAt:'2026-11-07T09:30:00Z',source:'WEB_FORM'}]}),/FOLLOWUP_AUTHORITY_INVALID/));
+test('foreign-tenant followup blocked',()=>assert.throws(()=>agenda({followups:[{organizationId:'96c07aba-402a-41f3-847f-01b59018143b',recordId,eventId:'task:'+taskId,followupAt:'2026-11-07T09:30:00Z',source:'OWNER_APPROVED_TIME_RECORD'}]}),/FOLLOWUP_TENANT_MISMATCH/));
+test('orphan followup cannot create task',()=>assert.throws(()=>agenda({followups:[{organizationId,recordId,eventId:'bus:23',followupAt:'2026-11-07T09:30:00Z',source:'OWNER_APPROVED_TIME_RECORD'}]}),/FOLLOWUP_UNKNOWN_EVENT/));
+test('duplicate record id is rejected',()=>{const f={organizationId,recordId,eventId:'task:'+taskId,followupAt:'2026-11-07T09:30:00Z',source:'OWNER_APPROVED_TIME_RECORD'};assert.throws(()=>agenda({followups:[f,f]}),/FOLLOWUP_DUPLICATE_ID/)});
+test('intent is pure, scoped and has no PII or send capability',()=>{const r=plan(agenda());assert.equal(r.sendingEnabled,false);assert.equal(r.requiresAtomicDurableReservation,true);assert.equal(r.intents.length,1);assert.equal(JSON.stringify(r).includes('secret'),false);assert.equal(JSON.stringify(r).includes('Approval checkpoint'),false);});
+test('plan generated stable idempotency key on replay',()=>{const a=agenda();assert.equal(plan(a).intents[0].intentKey,plan(a).intents[0].intentKey)});
+test('same intent is suppressed if durable outbox already reserved',()=>{const a=agenda();const key=plan(a).intents[0].intentKey;const r=plan(a,{existingEvidence:[{organizationId,intentKey:key,state:'RESERVED'}]});assert.equal(r.intents.length,0);assert.equal(r.suppressed.length,1);});
+test('unknown delivery is never silently retried',()=>{const a=agenda();const key=plan(a).intents[0].intentKey;const r=plan(a,{existingEvidence:[{organizationId,intentKey:key,state:'UNKNOWN'}]});assert.equal(r.intents.length,0);assert.equal(r.suppressed[0].state,'UNKNOWN');});
+test('foreign-tenant evidence rejected',()=>{const a=agenda();const key=plan(a).intents[0].intentKey;assert.throws(()=>plan(a,{existingEvidence:[{organizationId:'96c07aba-402a-41f3-847f-01b59018143b',intentKey:key,state:'DELIVERED',deliveryReceiptId:'receipt_123456789'}]}),/OUTBOX_EVIDENCE_INVALID/)});
+test('missing delivery receipt cannot be reported delivered',()=>{const a=agenda();const key=plan(a).intents[0].intentKey;assert.throws(()=>plan(a,{existingEvidence:[{organizationId,intentKey:key,state:'DELIVERED'}]}),/OUTBOX_DELIVERY_PROOF_MISSING/)});
+test('duplicate evidence entries rejected',()=>{const a=agenda();const key=plan(a).intents[0].intentKey;const e={organizationId,intentKey:key,state:'RESERVED'};assert.throws(()=>plan(a,{existingEvidence:[e,e]}),/OUTBOX_EVIDENCE_INVALID/)});
+test('stale reminder outside catch-up window is not replayed',()=>assert.equal(plan(agenda(),{now:'2026-11-09T09:00:00Z'}).intents.length,0));
+test('invalid channels cannot be injected',()=>assert.throws(()=>plan(agenda(),{leadMinutes:[-1]}),/OUTBOX_POLICY_INVALID/));
+test('delivery state is not proof of execution',()=>{assert.equal(classifyDeliveryEvidence({state:'UNKNOWN'}),'REVIEW_REQUIRED');assert.equal(classifyDeliveryEvidence({state:'RESERVED'}),'NOT_DELIVERED_CONFIRMED');assert.equal(classifyDeliveryEvidence({state:'DELIVERED',deliveryReceiptId:'provider_receipt_123'}),'DELIVERY_REPORTED_REQUIRES_PROVIDER_VERIFICATION')});
