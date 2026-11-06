@@ -14,7 +14,7 @@ Deliver a **read-only, owner-only** projection of VITO dispatches and specialist
 
 ### A1 source and test
 - Query: [receipt-ledger-readonly.sql](./receipt-ledger-readonly.sql). No network, no DDL, no writes. Read-only using existing columns.
-- On 06.11.2026 queried the connected actual Neon DB with this exact SQL: 16 known outgoing VITO dispatches returned as `DISPATCHED_NOT_ACKNOWLEDGED`; handoff **#67** was present and had no independent specialist-written receipt. Human-relayed chat report **#68** (sender `vito`) deliberately does not count.
+- On 06.11.2026 queried the connected real Neon DB twice: first all 16 outgoing dispatches were `DISPATCHED_NOT_ACKNOWLEDGED`, then independent EMPORIO report **#69** was discovered (sender `emporio`, recipient `vito`, `details.in_reply_to=67`, `details.receipt_state=RECEIVED`). The candidate was corrected and rerun: 16 dispatch rows, **only #67** has `receipt_id=69` / `RECEIPT_REPORTED_UNVERIFIED_SENDER`. Manual owner-relayed report **#68** (sender `vito`) remains excluded. All rows retain `authenticated_agent_ack=false`, `execution_verified=false`, `owner_release_approved=false`. No source- or site-integration completion is claimed.
 - The query must be invoked only in authorized Owner/Admin backend contexts with tenant-safe access. The raw messages table currently contains **no organization_id**; therefore this query must NOT be exposed as a general tenant query, unrestricted REST endpoint or public browser call.
 - For performance keep a bounded result limit and add appropriate database read permissions before genuine deployment. Never use superuser fallback in a runtime.
 - No automatic polling agent, chat wakeup, native API route or new service is delivered by the SQL alone.
