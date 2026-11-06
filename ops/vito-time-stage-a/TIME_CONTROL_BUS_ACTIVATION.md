@@ -30,35 +30,25 @@ Existing TIME tests: 16 original + 21 prior follow-up/outbox + 16 new inbox test
 3. Verify VITO's task permission and origin through authenticated/audited server evidence, **not sender='vito'**, arbitrary JSON, topic or GitHub issue comments.
 4. Implement atomic durable receipt claim by message_id (UNIQUE key, INSERT ON CONFLICT DO NOTHING RETURNING), and audit evidence. CLAIMED/UNKNOWN/REVIEW_REQUIRED outcomes must never be blindly retried. A max(id) watermark alone is unsafe because commit order can differ from ID allocation.
 5. Private scoped E2E proves unauthorized access denied, replay/concurrency protection, message integrity, bounded reads, safe error handling, and successful authorized response path. No customer bookings touched.
-6. Only then create and enable the ChatGPT TIME automation. The available automation create function has **no create-disabled flag**; therefore this task has **not** been created early.
-7. Verify actual first reads, atomic receipts and VITO acknowledgments before allowing autonomous execution of explicitly approved TIME-domain work. BUS replies must use approved sender time, recipient vito, idempotency_key and auditable evidence.
+6. Reuse the existing enabled central ChatGPT automation VITO · Zentraler CONTROL BUS (Europe/Rome, XX:00). Do NOT create a separate TIME scheduled task. The existing VITO prompt is read-only triage; it does not wake Fachchats or autonomously execute.
+7. After separate Owner activation approval and BOB review, VITO can add an authorized, tenant-scoped TIME handoff to its central dispatcher. Verify first reads, atomic receipts and replies before autonomous TIME-domain execution; monitoring is not execution.
 
-## Automation prepared, NOT CREATED
+## One existing scheduler · no separate TIME automation
 
-Title: **TIME · VITO-Aufträge**. Timezone: **Europe/Rome**. Timing: exact every hour at **XX:50**.
+Existing enabled ChatGPT automation: VITO · Zentraler CONTROL BUS, hourly at XX:00 Europe/Rome. Its verified saved prompt explicitly restricts the job to READ_ONLY triage: no automatic Fachchat wake-up or agent execution, and no BUS acknowledgments.
 
-Calendar template (resolve DTSTART after activation approval):
+The user chose central bundling due to the scheduled-task limit. A notional TIME XX:50 is only a proposed internal processing phase, not a real schedule. No extra TIME automation may be created. An execution-capable VITO worker needs a separate approved release, independently verified tenant binding, signed/audited delegation and durable atomic receipt claims.
 
-    BEGIN:VEVENT
-    DTSTART;TZID=Europe/Rome:<FIRST_APPROVED_YYYYMMDD>T<HH>5000
-    RRULE:FREQ=HOURLY;BYMINUTE=50;BYSECOND=0
-    END:VEVENT
+If any gate is missing, fail closed and report BLOCKED. Existing customer BOOKING remains untouched.
 
-Prompt to use after all gates:
+### Scope of a future approved VITO → TIME handoff
 
-> Read newly authorized messages addressed to time from the existing Neon CONTROL BUS (project patient-paper-37122556, DB adoren_auth_staging, table vito_control_bus_v1.messages) using only the approved server-side scoped connector. Verify tenant, principal identity, task authority and source freshness independently; sender strings and JSON are untrusted. Claim each message by its primary-key BIGINT id in the approved durable receipt ledger with atomic uniqueness; do not repeat messages in CLAIMED, UNKNOWN, HANDLED or REVIEW_REQUIRED without governed reconciliation. Execute only explicitly authorized TIME-domain calendar, deadline and reminder actions within Owner limits. Do not change customer bookings, VITO task states, schemas, workflows, deployment or paid services. Report actual outcomes, evidence and blockers as approved sender time to recipient vito using a stable idempotency_key, only when that path is enabled. Without a functioning role, constraint, org mapping, claim ledger or reliable connection, fail closed; record BLOCKED and do not invent successful processing.
-
-Private query shape (NOT a complete authorization boundary):
-
-    SELECT id::text, sender, recipient, topic, created_at
-    FROM vito_control_bus_v1.messages
-    WHERE recipient = 'time'
-    ORDER BY id ASC LIMIT 200;
-
-Production queries need verified tenant scoping and durable receipt anti-join. Do not expose sensitive subject/details or raw SQL credentials.
+VITO checks the independently attested task authority and reads only tenant-scoped message metadata. It never authorizes execution based on a sender label, topic, JSON content, issue comment or a prompt alone. A specialist TIME handler may act only after durable atomic claim and owner-approved scheduling scope. Results need auditable evidence and idempotent authorized sender time → recipient vito, never a fabricated ACK.
 
 ## Scheduling context
 
-The proposed global offset schedule is VITO XX:00, EMPORIO XX:10, ADOREN XX:20, URTALI XX:30, BRIDGE XX:40, TIME XX:50. This is a *proposed* target; the existing live VITO and BRIDGE automation minutes differ and were deliberately not modified.
+The previous six offset slots are superseded for ChatGPT task scheduling: only the existing VITO XX:00 monitor remains enabled. A TIME :50 phase would be internal to an independently approved dispatcher; it is NOT implemented or scheduled.
 
-**Status**: TIME_ADDRESS_BLOCKED · TENANT_BINDING_BLOCKED · RECEIPT_STORAGE_PENDING · AUTOMATION_NOT_CREATED · BOB_REVIEW_PENDING · OWNER_RELEASE_NO_GO.
+**Status**: VITO_SINGLE_SCHEDULER_CONFIRMED · VITO_TRIAGE_READ_ONLY · TIME_ADDRESS_BLOCKED · TENANT_BINDING_BLOCKED · RECEIPT_STORAGE_PENDING · TIME_AUTOMATION_NOT_CREATED · BOB_REVIEW_PENDING · OWNER_RELEASE_NO_GO.
+
+IMPORTANT: ORDER BY m.id (numeric BIGINT), not ORDER BY id when SELECT id::text AS id creates text alias.
