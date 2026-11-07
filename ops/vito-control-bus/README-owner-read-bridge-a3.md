@@ -29,8 +29,14 @@ The separate PrismaClient is **one singleton pool**, lazily opened and disconnec
 - Four new API source files passed TypeScript syntax transpilation (4/4); standalone pure contract strict `tsc --noEmit` **PASS**.
 - Seven additional **isolated mocked service checks PASS 7/7**: trusted Owner read, singleton reader reuse across requests, cross-tenant rejection before DB access, non-Owner/insecure-auth denial, disabled source fail-closed, write-capable DB credential rejection and missing reader configuration. Mocked SQL is **not** evidence of an authenticated live Neon connection.
 - **Full NestJS build and integration Jest tests NOT RUN**. Source-level and mocked tests are not authenticated browser QA.
-- Real Neon read-only SQL candidate returned **25** VITO dispatches, only **one** unsigned specialist receipt. Latest verified message window includes #84; its presence is **not** evidence of acceptance by URTALI.
-- Current connected Neon operator is **not safe for runtime use**: direct `messages` SELECT/INSERT/UPDATE/DELETE all TRUE. Proposed narrow view **does not exist**. This is an explicit blocking fact, not a failure to log in.
+- Real Neon read-only SQL candidate originally returned **25** VITO dispatches, only **one** unsigned specialist receipt. The receipt is an unsigned specialist report, not authenticated completion. After the subsequent URTALI release handoff, the new role safely sees dispatch #89; this is **not** evidence URTALI accepted #89.
+- On **07.11.2026** the Owner-authorized *additive*, private database gate was executed on Neon staging-synthetic branch `br-delicate-unit-babt3aup`, database `adoren_auth_staging`:
+  - Created `vito_control_bus_v1.owner_receipts_projection_v1` as `security_barrier` view exposing only `dispatch_id, recipient, topic, subject, dispatched_at, receipt_id` and bounded to the latest 100 outgoing VITO task/handoff messages.
+  - Created empty dedicated grant scope `vito_cockpit_reader_scope_v1` and Neon `read_only` login `vito_cockpit_reader_a3` scoped to that schema; granted `USAGE` on the BUS schema and `SELECT` only on the narrow view. **No direct SELECT/INSERT/UPDATE/DELETE rights on `vito_control_bus_v1.messages`.**
+  - Independently connected *as the new role*: `can_select_view=true`, `can_select_table=false`, `can_insert_table=false`, `can_update_table=false`, `can_delete_table=false`; `rolsuper=false`, `rolcreaterole=false`, `rolcreatedb=false`, `rolbypassrls=false`.
+  - Verified actual view query under the new role returns bounded dispatch rows and only the six allowlisted columns. Attempted `SELECT id FROM vito_control_bus_v1.messages` with the reader: rejected with **SQLSTATE 42501 permission denied**.
+  - The existing Neon owner account **retains its prior rights**, but must never be used by the runtime reader. No message, source business table, or existing portal release was modified.
+- **Full NestJS build and integration Jest tests NOT RUN**, **VITO Owner organization UUID not yet verified**, **restricted connection URL not bound to VITO runtime**, and **authenticated existing ONE COCKPIT browser QA NOT RUN**. The API feature flag remains **disabled**.
 
 ## Gates
 
@@ -40,13 +46,14 @@ The separate PrismaClient is **one singleton pool**, lazily opened and disconnec
 | Pure negative runtime checks | PASS 9/9 + mocked service 7/7 |
 | Pure strict TypeScript check | PASS |
 | Full VITO API build / Jest | NOT RUN |
-| Dedicated restricted database user | NOT CONFIGURED |
-| Approved narrow view | NOT CREATED |
+| Dedicated restricted database user | CREATED, VERIFIED VIEW-ONLY IN STAGING |
+| Narrow view | CREATED IN STAGING, SELECT VERIFIED |
 | Owner organization UUID mapping | NOT VERIFIED / NOT CONFIGURED |
-| Authenticated real read via new API | NOT RUN |
+| Real SQL under restricted role | PASS · direct source-table read DENIED |
+| Authenticated real read via new API | NOT RUN · runtime still disabled |
 | Next.js logged-in browser | NOT RUN |
 | GitHub merge or public deploy | NO_GO |
 
-**Next GO requires explicit Owner authority for a private non-destructive database role/view migration and an exact existing VITO Owner organization UUID.** Then execute the integration tests with the real restricted role, full Nest build and current ONE COCKPIT browser. Do not activate `VITO_CONTROL_BUS_READER_ENABLED` before all checks pass. Longer-term multi-tenant use requires a genuinely tenant-owned bus schema / authenticated agent identities, not merely a frontend filter.
+**The Owner GO for the private restricted view/role was executed.** Next identify the real existing VITO Owner organization UUID, configure the restricted connection securely in an isolated runtime, run full Nest build/Jest and authenticated existing ONE COCKPIT browser. Do not activate `VITO_CONTROL_BUS_READER_ENABLED` before all checks pass. Longer-term multi-tenant use requires a genuinely tenant-owned bus schema / authenticated agent identities, not merely a frontend filter.
 
-**Verdict:** `A3_OWNER_READ_BRIDGE_SOURCE_READY` · `CONTRACT_PASS_9_OF_9` · `DB_VIEW_AND_ROLE_PENDING` · `FULL_BUILD_PENDING` · `PUBLIC_NO_GO`.
+**Verdict:** `A3_OWNER_READ_BRIDGE_SOURCE_READY` · `CONTRACT_PASS_9_OF_9` · `DB_VIEW_ROLE_STAGING_VERIFIED` · `FULL_BUILD_PENDING` · `PUBLIC_NO_GO`.
