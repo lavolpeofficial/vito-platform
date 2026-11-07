@@ -8,6 +8,9 @@ import type { ReceiptOverview } from '@/lib/receipt-ledger/contracts';
 import { ExecutiveOperationsPanel } from '@/components/executive-operations-panel';
 import { getOperationsSummary } from '@/lib/operations/server';
 import { projectExecutiveOperations, type ExecutiveOperationsSnapshot } from '@/lib/executive/operations-gate';
+import { SpecialistReportsPanel } from '@/components/specialist-reports-panel';
+import { getSpecialistReportsOverview } from '@/lib/specialist-reports/server';
+import type { SpecialistReportsOverview } from '@/lib/specialist-reports/contracts';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,29 +18,35 @@ export default async function ControlCenterHome() {
   const session = await getAuthenticatedSession();
   if (!session) redirect('/login');
   const canReadExecutive = session.user.role === 'OWNER' || session.user.role === 'ADMIN';
+  const canReadBus = session.user.role === 'OWNER';
 
   let ledger: ReceiptOverview | null = null;
   let operations: ExecutiveOperationsSnapshot | null = null;
+  let reports: SpecialistReportsOverview | null = null;
   if (canReadExecutive) {
-    // Independent sources: one failing provider must not hide the other.
-    const [receiptsResult, operationsResult] = await Promise.allSettled([
-      getReceiptOverview(),
+    // Sources are independent, and the CONTROL BUS requires OWNER, not ADMIN.
+    const [receiptsResult, operationsResult, reportsResult] = await Promise.allSettled([
+      canReadBus ? getReceiptOverview() : Promise.resolve(null),
       getOperationsSummary(),
+      canReadBus ? getSpecialistReportsOverview() : Promise.resolve(null),
     ]);
-    if (receiptsResult.status === 'fulfilled') {
-      const result = receiptsResult.value;
-      const ageMs = Date.now() - Date.parse(result.observedAt);
-      if (result.organizationId === session.organization.id &&
-          result.sourceHealth === 'HEALTHY' &&
-          ageMs >= -60_000 && ageMs <= 300_000) {
-        ledger = result;
-      }
+    const nowMs = Date.now();
+    const freshOwnerData = (data: {organizationId:string; observedAt:string; sourceHealth:string}) => {
+      const ageMs = nowMs - Date.parse(data.observedAt);
+      return data.organizationId === session.organization.id &&
+        data.sourceHealth === 'HEALTHY' && ageMs >= -60_000 && ageMs <= 300_000;
+    };
+    if (receiptsResult.status === 'fulfilled' && receiptsResult.value &&
+        freshOwnerData(receiptsResult.value)) {
+      ledger = receiptsResult.value;
+    }
+    if (reportsResult.status === 'fulfilled' && reportsResult.value &&
+        freshOwnerData(reportsResult.value)) {
+      reports = reportsResult.value;
     }
     if (operationsResult.status === 'fulfilled') {
       operations = projectExecutiveOperations(
-        operationsResult.value,
-        session.organization.id,
-        Date.now(),
+        operationsResult.value, session.organization.id, nowMs,
       );
     }
   }
@@ -51,13 +60,14 @@ export default async function ControlCenterHome() {
       </div>
 
       <ExecutiveOperationsPanel permitted={canReadExecutive} snapshot={operations} />
+      <SpecialistReportsPanel permitted={canReadBus} snapshot={reports} />
 
       <section aria-labelledby="receipt-title" className="boundary-notice">
         <span className="system-dot" />
         <div>
           <strong id="receipt-title">CONTROL BUS · Auftragsübergaben</strong>
-          {!canReadExecutive ? (
-            <p>Zugriff nur für OWNER und ADMIN. Keine Empfangsdaten verfügbar.</p>
+          {!canReadBus ? (
+            <p>Zugriff nur für OWNER. Keine Empfangsdaten verfügbar.</p>
           ) : !ledger ? (
             <p>Datenquelle nicht sicher verbunden, nicht autorisiert oder zu alt. Empfangsstatus unbekannt; es werden keine abgeschlossenen Aufträge behauptet.</p>
           ) : (
