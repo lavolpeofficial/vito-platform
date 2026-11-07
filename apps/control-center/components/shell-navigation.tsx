@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { navigationItems, isNavigationItemActive } from '@/lib/navigation';
 import { NavigationIcon } from './navigation-icon';
 
-export function ShellNavigation() {
+export function ShellNavigation({ showBridgeReview = false }: Readonly<{ showBridgeReview?: boolean }>) {
   const pathname = usePathname();
 
   return (
@@ -19,6 +19,13 @@ export function ShellNavigation() {
           </Link>
         );
       })}
+      {showBridgeReview ? (
+        <Link aria-current={pathname==='/bridge'?'page':undefined}
+          className="nav-link" href="/bridge">
+          <NavigationIcon name="governance" />
+          <span><strong>BRIDGE · Prüfkorb</strong><small>Interne Lead-Prüfung · nur Owner</small></span>
+        </Link>
+      ) : null}
     </nav>
   );
 }
