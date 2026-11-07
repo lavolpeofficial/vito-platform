@@ -7,7 +7,7 @@
     "dev": "next dev --port 3001",
     "build": "next build",
     "start": "next start --port 3001",
-    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test": "node tests/run-contract-tests.cjs",
     "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
