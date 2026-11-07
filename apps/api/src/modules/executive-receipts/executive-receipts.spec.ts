@@ -95,7 +95,7 @@ describe('service fails closed before any database connection', () => {
       getUserId: () => 'owner-account',
       getAuthenticationMethod: () => 'jwt',
     } as TenantContext;
-    await expect(new ExecutiveReceiptsService(tenant).overview()).rejects.toThrow(ForbiddenException);
+    await expect(new ExecutiveReceiptsService().overview(tenant)).rejects.toThrow(ForbiddenException);
   });
 
   it('refuses provider-disabled owner without creating a fake empty response', async () => {
@@ -107,6 +107,6 @@ describe('service fails closed before any database connection', () => {
       getUserId: () => 'owner-account',
       getAuthenticationMethod: () => 'jwt',
     } as TenantContext;
-    await expect(new ExecutiveReceiptsService(tenant).overview()).rejects.toThrow(ServiceUnavailableException);
+    await expect(new ExecutiveReceiptsService().overview(tenant)).rejects.toThrow(ServiceUnavailableException);
   });
 });
