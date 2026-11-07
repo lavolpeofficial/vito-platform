@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import type { AuthenticatedSession } from '@/lib/auth/contracts';
 import { LogoutButton } from './logout-button';
 import { ShellNavigation } from './shell-navigation';
+import { isVitoInteractiveOwner } from '@/lib/auth/owner-access';
 
 type AppShellProps = Readonly<{ children: ReactNode; session: AuthenticatedSession }>;
 
@@ -18,7 +19,7 @@ export function AppShell({ children, session }: AppShellProps) {
           <span><strong>VITO</strong><small>Control Center</small></span>
         </Link>
         <div className="sidebar-section-label">Steuerung</div>
-        <ShellNavigation />
+        <ShellNavigation showBridgeReview={isVitoInteractiveOwner(session)} />
         <div className="sidebar-footer">
           <span className="system-dot" />
           <span><strong>{session.organization.name}</strong><small>Tenant active</small></span>

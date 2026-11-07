@@ -1,0 +1,13 @@
+.bridge-review{max-width:1120px;margin:0 auto;padding-bottom:36px}
+.bridge-review-header{padding:22px 0}.bridge-review-header h1{font-size:clamp(1.7rem,3vw,2.5rem);margin:10px 0}
+.bridge-review-header p{max-width:780px;line-height:1.65}
+.bridge-review-notice{padding:18px 22px;border:1px solid var(--border,#41444b);border-radius:12px;margin:20px 0}
+.bridge-review-notice strong{display:block;font-size:1.06rem}.bridge-review-notice p{margin-bottom:0;line-height:1.55}
+.bridge-review-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:20px 0}
+.bridge-review-stats article,.bridge-review-panel{border:1px solid var(--border,#41444b);border-radius:12px;padding:20px}
+.bridge-review-stats article span{display:block;font-size:.84rem;opacity:.75}
+.bridge-review-stats article strong{display:block;margin-top:8px;font-size:1.2rem}
+.bridge-review-panel{margin:16px 0;line-height:1.6}
+.bridge-review-panel h2{font-size:1.22rem;margin:0 0 10px}
+.bridge-review-panel li{margin:6px 0}
+@media(max-width:700px){.bridge-review-stats{grid-template-columns:1fr}.bridge-review-panel{padding:16px}}
