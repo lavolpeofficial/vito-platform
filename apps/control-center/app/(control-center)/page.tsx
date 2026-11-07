@@ -5,6 +5,9 @@ import { getAuthenticatedSession } from '@/lib/auth/session';
 import { navigationItems } from '@/lib/navigation';
 import { getReceiptOverview } from '@/lib/receipt-ledger/server';
 import type { ReceiptOverview } from '@/lib/receipt-ledger/contracts';
+import { ExecutiveOperationsPanel } from '@/components/executive-operations-panel';
+import { getOperationsSummary } from '@/lib/operations/server';
+import { projectExecutiveOperations, type ExecutiveOperationsSnapshot } from '@/lib/executive/operations-gate';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,20 +17,28 @@ export default async function ControlCenterHome() {
   const canReadExecutive = session.user.role === 'OWNER' || session.user.role === 'ADMIN';
 
   let ledger: ReceiptOverview | null = null;
+  let operations: ExecutiveOperationsSnapshot | null = null;
   if (canReadExecutive) {
-    try {
-      const result = await getReceiptOverview();
-      // The frontend tenant equality check is defense in depth. The future API
-      // MUST enforce this boundary and per-tenant data access independently.
+    // Independent sources: one failing provider must not hide the other.
+    const [receiptsResult, operationsResult] = await Promise.allSettled([
+      getReceiptOverview(),
+      getOperationsSummary(),
+    ]);
+    if (receiptsResult.status === 'fulfilled') {
+      const result = receiptsResult.value;
       const ageMs = Date.now() - Date.parse(result.observedAt);
       if (result.organizationId === session.organization.id &&
           result.sourceHealth === 'HEALTHY' &&
           ageMs >= -60_000 && ageMs <= 300_000) {
         ledger = result;
       }
-    } catch {
-      // Source missing, invalid, stale, inaccessible, or unauthorized:
-      // fail closed and NEVER render fictitious "0 pending / all green".
+    }
+    if (operationsResult.status === 'fulfilled') {
+      operations = projectExecutiveOperations(
+        operationsResult.value,
+        session.organization.id,
+        Date.now(),
+      );
     }
   }
 
@@ -38,6 +49,8 @@ export default async function ControlCenterHome() {
         <h1 id="page-title">ONE COCKPIT</h1>
         <p>Ein Login. Ein gemeinsamer Überblick über Nachrichten, Empfangsnachweise und offene Freigaben.</p>
       </div>
+
+      <ExecutiveOperationsPanel permitted={canReadExecutive} snapshot={operations} />
 
       <section aria-labelledby="receipt-title" className="boundary-notice">
         <span className="system-dot" />
