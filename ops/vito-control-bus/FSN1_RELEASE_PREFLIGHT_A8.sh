@@ -5,7 +5,7 @@ set -Eeuo pipefail
 set +x
 blocked=0
 check() {
- if [[ "$2" == "true" ]]; then
+ if [[ "$2" == "true" || "$2" == "1" ]]; then
   printf 'PASS %s\n' "$1"
  else
   printf 'BLOCKED %s\n' "$1"
