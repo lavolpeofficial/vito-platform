@@ -20,15 +20,14 @@ type PrivilegeRow = Readonly<{
 export class ExecutiveReceiptsService implements OnModuleDestroy {
   private reader: PrismaClient | null = null;
 
-  constructor(private readonly tenant: TenantContext) {}
-
-  async overview() {
-    const organizationId = this.tenant.getOrThrow();
+  // Singleton service: no per-request database pool; tenant is passed by the guarded controller.
+  async overview(tenant: TenantContext) {
+    const organizationId = tenant.getOrThrow();
     if (!isAuthorizedOwnerBusReader({
       organizationId,
-      role: this.tenant.getRole(),
-      userId: this.tenant.getUserId(),
-      authenticationMethod: this.tenant.getAuthenticationMethod(),
+      role: tenant.getRole(),
+      userId: tenant.getUserId(),
+      authenticationMethod: tenant.getAuthenticationMethod(),
     }, process.env.VITO_CONTROL_BUS_OWNER_ORGANIZATION_ID ?? '')) {
       throw new ForbiddenException('CONTROL_BUS_OWNER_TENANT_DENIED');
     }
