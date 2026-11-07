@@ -18,4 +18,11 @@ export class ExecutiveReceiptsController {
   receiptsOverview() {
     return this.receipts.overview(this.tenant);
   }
+
+  /** Unsigned specialist reports, bounded and Owner-only. */
+  @Get('reports')
+  @ApiOkResponse({ description: 'Latest unverified specialist status reports, not authenticated execution evidence.' })
+  reportsOverview() {
+    return this.receipts.reportsOverview(this.tenant);
+  }
 }
